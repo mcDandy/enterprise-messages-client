@@ -15,12 +15,8 @@ import androidx.recyclerview.widget.DiffUtil;
 import androidx.recyclerview.widget.ListAdapter;
 import androidx.recyclerview.widget.RecyclerView;
 
-import cz.mkdaniel.enterprisemessenger.R;
 import cz.mkdaniel.enterprisemessenger.databinding.FragmentTransformBinding;
 import cz.mkdaniel.enterprisemessenger.databinding.ItemTransformBinding;
-
-import java.util.Arrays;
-import java.util.List;
 
 /**
  * Fragment that demonstrates a responsive layout pattern where the format of the content
@@ -41,9 +37,9 @@ public class TransformFragment extends Fragment {
         View root = binding.getRoot();
 
         RecyclerView recyclerView = binding.recyclerviewTransform;
-        ListAdapter<String, TransformViewHolder> adapter = new TransformAdapter();
+        ListAdapter<ServerViewItem, TransformViewHolder> adapter = new TransformAdapter();
         recyclerView.setAdapter(adapter);
-        transformViewModel.getTexts().observe(getViewLifecycleOwner(), adapter::submitList);
+        transformViewModel.getItems().observe(getViewLifecycleOwner(), adapter::submitList);
         return root;
     }
 
@@ -53,36 +49,19 @@ public class TransformFragment extends Fragment {
         binding = null;
     }
 
-    private static class TransformAdapter extends ListAdapter<String, TransformViewHolder> {
-
-        private final List<Integer> drawables = Arrays.asList(
-                R.drawable.avatar_1,
-                R.drawable.avatar_2,
-                R.drawable.avatar_3,
-                R.drawable.avatar_4,
-                R.drawable.avatar_5,
-                R.drawable.avatar_6,
-                R.drawable.avatar_7,
-                R.drawable.avatar_8,
-                R.drawable.avatar_9,
-                R.drawable.avatar_10,
-                R.drawable.avatar_11,
-                R.drawable.avatar_12,
-                R.drawable.avatar_13,
-                R.drawable.avatar_14,
-                R.drawable.avatar_15,
-                R.drawable.avatar_16);
+    private static class TransformAdapter extends ListAdapter<ServerViewItem, TransformViewHolder> {
 
         protected TransformAdapter() {
-            super(new DiffUtil.ItemCallback<String>() {
+            super(new DiffUtil.ItemCallback<ServerViewItem>() {
                 @Override
-                public boolean areItemsTheSame(@NonNull String oldItem, @NonNull String newItem) {
-                    return oldItem.equals(newItem);
+                public boolean areItemsTheSame(@NonNull ServerViewItem oldItem, @NonNull ServerViewItem newItem) {
+                    return oldItem.getText().equals(newItem.getText());
                 }
 
                 @Override
-                public boolean areContentsTheSame(@NonNull String oldItem, @NonNull String newItem) {
-                    return oldItem.equals(newItem);
+                public boolean areContentsTheSame(@NonNull ServerViewItem oldItem, @NonNull ServerViewItem newItem) {
+                    return oldItem.getText().equals(newItem.getText())
+                            && oldItem.getDrawableId() == newItem.getDrawableId();
                 }
             });
         }
@@ -96,10 +75,11 @@ public class TransformFragment extends Fragment {
 
         @Override
         public void onBindViewHolder(@NonNull TransformViewHolder holder, int position) {
-            holder.textView.setText(getItem(position));
+            ServerViewItem item = getItem(position);
+            holder.textView.setText(item.getText());
             holder.imageView.setImageDrawable(
                     ResourcesCompat.getDrawable(holder.imageView.getResources(),
-                            drawables.get(position),
+                            item.getDrawableId(),
                             null));
         }
     }

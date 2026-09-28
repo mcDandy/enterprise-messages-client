@@ -7,20 +7,43 @@ import androidx.lifecycle.ViewModel;
 import java.util.ArrayList;
 import java.util.List;
 
+import cz.mkdaniel.enterprisemessenger.R;
+
 public class TransformViewModel extends ViewModel {
 
-    private final MutableLiveData<List<String>> mTexts;
+    private final MutableLiveData<List<ServerViewItem>> mItems;
 
     public TransformViewModel() {
-        mTexts = new MutableLiveData<>();
-        List<String> texts = new ArrayList<>();
-        for (int i = 1; i <= 16; i++) {
-            texts.add("This is item # " + i);
+        mItems = new MutableLiveData<>();
+        List<ServerViewItem> items = new ArrayList<>();
+
+        int[] avatarDrawables = {
+                R.drawable.avatar_1,
+                R.drawable.avatar_2,
+                R.drawable.avatar_3,
+                R.drawable.avatar_4,
+                R.drawable.avatar_5,
+                R.drawable.avatar_6,
+                R.drawable.avatar_7,
+                R.drawable.avatar_8,
+                R.drawable.avatar_9,
+                R.drawable.avatar_10,
+                R.drawable.avatar_11,
+                R.drawable.avatar_12,
+                R.drawable.avatar_13,
+                R.drawable.avatar_14,
+                R.drawable.avatar_15,
+                R.drawable.avatar_16
+        };
+
+        for (int i = 0; i < avatarDrawables.length; i++) {
+            items.add(new ServerViewItem("This is item # " + (i + 1), avatarDrawables[i]));
         }
-        mTexts.setValue(texts);
+
+        mItems.setValue(items);
     }
 
-    public LiveData<List<String>> getTexts() {
-        return mTexts;
+    public LiveData<List<ServerViewItem>> getItems() {
+        return mItems;
     }
 }
