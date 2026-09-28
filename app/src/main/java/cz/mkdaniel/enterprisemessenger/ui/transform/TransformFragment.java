@@ -43,10 +43,11 @@ public class TransformFragment extends Fragment {
 
         RecyclerView recyclerView = binding.recyclerviewTransform;
         ListAdapter<ServerViewItem, TransformViewHolder> adapter =
-                new TransformAdapter(serverIndex -> {
+                new TransformAdapter((serverIndex, serverName) -> {
                     // Navigate to the rooms screen for this server
                     Bundle args = new Bundle();
                     args.putInt("serverIndex", serverIndex);
+                    args.putString("serverName", serverName);
                     navController.navigate(R.id.nav_rooms, args);
                 });
         recyclerView.setAdapter(adapter);
@@ -97,7 +98,7 @@ public class TransformFragment extends Fragment {
                             item.getDrawableId(),
                             null));
             // Clicking any server row navigates to its rooms
-            holder.itemView.setOnClickListener(v -> clickListener.onServerClicked(position));
+            holder.itemView.setOnClickListener(v -> clickListener.onServerClicked(position, item.getText()));
         }
     }
 
@@ -114,6 +115,6 @@ public class TransformFragment extends Fragment {
     }
 
     private interface OnServerClickListener {
-        void onServerClicked(int serverIndex);
+        void onServerClicked(int serverIndex, String serverName);
     }
 }

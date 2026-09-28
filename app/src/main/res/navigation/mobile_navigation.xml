@@ -25,6 +25,9 @@
         <argument
             android:name="serverIndex"
             app:argType="integer" />
+        <argument
+            android:name="serverName"
+            app:argType="string" />
     </fragment>
 
     <fragment
