@@ -28,4 +28,27 @@
         android:name="cz.mkdaniel.enterprisemessenger.ui.settings.SettingsFragment"
         android:label="@string/menu_settings"
         tools:layout="@layout/fragment_settings" />
+
+    <fragment
+        android:id="@+id/nav_rooms"
+        android:name="cz.mkdaniel.enterprisemessenger.ui.transform.RoomsFragment"
+        android:label="{serverName}"
+        tools:layout="@layout/fragment_rooms">
+        <argument
+            android:name="serverIndex"
+            app:argType="integer" />
+    </fragment>
+
+    <fragment
+        android:id="@+id/nav_messages"
+        android:name="cz.mkdaniel.enterprisemessenger.ui.message.MessagesFragment"
+        android:label="{roomName}"
+        tools:layout="@layout/fragment_messages">
+        <argument
+            android:name="serverIndex"
+            app:argType="integer" />
+        <argument
+            android:name="roomId"
+            app:argType="string" />
+    </fragment>
 </navigation>

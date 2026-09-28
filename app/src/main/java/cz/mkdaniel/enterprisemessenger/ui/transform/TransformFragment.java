@@ -11,10 +11,13 @@ import androidx.annotation.NonNull;
 import androidx.core.content.res.ResourcesCompat;
 import androidx.fragment.app.Fragment;
 import androidx.lifecycle.ViewModelProvider;
+import androidx.navigation.NavController;
+import androidx.navigation.fragment.NavHostFragment;
 import androidx.recyclerview.widget.DiffUtil;
 import androidx.recyclerview.widget.ListAdapter;
 import androidx.recyclerview.widget.RecyclerView;
 
+import cz.mkdaniel.enterprisemessenger.R;
 import cz.mkdaniel.enterprisemessenger.databinding.FragmentTransformBinding;
 import cz.mkdaniel.enterprisemessenger.databinding.ItemTransformBinding;
 
@@ -36,8 +39,16 @@ public class TransformFragment extends Fragment {
         binding = FragmentTransformBinding.inflate(inflater, container, false);
         View root = binding.getRoot();
 
+        NavController navController = NavHostFragment.findNavController(this);
+
         RecyclerView recyclerView = binding.recyclerviewTransform;
-        ListAdapter<ServerViewItem, TransformViewHolder> adapter = new TransformAdapter();
+        ListAdapter<ServerViewItem, TransformViewHolder> adapter =
+                new TransformAdapter(serverIndex -> {
+                    // Navigate to the rooms screen for this server
+                    Bundle args = new Bundle();
+                    args.putInt("serverIndex", serverIndex);
+                    navController.navigate(R.id.nav_rooms, args);
+                });
         recyclerView.setAdapter(adapter);
         transformViewModel.getItems().observe(getViewLifecycleOwner(), adapter::submitList);
         return root;
@@ -51,7 +62,10 @@ public class TransformFragment extends Fragment {
 
     private static class TransformAdapter extends ListAdapter<ServerViewItem, TransformViewHolder> {
 
-        protected TransformAdapter() {
+        @NonNull
+        private final OnServerClickListener clickListener;
+
+        protected TransformAdapter(@NonNull OnServerClickListener clickListener) {
             super(new DiffUtil.ItemCallback<ServerViewItem>() {
                 @Override
                 public boolean areItemsTheSame(@NonNull ServerViewItem oldItem, @NonNull ServerViewItem newItem) {
@@ -64,6 +78,7 @@ public class TransformFragment extends Fragment {
                             && oldItem.getDrawableId() == newItem.getDrawableId();
                 }
             });
+            this.clickListener = clickListener;
         }
 
         @NonNull
@@ -81,6 +96,8 @@ public class TransformFragment extends Fragment {
                     ResourcesCompat.getDrawable(holder.imageView.getResources(),
                             item.getDrawableId(),
                             null));
+            // Clicking any server row navigates to its rooms
+            holder.itemView.setOnClickListener(v -> clickListener.onServerClicked(position));
         }
     }
 
@@ -94,5 +111,9 @@ public class TransformFragment extends Fragment {
             imageView = binding.imageViewItemTransform;
             textView = binding.textViewItemTransform;
         }
+    }
+
+    private interface OnServerClickListener {
+        void onServerClicked(int serverIndex);
     }
 }

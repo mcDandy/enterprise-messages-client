@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical">
+
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/recyclerview_messages"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:clipToPadding="false"
+        android:paddingBottom="8dp" />
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="?android:attr/listDivider" />
+
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:paddingStart="12dp"
+        android:paddingEnd="4dp"
+        android:paddingTop="8dp"
+        android:paddingBottom="8dp">
+
+        <EditText
+            android:id="@+id/edittext_message_input"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="Type a message..."
+            android:imeOptions="actionSend"
+            android:inputType="textShortMessage|textMultiLine"
+            android:maxLines="4"
+            android:paddingEnd="56dp" />
+
+        <ImageButton
+            android:id="@+id/button_send_message"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:layout_gravity="end|center_vertical"
+            android:background="@drawable/circle_button_bg"
+            android:contentDescription="Send message"
+            android:scaleType="centerInside"
+            android:src="@drawable/ic_send_black_24dp" />
+
+    </FrameLayout>
+
+</LinearLayout>
