@@ -41,6 +41,7 @@ public class RoomsFragment extends Fragment {
                     Bundle args = new Bundle();
                     args.putInt("serverIndex", serverIndex);
                     args.putString("roomId", room.getId());
+                    args.putString("roomName", room.getName());
                     NavController navController = NavHostFragment.findNavController(this);
                     navController.navigate(R.id.nav_messages, args);
                 }

@@ -41,5 +41,8 @@
         <argument
             android:name="roomId"
             app:argType="string" />
+        <argument
+            android:name="roomName"
+            app:argType="string" />
     </fragment>
 </navigation>
