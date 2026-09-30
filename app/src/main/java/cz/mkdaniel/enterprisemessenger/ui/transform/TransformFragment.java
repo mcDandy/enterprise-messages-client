@@ -1,6 +1,8 @@
 package cz.mkdaniel.enterprisemessenger.ui.transform;
 
 import android.os.Bundle;
+import android.util.DisplayMetrics;
+import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -14,6 +16,7 @@ import androidx.lifecycle.ViewModelProvider;
 import androidx.navigation.NavController;
 import androidx.navigation.fragment.NavHostFragment;
 import androidx.recyclerview.widget.DiffUtil;
+import androidx.recyclerview.widget.GridLayoutManager;
 import androidx.recyclerview.widget.ListAdapter;
 import androidx.recyclerview.widget.RecyclerView;
 
@@ -22,12 +25,15 @@ import cz.mkdaniel.enterprisemessenger.databinding.FragmentTransformBinding;
 import cz.mkdaniel.enterprisemessenger.databinding.ItemTransformBinding;
 
 /**
- * Fragment that demonstrates a responsive layout pattern where the format of the content
- * transforms depending on the size of the screen. Specifically this Fragment shows items in
- * the [RecyclerView] using LinearLayoutManager in a small screen
- * and shows items using GridLayoutManager in a large screen.
+ * Shows the list of servers. The number of columns auto-fits to the available width:
+ * each cell is at least {@code @dimen/server_item_min_width} wide, so wider windows
+ * (e.g. desktop freeform / tablet landscape) simply fit more columns per row instead of
+ * stretching a fixed number of cells across the screen. The count is recomputed live on
+ * resize and rotation.
  */
 public class TransformFragment extends Fragment {
+
+    private static final String TAG = "TransformGrid";
 
     private FragmentTransformBinding binding;
 
@@ -42,6 +48,24 @@ public class TransformFragment extends Fragment {
         NavController navController = NavHostFragment.findNavController(this);
 
         RecyclerView recyclerView = binding.recyclerviewTransform;
+
+        // Compute the column count up front from the available width. The fragment is recreated on
+        // rotation / freeform resize, so this runs again with the new size — no live layout
+        // listener needed (and setSpanCount during a layout pass would not reflow bound items).
+        DisplayMetrics dm = getResources().getDisplayMetrics();
+        final int minItemWidthPx = (int) getResources().getDimension(R.dimen.server_item_min_width);
+        final int horizontalMarginPx = (int) getResources().getDimension(R.dimen.fragment_horizontal_margin);
+        int availableWidthPx = dm.widthPixels - 2 * horizontalMarginPx;
+        int columns = Math.max(1, availableWidthPx / minItemWidthPx);
+
+        Log.d(TAG, "onCreateView: widthPixels=" + dm.widthPixels
+                + ", availableWidthPx=" + availableWidthPx
+                + ", minItemWidthPx=" + minItemWidthPx
+                + ", computedColumns=" + columns);
+
+        GridLayoutManager gridLayoutManager = new GridLayoutManager(requireContext(), columns);
+        recyclerView.setLayoutManager(gridLayoutManager);
+
         ListAdapter<ServerViewItem, TransformViewHolder> adapter =
                 new TransformAdapter((serverIndex, serverName) -> {
                     // Navigate to the rooms screen for this server

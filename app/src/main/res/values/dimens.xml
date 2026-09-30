@@ -1,4 +1,7 @@
 <resources>
     <dimen name="fragment_horizontal_margin">16dp</dimen>
     <dimen name="item_transform_image_length">48dp</dimen>
+    <!-- Minimum width of a server cell; the grid fits as many columns of at least
+         this width as will fit, so wider windows show more columns. -->
+    <dimen name="server_item_min_width">150dp</dimen>
 </resources>
