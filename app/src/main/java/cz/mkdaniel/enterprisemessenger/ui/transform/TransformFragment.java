@@ -26,10 +26,7 @@ import cz.mkdaniel.enterprisemessenger.databinding.ItemTransformBinding;
 
 /**
  * Shows the list of servers. The number of columns auto-fits to the available width:
- * each cell is at least {@code @dimen/server_item_min_width} wide, so wider windows
- * (e.g. desktop freeform / tablet landscape) simply fit more columns per row instead of
- * stretching a fixed number of cells across the screen. The count is recomputed live on
- * resize and rotation.
+ * each cell is at least {@code @dimen/server_item_min_width} wide.
  */
 public class TransformFragment extends Fragment {
 
@@ -49,22 +46,42 @@ public class TransformFragment extends Fragment {
 
         RecyclerView recyclerView = binding.recyclerviewTransform;
 
-        // Compute the column count up front from the available width. The fragment is recreated on
-        // rotation / freeform resize, so this runs again with the new size — no live layout
-        // listener needed (and setSpanCount during a layout pass would not reflow bound items).
-        DisplayMetrics dm = getResources().getDisplayMetrics();
         final int minItemWidthPx = (int) getResources().getDimension(R.dimen.server_item_min_width);
         final int horizontalMarginPx = (int) getResources().getDimension(R.dimen.fragment_horizontal_margin);
-        int availableWidthPx = dm.widthPixels - 2 * horizontalMarginPx;
-        int columns = Math.max(1, availableWidthPx / minItemWidthPx);
 
-        Log.d(TAG, "onCreateView: widthPixels=" + dm.widthPixels
-                + ", availableWidthPx=" + availableWidthPx
+        // 1. Initial estimate from display metrics so items render in multi-column immediately
+        DisplayMetrics dm = getResources().getDisplayMetrics();
+        int approxWidthPx = dm.widthPixels - (2 * horizontalMarginPx);
+        int initialColumns = Math.max(1, approxWidthPx / minItemWidthPx);
+
+        Log.d(TAG, "onCreateView: displayWidth=" + dm.widthPixels
+                + ", approxWidthPx=" + approxWidthPx
                 + ", minItemWidthPx=" + minItemWidthPx
-                + ", computedColumns=" + columns);
+                + ", initialColumns=" + initialColumns);
 
-        GridLayoutManager gridLayoutManager = new GridLayoutManager(requireContext(), columns);
+        GridLayoutManager gridLayoutManager = new GridLayoutManager(requireContext(), initialColumns);
         recyclerView.setLayoutManager(gridLayoutManager);
+
+        // 2. Exact adjustment after layout measurement (accounts for notch, insets, margins, desktop resizing).
+        // Calling v.post() defers setSpanCount() until AFTER the current layout pass completes,
+        // allowing RecyclerView to cleanly re-measure and re-bind items.
+        recyclerView.addOnLayoutChangeListener((v, left, top, right, bottom,
+                                               oldLeft, oldTop, oldRight, oldBottom) -> {
+            int widthPx = right - left;
+            if (widthPx <= 0 || minItemWidthPx <= 0) return;
+
+            int exactColumns = Math.max(1, widthPx / minItemWidthPx);
+            if (gridLayoutManager.getSpanCount() != exactColumns) {
+                Log.d(TAG, "onLayoutChange: widthPx=" + widthPx
+                        + ", updating spanCount from " + gridLayoutManager.getSpanCount()
+                        + " to " + exactColumns);
+                v.post(() -> {
+                    if (binding != null && isAdded()) {
+                        gridLayoutManager.setSpanCount(exactColumns);
+                    }
+                });
+            }
+        });
 
         ListAdapter<ServerViewItem, TransformViewHolder> adapter =
                 new TransformAdapter((serverIndex, serverName) -> {
