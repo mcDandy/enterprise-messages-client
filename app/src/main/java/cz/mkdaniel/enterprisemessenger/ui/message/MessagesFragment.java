@@ -1,6 +1,7 @@
 package cz.mkdaniel.enterprisemessenger.ui.message;
 
 import android.os.Bundle;
+import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -31,8 +32,15 @@ import cz.mkdaniel.enterprisemessenger.databinding.FragmentMessagesBinding;
  */
 public class MessagesFragment extends Fragment {
 
+    private static final String TAG = "MessagesFragment";
+
     private FragmentMessagesBinding binding;
     private MessageAdapter adapter;
+
+    private String serverIp;
+    private String roomId;
+    private String roomName;
+    private String encryptionKey;
 
     @Override
     public View onCreateView(@NonNull LayoutInflater inflater,
@@ -44,6 +52,18 @@ public class MessagesFragment extends Fragment {
     @Override
     public void onViewCreated(@NonNull View view, Bundle savedInstanceState) {
         super.onViewCreated(view, savedInstanceState);
+
+        // --- Arguments setup (server IP & channel encryption key) ---
+        if (getArguments() != null) {
+            serverIp = getArguments().getString("serverIp", "");
+            roomId = getArguments().getString("roomId", "");
+            roomName = getArguments().getString("roomName", "");
+            encryptionKey = getArguments().getString("encryptionKey", "");
+        }
+
+        Log.d(TAG, "Connecting to serverIp=" + serverIp
+                + ", room=" + roomName + " (" + roomId + ")"
+                + ", encryptionKey=" + encryptionKey);
 
         // --- RecyclerView setup ---
         LinearLayoutManager layoutManager = new LinearLayoutManager(requireContext());
@@ -61,9 +81,8 @@ public class MessagesFragment extends Fragment {
             @Override
             public void onScrolled(@NonNull RecyclerView recyclerView, int dx, int dy) {
                 if (layoutManager.findFirstVisibleItemPosition() <= 2 && !adapter.isLoading()) {
-                    // TODO: Fetch older messages from server and prepend to the list.
-                    //       Use a MutableLiveData / StateFlow in a ViewModel,
-                    //       then call adapter.submitList(newList) with combined results.
+                    // TODO: Fetch older encrypted messages from serverIp for roomId,
+                    //       decrypt using encryptionKey, and prepend to the list.
                 }
             }
         });
@@ -75,7 +94,7 @@ public class MessagesFragment extends Fragment {
         sendButton.setOnClickListener(v -> {
             String text = inputField.getText().toString().trim();
             if (!text.isEmpty()) {
-                // TODO: Post the message to the server via ViewModel/repository.
+                // TODO: Encrypt 'text' using encryptionKey and post to serverIp for roomId.
                 //
                 // For now, echo it back into the local list so the user sees
                 // immediate feedback while waiting for server round-trip.
@@ -154,7 +173,6 @@ public class MessagesFragment extends Fragment {
         @NonNull
         @Override
         public MessageViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
-            // For now inflate a simple layout programmatically; replace with R.layout.item_message later.
             View itemView = LayoutInflater.from(parent.getContext())
                     .inflate(android.R.layout.simple_list_item_2, parent, false);
             return new MessageViewHolder(itemView);
@@ -175,7 +193,6 @@ public class MessagesFragment extends Fragment {
 
         public MessageViewHolder(@NonNull View itemView) {
             super(itemView);
-            // Using android.R.layout.simple_list_item_2 — it has two text fields
             text1 = itemView.findViewById(android.R.id.text1);
             text2 = itemView.findViewById(android.R.id.text2);
         }

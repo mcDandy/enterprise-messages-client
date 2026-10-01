@@ -37,7 +37,10 @@ public class TransformViewModel extends ViewModel {
         };
 
         for (int i = 0; i < avatarDrawables.length; i++) {
-            items.add(new ServerViewItem("This is item # " + (i + 1), avatarDrawables[i]));
+            String serverId = "srv_" + (i + 1);
+            String serverName = "Server #" + (i + 1);
+            String ipAddress = "10.0.0." + (i + 1);
+            items.add(new ServerViewItem(serverId, serverName, ipAddress, avatarDrawables[i]));
         }
 
         mItems.setValue(items);

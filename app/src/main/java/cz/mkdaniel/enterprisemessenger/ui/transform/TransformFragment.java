@@ -84,11 +84,12 @@ public class TransformFragment extends Fragment {
         });
 
         ListAdapter<ServerViewItem, TransformViewHolder> adapter =
-                new TransformAdapter((serverIndex, serverName) -> {
+                new TransformAdapter((serverIndex, serverName, serverIp) -> {
                     // Navigate to the rooms screen for this server
                     Bundle args = new Bundle();
                     args.putInt("serverIndex", serverIndex);
                     args.putString("serverName", serverName);
+                    args.putString("serverIp", serverIp);
                     navController.navigate(R.id.nav_rooms, args);
                 });
         recyclerView.setAdapter(adapter);
@@ -111,12 +112,13 @@ public class TransformFragment extends Fragment {
             super(new DiffUtil.ItemCallback<ServerViewItem>() {
                 @Override
                 public boolean areItemsTheSame(@NonNull ServerViewItem oldItem, @NonNull ServerViewItem newItem) {
-                    return oldItem.getText().equals(newItem.getText());
+                    return oldItem.getId().equals(newItem.getId());
                 }
 
                 @Override
                 public boolean areContentsTheSame(@NonNull ServerViewItem oldItem, @NonNull ServerViewItem newItem) {
                     return oldItem.getText().equals(newItem.getText())
+                            && oldItem.getIpAddress().equals(newItem.getIpAddress())
                             && oldItem.getDrawableId() == newItem.getDrawableId();
                 }
             });
@@ -138,8 +140,8 @@ public class TransformFragment extends Fragment {
                     ResourcesCompat.getDrawable(holder.imageView.getResources(),
                             item.getDrawableId(),
                             null));
-            // Clicking any server row navigates to its rooms
-            holder.itemView.setOnClickListener(v -> clickListener.onServerClicked(position, item.getText()));
+            // Clicking any server row navigates to its rooms with IP address
+            holder.itemView.setOnClickListener(v -> clickListener.onServerClicked(position, item.getText(), item.getIpAddress()));
         }
     }
 
@@ -156,6 +158,6 @@ public class TransformFragment extends Fragment {
     }
 
     private interface OnServerClickListener {
-        void onServerClicked(int serverIndex, String serverName);
+        void onServerClicked(int serverIndex, String serverName, String serverIp);
     }
 }

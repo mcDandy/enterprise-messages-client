@@ -28,6 +28,10 @@
         <argument
             android:name="serverName"
             app:argType="string" />
+        <argument
+            android:name="serverIp"
+            app:argType="string"
+            android:defaultValue="" />
     </fragment>
 
     <fragment
@@ -44,5 +48,13 @@
         <argument
             android:name="roomName"
             app:argType="string" />
+        <argument
+            android:name="serverIp"
+            app:argType="string"
+            android:defaultValue="" />
+        <argument
+            android:name="encryptionKey"
+            app:argType="string"
+            android:defaultValue="" />
     </fragment>
 </navigation>
