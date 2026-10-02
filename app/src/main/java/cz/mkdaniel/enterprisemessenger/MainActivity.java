@@ -16,6 +16,7 @@ import androidx.navigation.ui.AppBarConfiguration;
 import androidx.navigation.ui.NavigationUI;
 import androidx.appcompat.app.AppCompatActivity;
 
+import cz.mkdaniel.enterprisemessenger.crypto.CryptoManager;
 import cz.mkdaniel.enterprisemessenger.databinding.ActivityMainBinding;
 
 public class MainActivity extends AppCompatActivity {
@@ -25,6 +26,9 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+
+        // Initialize / load Elliptic Curve (EC) KeyPair on first app startup
+        CryptoManager.getInstance(this).initializeKeysAsync();
 
         ActivityMainBinding binding = ActivityMainBinding.inflate(getLayoutInflater());
         setContentView(binding.getRoot());
