@@ -1,7 +1,7 @@
 package cz.mkdaniel.enterprisemessenger.net;
 
+import java.io.ByteArrayInputStream;
 import java.io.DataInputStream;
-import java.io.DataOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.ByteBuffer;
@@ -155,5 +155,18 @@ public class Packet {
 
     public static Packet readFromStream(InputStream inputStream) throws Exception {
         return readFromStream(inputStream, null, null);
+    }
+
+    /**
+     * Reads an incoming packet from a byte array (e.g. from a WebSocket binary frame).
+     */
+    public static Packet readFromByteArray(byte[] data, CryptoManager cryptoManager, byte[] encryptionKey) throws Exception {
+        try (ByteArrayInputStream bais = new ByteArrayInputStream(data)) {
+            return readFromStream(bais, cryptoManager, encryptionKey);
+        }
+    }
+
+    public static Packet readFromByteArray(byte[] data) throws Exception {
+        return readFromByteArray(data, null, null);
     }
 }
