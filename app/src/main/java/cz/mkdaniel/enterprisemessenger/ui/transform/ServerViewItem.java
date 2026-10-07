@@ -2,7 +2,8 @@ package cz.mkdaniel.enterprisemessenger.ui.transform;
 
 /**
  * Model class representing a Server item in the Server list.
- * Holds server ID, display name, IP address / hostname, and drawable resource ID for avatar.
+ * Holds server ID, display name, IP address / hostname, drawable resource ID for avatar,
+ * and unread message count.
  */
 public class ServerViewItem {
 
@@ -10,16 +11,22 @@ public class ServerViewItem {
     private final String text;
     private final String ipAddress;
     private final int drawableId;
+    private int unreadCount;
 
-    public ServerViewItem(String id, String text, String ipAddress, int drawableId) {
+    public ServerViewItem(String id, String text, String ipAddress, int drawableId, int unreadCount) {
         this.id = id;
         this.text = text;
         this.ipAddress = ipAddress;
         this.drawableId = drawableId;
+        this.unreadCount = unreadCount;
+    }
+
+    public ServerViewItem(String id, String text, String ipAddress, int drawableId) {
+        this(id, text, ipAddress, drawableId, 0);
     }
 
     public ServerViewItem(String text, int drawableId) {
-        this("srv_" + text.hashCode(), text, "192.168.1.1", drawableId);
+        this("srv_" + text.hashCode(), text, "192.168.1.1", drawableId, 0);
     }
 
     public String getId() {
@@ -36,5 +43,17 @@ public class ServerViewItem {
 
     public int getDrawableId() {
         return drawableId;
+    }
+
+    public int getUnreadCount() {
+        return unreadCount;
+    }
+
+    public void setUnreadCount(int unreadCount) {
+        this.unreadCount = unreadCount;
+    }
+
+    public boolean hasUnread() {
+        return unreadCount > 0;
     }
 }

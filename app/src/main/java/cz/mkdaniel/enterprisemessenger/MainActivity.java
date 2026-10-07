@@ -5,7 +5,6 @@ import android.view.MenuItem;
 import android.view.Menu;
 
 import com.google.android.material.bottomnavigation.BottomNavigationView;
-import com.google.android.material.snackbar.Snackbar;
 import com.google.android.material.navigation.NavigationView;
 
 import androidx.annotation.NonNull;
@@ -18,6 +17,7 @@ import androidx.appcompat.app.AppCompatActivity;
 
 import cz.mkdaniel.enterprisemessenger.crypto.CryptoManager;
 import cz.mkdaniel.enterprisemessenger.databinding.ActivityMainBinding;
+import cz.mkdaniel.enterprisemessenger.notification.NotificationHelper;
 
 public class MainActivity extends AppCompatActivity {
 
@@ -29,6 +29,10 @@ public class MainActivity extends AppCompatActivity {
 
         // Initialize / load Elliptic Curve (EC) KeyPair on first app startup
         CryptoManager.getInstance(this).initializeKeysAsync();
+
+        // Initialize notification channel and check/request permission for Android 13+
+        NotificationHelper.createNotificationChannel(this);
+        NotificationHelper.checkAndRequestPermission(this);
 
         ActivityMainBinding binding = ActivityMainBinding.inflate(getLayoutInflater());
         setContentView(binding.getRoot());

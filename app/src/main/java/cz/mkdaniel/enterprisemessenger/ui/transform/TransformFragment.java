@@ -1,5 +1,6 @@
 package cz.mkdaniel.enterprisemessenger.ui.transform;
 
+import android.graphics.Typeface;
 import android.os.Bundle;
 import android.util.DisplayMetrics;
 import android.util.Log;
@@ -23,6 +24,7 @@ import androidx.recyclerview.widget.RecyclerView;
 import cz.mkdaniel.enterprisemessenger.R;
 import cz.mkdaniel.enterprisemessenger.databinding.FragmentTransformBinding;
 import cz.mkdaniel.enterprisemessenger.databinding.ItemTransformBinding;
+import cz.mkdaniel.enterprisemessenger.notification.NotificationHelper;
 
 /**
  * Shows the list of servers. The number of columns auto-fits to the available width:
@@ -85,6 +87,9 @@ public class TransformFragment extends Fragment {
 
         ListAdapter<ServerViewItem, TransformViewHolder> adapter =
                 new TransformAdapter((serverIndex, serverName, serverIp) -> {
+                    // Cancel notification for this server when user opens it
+                    NotificationHelper.cancelNotificationForServer(requireContext(), serverName);
+
                     // Navigate to the rooms screen for this server
                     Bundle args = new Bundle();
                     args.putInt("serverIndex", serverIndex);
@@ -93,7 +98,20 @@ public class TransformFragment extends Fragment {
                     navController.navigate(R.id.nav_rooms, args);
                 });
         recyclerView.setAdapter(adapter);
-        transformViewModel.getItems().observe(getViewLifecycleOwner(), adapter::submitList);
+
+        transformViewModel.getItems().observe(getViewLifecycleOwner(), items -> {
+            adapter.submitList(items);
+
+            // Trigger system notifications for servers with unread messages (showing number of messages & server)
+            if (items != null) {
+                for (ServerViewItem item : items) {
+                    if (item.hasUnread()) {
+                        NotificationHelper.showMessageNotification(requireContext(), item.getText(), item.getUnreadCount());
+                    }
+                }
+            }
+        });
+
         return root;
     }
 
@@ -119,7 +137,8 @@ public class TransformFragment extends Fragment {
                 public boolean areContentsTheSame(@NonNull ServerViewItem oldItem, @NonNull ServerViewItem newItem) {
                     return oldItem.getText().equals(newItem.getText())
                             && oldItem.getIpAddress().equals(newItem.getIpAddress())
-                            && oldItem.getDrawableId() == newItem.getDrawableId();
+                            && oldItem.getDrawableId() == newItem.getDrawableId()
+                            && oldItem.getUnreadCount() == newItem.getUnreadCount();
                 }
             });
             this.clickListener = clickListener;
@@ -136,12 +155,24 @@ public class TransformFragment extends Fragment {
         public void onBindViewHolder(@NonNull TransformViewHolder holder, int position) {
             ServerViewItem item = getItem(position);
             holder.textView.setText(item.getText());
+
+            // Set bold text if server has unread messages
+            if (item.hasUnread()) {
+                holder.textView.setTypeface(null, Typeface.BOLD);
+            } else {
+                holder.textView.setTypeface(null, Typeface.NORMAL);
+            }
+
             holder.imageView.setImageDrawable(
                     ResourcesCompat.getDrawable(holder.imageView.getResources(),
                             item.getDrawableId(),
                             null));
+
             // Clicking any server row navigates to its rooms with IP address
-            holder.itemView.setOnClickListener(v -> clickListener.onServerClicked(position, item.getText(), item.getIpAddress()));
+            holder.itemView.setOnClickListener(v -> {
+                item.setUnreadCount(0); // clear unread status on click
+                clickListener.onServerClicked(position, item.getText(), item.getIpAddress());
+            });
         }
     }
 

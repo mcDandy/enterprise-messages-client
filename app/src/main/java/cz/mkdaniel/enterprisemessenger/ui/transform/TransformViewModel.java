@@ -40,7 +40,8 @@ public class TransformViewModel extends ViewModel {
             String serverId = "srv_" + (i + 1);
             String serverName = "Server #" + (i + 1);
             String ipAddress = "10.0.0." + (i + 1);
-            items.add(new ServerViewItem(serverId, serverName, ipAddress, avatarDrawables[i]));
+            int unreadCount = (i == 0) ? 3 : ((i == 2) ? 1 : 0);
+            items.add(new ServerViewItem(serverId, serverName, ipAddress, avatarDrawables[i], unreadCount));
         }
 
         mItems.setValue(items);

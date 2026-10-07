@@ -1,5 +1,6 @@
 package cz.mkdaniel.enterprisemessenger.ui.transform;
 
+import android.graphics.Typeface;
 import android.os.Bundle;
 import android.view.LayoutInflater;
 import android.view.View;
@@ -22,14 +23,16 @@ import cz.mkdaniel.enterprisemessenger.R;
 
 /**
  * Displays rooms/channels for the selected server.
+ * Channels with unread messages are displayed with bold font.
  */
 public class RoomsFragment extends Fragment {
 
     @Override
     public View onCreateView(@NonNull LayoutInflater inflater,
                              ViewGroup container, Bundle savedInstanceState) {
-        // Get the selected server index and IP address passed from TransformFragment
+        // Get the selected server index, name, and IP address passed from TransformFragment
         int serverIndex = getArguments() != null ? getArguments().getInt("serverIndex", 0) : 0;
+        String serverName = getArguments() != null ? getArguments().getString("serverName", "Server") : "Server";
         String serverIp = getArguments() != null ? getArguments().getString("serverIp", "127.0.0.1") : "127.0.0.1";
 
         RecyclerView recyclerView = new RecyclerView(requireContext());
@@ -38,9 +41,13 @@ public class RoomsFragment extends Fragment {
 
         ListAdapter<Room, RoomViewHolder> adapter = new RoomsAdapter(
                 room -> {
+                    // When clicked, clear new messages indicator
+                    room.setHasNewMessages(false);
+
                     // Navigate to the Messages screen for this room with encryption key and server IP
                     Bundle args = new Bundle();
                     args.putInt("serverIndex", serverIndex);
+                    args.putString("serverName", serverName);
                     args.putString("serverIp", serverIp);
                     args.putString("roomId", room.getId());
                     args.putString("roomName", room.getName());
@@ -51,14 +58,14 @@ public class RoomsFragment extends Fragment {
         );
         recyclerView.setAdapter(adapter);
 
-        // Placeholder rooms with encryption keys — will be replaced by server data later
+        // Placeholder rooms with encryption keys — channels with hasNewMessages=true will be displayed in bold
         List<Room> placeholderRooms = Arrays.asList(
-                new Room("r1", "general", "key_aes256_gen_01"),
-                new Room("r2", "random", "key_aes256_rnd_02"),
-                new Room("r3", "announcements", "key_aes256_ann_03"),
-                new Room("r4", "development", "key_aes256_dev_04"),
-                new Room("r5", "design", "key_aes256_dsg_05"),
-                new Room("r6", "support", "key_aes256_spt_06")
+                new Room("r1", "general", "key_aes256_gen_01", true),
+                new Room("r2", "random", "key_aes256_rnd_02", false),
+                new Room("r3", "announcements", "key_aes256_ann_03", false),
+                new Room("r4", "development", "key_aes256_dev_04", true),
+                new Room("r5", "design", "key_aes256_dsg_05", false),
+                new Room("r6", "support", "key_aes256_spt_06", false)
         );
         adapter.submitList(placeholderRooms);
 
@@ -80,7 +87,8 @@ public class RoomsFragment extends Fragment {
                 @Override
                 public boolean areContentsTheSame(@NonNull Room oldItem, @NonNull Room newItem) {
                     return oldItem.getName().equals(newItem.getName())
-                            && oldItem.getEncryptionKey().equals(newItem.getEncryptionKey());
+                            && oldItem.getEncryptionKey().equals(newItem.getEncryptionKey())
+                            && oldItem.hasNewMessages() == newItem.hasNewMessages();
                 }
             });
             this.clickListener = clickListener;
@@ -98,6 +106,14 @@ public class RoomsFragment extends Fragment {
         public void onBindViewHolder(@NonNull RoomViewHolder holder, int position) {
             Room room = getItem(position);
             holder.roomNameText.setText(room.getName());
+
+            // Set bold font if channel has new unread messages
+            if (room.hasNewMessages()) {
+                holder.roomNameText.setTypeface(null, Typeface.BOLD);
+            } else {
+                holder.roomNameText.setTypeface(null, Typeface.NORMAL);
+            }
+
             holder.itemView.setOnClickListener(v -> clickListener.onRoomClicked(room));
         }
     }
