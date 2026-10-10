@@ -15,7 +15,18 @@
     <string name="hint_server_name">Server Name (optional)</string>
     <string name="hint_server_ip">IP Address / Hostname (e.g. 10.0.2.2:8080)</string>
     <string name="action_add">Add</string>
+    <string name="action_save">Save</string>
+    <string name="action_edit">Edit</string>
+    <string name="action_delete">Delete</string>
     <string name="action_cancel">Cancel</string>
+
+    <string name="dialog_edit_server_title">Edit Server</string>
+    <string name="dialog_delete_server_title">Delete Server</string>
+    <string name="dialog_delete_server_message">Are you sure you want to delete \"%1$s\"?</string>
+
+    <string name="hint_type_message">Type a message&#8230;</string>
+    <string name="desc_send_message">Send message</string>
+    <string name="error_server_unreachable">Server cannot be reached</string>
 
     <string name="lorem_ipsum_title">Lorem Ipsum"</string>
     <string name="lorem_ipsum">Lorem Ipsum is simply placeholder text of the printing and

@@ -114,6 +114,43 @@ public class ServerRepository {
         return newServer;
     }
 
+    public synchronized boolean updateServer(Context context, String serverId, String newName, String newIpAddress) {
+        List<ServerViewItem> servers = getServers(context);
+        for (int i = 0; i < servers.size(); i++) {
+            ServerViewItem item = servers.get(i);
+            if (item.getId().equals(serverId)) {
+                String trimmedIp = newIpAddress.trim();
+                String trimmedName = (newName != null && !newName.trim().isEmpty())
+                        ? newName.trim()
+                        : item.getText();
+
+                ServerViewItem updatedItem = new ServerViewItem(
+                        item.getId(),
+                        trimmedName,
+                        trimmedIp,
+                        item.getDrawableId(),
+                        item.getUnreadCount()
+                );
+                servers.set(i, updatedItem);
+                saveServers(context, servers);
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public synchronized boolean deleteServer(Context context, String serverId) {
+        List<ServerViewItem> servers = getServers(context);
+        for (int i = 0; i < servers.size(); i++) {
+            if (servers.get(i).getId().equals(serverId)) {
+                servers.remove(i);
+                saveServers(context, servers);
+                return true;
+            }
+        }
+        return false;
+    }
+
     private synchronized void saveServers(Context context, List<ServerViewItem> servers) {
         JSONArray jsonArray = new JSONArray();
         for (int i = 0; i < servers.size(); i++) {

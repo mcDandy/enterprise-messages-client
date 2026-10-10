@@ -1,5 +1,7 @@
 package cz.mkdaniel.enterprisemessenger.ui.message;
 
+import android.content.res.ColorStateList;
+import android.graphics.Color;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.LayoutInflater;
@@ -22,12 +24,14 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
+import cz.mkdaniel.enterprisemessenger.R;
 import cz.mkdaniel.enterprisemessenger.databinding.FragmentMessagesBinding;
 import cz.mkdaniel.enterprisemessenger.net.ServerConnectionManager;
 
 /**
  * Chat screen showing messages in a room.
  * Communicates with the remote server via WebSocket using ServerConnectionManager.
+ * Displays a red underline on the message input field if the server cannot be reached.
  */
 public class MessagesFragment extends Fragment implements ServerConnectionManager.ConnectionListener {
 
@@ -36,6 +40,9 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
     private FragmentMessagesBinding binding;
     private MessageAdapter adapter;
     private ServerConnectionManager connectionManager;
+
+    private ColorStateList defaultInputTint;
+    private ColorStateList redInputTint;
 
     private String serverIp;
     private String roomId;
@@ -65,6 +72,10 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
                 + ", room=" + roomName + " (" + roomId + ")"
                 + ", encryptionKey=" + encryptionKey);
 
+        // --- Underline tint setup ---
+        defaultInputTint = binding.edittextMessageInput.getBackgroundTintList();
+        redInputTint = ColorStateList.valueOf(Color.RED);
+
         // --- RecyclerView setup ---
         LinearLayoutManager layoutManager = new LinearLayoutManager(requireContext());
         adapter = new MessageAdapter();
@@ -85,6 +96,9 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
             connectionManager.joinRoom(roomId);
         }
 
+        // Set initial underline state based on connection
+        updateInputUnderline(connectionManager.isConnected());
+
         // --- Send button & text field ---
         ImageButton sendButton = binding.buttonSendMessage;
         EditText inputField = binding.edittextMessageInput;
@@ -97,9 +111,24 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
         });
     }
 
+    private void updateInputUnderline(boolean isConnected) {
+        if (binding == null) return;
+        if (isConnected) {
+            binding.edittextMessageInput.setBackgroundTintList(defaultInputTint);
+        } else {
+            binding.edittextMessageInput.setBackgroundTintList(redInputTint);
+        }
+    }
+
     private void sendMessageFromInput(EditText inputField) {
         String text = inputField.getText().toString().trim();
         if (text.isEmpty()) return;
+
+        if (!connectionManager.isConnected()) {
+            updateInputUnderline(false);
+            Toast.makeText(requireContext(), R.string.error_server_unreachable, Toast.LENGTH_SHORT).show();
+            return;
+        }
 
         Message sent = new Message(UUID.randomUUID().toString(), text, "You", System.currentTimeMillis());
         List<Message> updated = new ArrayList<>(adapter.getCurrentList());
@@ -123,8 +152,11 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
     public void onConnectionStateChanged(boolean connected, String ip) {
         if (!isAdded()) return;
         Log.d(TAG, "Connection state changed: connected=" + connected + ", ip=" + ip);
+        updateInputUnderline(connected);
         if (connected) {
             Toast.makeText(getContext(), "Connected to server: " + ip, Toast.LENGTH_SHORT).show();
+        } else {
+            Toast.makeText(getContext(), R.string.error_server_unreachable, Toast.LENGTH_SHORT).show();
         }
     }
 
@@ -144,6 +176,7 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
     public void onError(String errorMessage) {
         if (!isAdded()) return;
         Log.e(TAG, "Server connection error: " + errorMessage);
+        updateInputUnderline(false);
     }
 
     @Override

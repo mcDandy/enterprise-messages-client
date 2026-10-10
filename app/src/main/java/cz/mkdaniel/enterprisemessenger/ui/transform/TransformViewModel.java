@@ -35,4 +35,20 @@ public class TransformViewModel extends AndroidViewModel {
         loadServers();
         return newServer;
     }
+
+    public boolean updateServer(String serverId, String name, String ipAddress) {
+        boolean updated = ServerRepository.getInstance().updateServer(getApplication(), serverId, name, ipAddress);
+        if (updated) {
+            loadServers();
+        }
+        return updated;
+    }
+
+    public boolean deleteServer(String serverId) {
+        boolean deleted = ServerRepository.getInstance().deleteServer(getApplication(), serverId);
+        if (deleted) {
+            loadServers();
+        }
+        return deleted;
+    }
 }
