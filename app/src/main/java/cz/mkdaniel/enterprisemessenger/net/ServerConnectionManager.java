@@ -5,19 +5,26 @@ import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
 
-import androidx.annotation.NonNull;
+import org.json.JSONObject;
 
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArraySet;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 import cz.mkdaniel.enterprisemessenger.crypto.CryptoManager;
 import cz.mkdaniel.enterprisemessenger.ui.message.Message;
+import okhttp3.MediaType;
+import okhttp3.OkHttpClient;
+import okhttp3.Request;
+import okhttp3.RequestBody;
+import okhttp3.Response;
 
 /**
- * Singleton manager handling WebSocket protocol exchanges with Enterprise Messenger servers.
- * Implements Handshake, Key Exchange, Channel Join, and Encrypted Chat Message transmission.
+ * Singleton manager handling WebSocket protocol exchanges and HTTP Auth with Enterprise Messenger servers.
+ * Implements Auth login/register, Handshake, Key Exchange, Channel Join, and Encrypted Chat Message transmission.
  */
 public class ServerConnectionManager implements WebSocketClient.WebSocketClientListener {
 
@@ -26,12 +33,14 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 
     private final CryptoManager cryptoManager;
     private final WebSocketClient webSocketClient;
+    private final OkHttpClient httpClient;
+    private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final Set<ConnectionListener> listeners = new CopyOnWriteArraySet<>();
 
     private String currentServerIp = "";
     private String currentRoomId = "";
-    private byte[] activeChannelKey = null;
+    private String jwtToken = "";
 
     public interface ConnectionListener {
         void onConnectionStateChanged(boolean connected, String serverIp);
@@ -43,6 +52,7 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
         this.cryptoManager = CryptoManager.getInstance(context);
         this.webSocketClient = new WebSocketClient(cryptoManager);
         this.webSocketClient.setListener(this);
+        this.httpClient = new OkHttpClient();
     }
 
     public static ServerConnectionManager getInstance(Context context) {
@@ -73,7 +83,7 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
     }
 
     /**
-     * Connects to a remote WebSocket server IP address or host.
+     * Authenticates via REST API (if needed) and connects to remote WebSocket server.
      */
     public void connectToServer(String serverIp) {
         if (webSocketClient.isConnected() && serverIp.equalsIgnoreCase(currentServerIp)) {
@@ -83,7 +93,77 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
         }
 
         this.currentServerIp = serverIp;
-        Log.d(TAG, "Connecting to server: " + serverIp);
+        Log.d(TAG, "Initiating authentication & connection to: " + serverIp);
+
+        executor.execute(() -> {
+            // Attempt to fetch a valid JWT token via REST API /api/auth/login or /api/auth/register
+            fetchJwtTokenAndConnect(serverIp);
+        });
+    }
+
+    private void fetchJwtTokenAndConnect(String serverIp) {
+        String httpUrl = formatHttpUrl(serverIp);
+        String username = "android_user";
+        String password = "GuestPassword123";
+        String pubKey = cryptoManager.getPublicKeyBase64();
+        if (pubKey == null) pubKey = "dummyPublicKeyBase64StringForE2EE";
+
+        try {
+            // 1. Try login
+            JSONObject loginJson = new JSONObject();
+            loginJson.put("username", username);
+            loginJson.put("password", password);
+
+            RequestBody body = RequestBody.create(
+                    loginJson.toString(),
+                    MediaType.parse("application/json; charset=utf-8")
+            );
+
+            Request loginRequest = new Request.Builder()
+                    .url(httpUrl + "/api/auth/login")
+                    .post(body)
+                    .build();
+
+            try (Response response = httpClient.newCall(loginRequest).execute()) {
+                if (response.isSuccessful() && response.body() != null) {
+                    String resStr = response.body().string();
+                    JSONObject resObj = new JSONObject(resStr);
+                    jwtToken = resObj.optString("token", "");
+                    Log.d(TAG, "Authentication successful, obtained JWT token");
+                }
+            }
+
+            // 2. If login failed/unauthorized, attempt registration
+            if (jwtToken.isEmpty()) {
+                JSONObject regJson = new JSONObject();
+                regJson.put("username", username);
+                regJson.put("password", password);
+                regJson.put("publicKey", pubKey);
+
+                RequestBody regBody = RequestBody.create(
+                        regJson.toString(),
+                        MediaType.parse("application/json; charset=utf-8")
+                );
+
+                Request regRequest = new Request.Builder()
+                        .url(httpUrl + "/api/auth/register")
+                        .post(regBody)
+                        .build();
+
+                try (Response regResponse = httpClient.newCall(regRequest).execute()) {
+                    if (regResponse.body() != null) {
+                        String resStr = regResponse.body().string();
+                        JSONObject resObj = new JSONObject(resStr);
+                        jwtToken = resObj.optString("token", "");
+                        Log.d(TAG, "Registration response, obtained token: " + !jwtToken.isEmpty());
+                    }
+                }
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "HTTP Auth request failed or skipped: " + e.getMessage());
+        }
+
+        // Connect WebSocket regardless (will send token in Handshake if present)
         webSocketClient.connectAsync(serverIp);
     }
 
@@ -98,14 +178,13 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
         }
 
         try {
-            // Encode numeric channel ID if possible or hash string to Long for 8-byte server payload
             long channelLongId = 1L;
             if (roomId != null) {
                 String numericOnly = roomId.replaceAll("\\D+", "");
                 if (!numericOnly.isEmpty()) {
                     channelLongId = Long.parseLong(numericOnly);
                 } else {
-                    channelLongId = Math.abs(roomId.hashCode());
+                    channelLongId = Math.abs((long) roomId.hashCode());
                 }
             }
 
@@ -156,14 +235,15 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
         Log.d(TAG, "WebSocket connected successfully: " + url);
         notifyStateChanged(true, currentServerIp);
 
-        // 1. Perform automatic Handshake with server (JWT or Auth token)
-        try {
-            String token = "eyJhbGciOiJIUzI1NiJ9.demoToken"; // Default JWT demo token
-            Packet handshakePacket = new Packet(Packet.TYPE_HANDSHAKE, token.getBytes(StandardCharsets.UTF_8));
-            webSocketClient.sendPacketAsync(handshakePacket);
-            Log.d(TAG, "Sent HANDSHAKE packet");
-        } catch (Exception e) {
-            Log.e(TAG, "Error sending HANDSHAKE", e);
+        // 1. Perform Handshake with server using the JWT token obtained from HTTP Auth
+        if (!jwtToken.isEmpty()) {
+            try {
+                Packet handshakePacket = new Packet(Packet.TYPE_HANDSHAKE, jwtToken.getBytes(StandardCharsets.UTF_8));
+                webSocketClient.sendPacketAsync(handshakePacket);
+                Log.d(TAG, "Sent HANDSHAKE packet with JWT token");
+            } catch (Exception e) {
+                Log.e(TAG, "Error sending HANDSHAKE", e);
+            }
         }
 
         // 2. Perform Key Exchange REQ with client's Public Key
@@ -270,5 +350,23 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
                 l.onError(error);
             }
         });
+    }
+
+    private static String formatHttpUrl(String input) {
+        if (input == null || input.isEmpty()) {
+            return "http://10.0.2.2:8080";
+        }
+        String clean = input;
+        if (clean.startsWith("ws://")) clean = "http://" + clean.substring(5);
+        if (clean.startsWith("wss://")) clean = "https://" + clean.substring(6);
+        if (!clean.startsWith("http://") && !clean.startsWith("https://")) clean = "http://" + clean;
+
+        if (clean.contains("/ws")) {
+            clean = clean.substring(0, clean.indexOf("/ws"));
+        }
+        if (clean.endsWith("/")) {
+            clean = clean.substring(0, clean.length() - 1);
+        }
+        return clean;
     }
 }
