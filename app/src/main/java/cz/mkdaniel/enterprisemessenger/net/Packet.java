@@ -32,11 +32,18 @@ import cz.mkdaniel.enterprisemessenger.crypto.CryptoManager;
 public class Packet {
 
     // Packet Types
+    public static final short TYPE_UNKNOWN = 0x0000;
     public static final short TYPE_HANDSHAKE = 0x0001;
     public static final short TYPE_CHAT_MESSAGE = 0x0002;
     public static final short TYPE_ROOM_JOIN = 0x0003;
     public static final short TYPE_PING = 0x0004;
     public static final short TYPE_PONG = 0x0005;
+
+    public static final short TYPE_SERVER_JOIN = 0x0102;
+    public static final short TYPE_CHANNEL_JOIN = 0x0202;
+
+    public static final short TYPE_KEY_EXCHANGE_REQ = (short) 0x0400;
+    public static final short TYPE_KEY_EXCHANGE_RESP = (short) 0x0401;
 
     // Flags
     public static final byte FLAG_NONE = 0x00;

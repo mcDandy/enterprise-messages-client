@@ -1,53 +1,38 @@
 package cz.mkdaniel.enterprisemessenger.ui.transform;
 
+import android.app.Application;
+
+import androidx.annotation.NonNull;
+import androidx.lifecycle.AndroidViewModel;
 import androidx.lifecycle.LiveData;
 import androidx.lifecycle.MutableLiveData;
-import androidx.lifecycle.ViewModel;
 
-import java.util.ArrayList;
 import java.util.List;
 
-import cz.mkdaniel.enterprisemessenger.R;
+import cz.mkdaniel.enterprisemessenger.ui.server.ServerRepository;
 
-public class TransformViewModel extends ViewModel {
+public class TransformViewModel extends AndroidViewModel {
 
     private final MutableLiveData<List<ServerViewItem>> mItems;
 
-    public TransformViewModel() {
+    public TransformViewModel(@NonNull Application application) {
+        super(application);
         mItems = new MutableLiveData<>();
-        List<ServerViewItem> items = new ArrayList<>();
-
-        int[] avatarDrawables = {
-                R.drawable.avatar_1,
-                R.drawable.avatar_2,
-                R.drawable.avatar_3,
-                R.drawable.avatar_4,
-                R.drawable.avatar_5,
-                R.drawable.avatar_6,
-                R.drawable.avatar_7,
-                R.drawable.avatar_8,
-                R.drawable.avatar_9,
-                R.drawable.avatar_10,
-                R.drawable.avatar_11,
-                R.drawable.avatar_12,
-                R.drawable.avatar_13,
-                R.drawable.avatar_14,
-                R.drawable.avatar_15,
-                R.drawable.avatar_16
-        };
-
-        for (int i = 0; i < avatarDrawables.length; i++) {
-            String serverId = "srv_" + (i + 1);
-            String serverName = "Server #" + (i + 1);
-            String ipAddress = "10.0.0." + (i + 1);
-            int unreadCount = (i == 0) ? 3 : ((i == 2) ? 1 : 0);
-            items.add(new ServerViewItem(serverId, serverName, ipAddress, avatarDrawables[i], unreadCount));
-        }
-
-        mItems.setValue(items);
+        loadServers();
     }
 
     public LiveData<List<ServerViewItem>> getItems() {
         return mItems;
+    }
+
+    public void loadServers() {
+        List<ServerViewItem> servers = ServerRepository.getInstance().getServers(getApplication());
+        mItems.setValue(servers);
+    }
+
+    public ServerViewItem addServer(String name, String ipAddress) {
+        ServerViewItem newServer = ServerRepository.getInstance().addServer(getApplication(), name, ipAddress);
+        loadServers();
+        return newServer;
     }
 }

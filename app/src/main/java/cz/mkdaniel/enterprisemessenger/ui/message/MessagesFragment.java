@@ -8,6 +8,7 @@ import android.view.ViewGroup;
 import android.widget.EditText;
 import android.widget.ImageButton;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 import androidx.fragment.app.Fragment;
@@ -16,26 +17,25 @@ import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.ListAdapter;
 import androidx.recyclerview.widget.RecyclerView;
 
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
 import cz.mkdaniel.enterprisemessenger.databinding.FragmentMessagesBinding;
+import cz.mkdaniel.enterprisemessenger.net.ServerConnectionManager;
 
 /**
  * Chat screen showing messages in a room.
- *
- * Features:
- * - Paginated message loading (triggered when scrolling near the top)
- * - Text input field at the bottom
- * - Circular send button on the right of the text field
+ * Communicates with the remote server via WebSocket using ServerConnectionManager.
  */
-public class MessagesFragment extends Fragment {
+public class MessagesFragment extends Fragment implements ServerConnectionManager.ConnectionListener {
 
     private static final String TAG = "MessagesFragment";
 
     private FragmentMessagesBinding binding;
     private MessageAdapter adapter;
+    private ServerConnectionManager connectionManager;
 
     private String serverIp;
     private String roomId;
@@ -61,7 +61,7 @@ public class MessagesFragment extends Fragment {
             encryptionKey = getArguments().getString("encryptionKey", "");
         }
 
-        Log.d(TAG, "Connecting to serverIp=" + serverIp
+        Log.d(TAG, "Opening MessagesFragment for serverIp=" + serverIp
                 + ", room=" + roomName + " (" + roomId + ")"
                 + ", encryptionKey=" + encryptionKey);
 
@@ -72,73 +72,99 @@ public class MessagesFragment extends Fragment {
         binding.recyclerviewMessages.setLayoutManager(layoutManager);
         binding.recyclerviewMessages.setAdapter(adapter);
 
-        // Placeholder messages — will be fetched from server later
-        List<Message> placeholderMessages = generatePlaceholderMessages();
-        adapter.submitList(placeholderMessages);
+        // Initial messages
+        List<Message> initialMessages = generatePlaceholderMessages();
+        adapter.submitList(initialMessages);
 
-        // --- Pagination: load older messages when scrolled near the top ---
-        binding.recyclerviewMessages.addOnScrollListener(new RecyclerView.OnScrollListener() {
-            @Override
-            public void onScrolled(@NonNull RecyclerView recyclerView, int dx, int dy) {
-                if (layoutManager.findFirstVisibleItemPosition() <= 2 && !adapter.isLoading()) {
-                    // TODO: Fetch older encrypted messages from serverIp for roomId,
-                    //       decrypt using encryptionKey, and prepend to the list.
-                }
-            }
-        });
+        // --- Server Connection setup ---
+        connectionManager = ServerConnectionManager.getInstance(requireContext());
+        connectionManager.addListener(this);
+
+        if (serverIp != null && !serverIp.isEmpty()) {
+            connectionManager.connectToServer(serverIp);
+            connectionManager.joinRoom(roomId);
+        }
 
         // --- Send button & text field ---
         ImageButton sendButton = binding.buttonSendMessage;
         EditText inputField = binding.edittextMessageInput;
 
-        sendButton.setOnClickListener(v -> {
-            String text = inputField.getText().toString().trim();
-            if (!text.isEmpty()) {
-                // TODO: Encrypt 'text' using encryptionKey and post to serverIp for roomId.
-                //
-                // For now, echo it back into the local list so the user sees
-                // immediate feedback while waiting for server round-trip.
-                Message sent = new Message(UUID.randomUUID().toString(), text, "You", System.currentTimeMillis());
-                List<Message> updated = new ArrayList<>(adapter.getCurrentList());
-                updated.add(sent);
-                adapter.submitList(updated);
+        sendButton.setOnClickListener(v -> sendMessageFromInput(inputField));
 
-                inputField.setText("");
-            }
-        });
-
-        // Also send when pressing Enter / action IME
         inputField.setOnEditorActionListener((v, actionId, event) -> {
-            String text = v.getText().toString().trim();
-            if (!text.isEmpty()) {
-                Message sent = new Message(UUID.randomUUID().toString(), text, "You", System.currentTimeMillis());
-                List<Message> updated = new ArrayList<>(adapter.getCurrentList());
-                updated.add(sent);
-                adapter.submitList(updated);
-                v.setText("");
-            }
+            sendMessageFromInput(inputField);
             return true;
         });
+    }
+
+    private void sendMessageFromInput(EditText inputField) {
+        String text = inputField.getText().toString().trim();
+        if (text.isEmpty()) return;
+
+        Message sent = new Message(UUID.randomUUID().toString(), text, "You", System.currentTimeMillis());
+        List<Message> updated = new ArrayList<>(adapter.getCurrentList());
+        updated.add(sent);
+        adapter.submitList(updated, () -> {
+            if (binding != null) {
+                binding.recyclerviewMessages.smoothScrollToPosition(updated.size() - 1);
+            }
+        });
+
+        // Transmit over WebSocket
+        byte[] keyBytes = (encryptionKey != null && !encryptionKey.isEmpty())
+                ? encryptionKey.getBytes(StandardCharsets.UTF_8)
+                : null;
+        connectionManager.sendChatMessage(text, "You", keyBytes);
+
+        inputField.setText("");
+    }
+
+    @Override
+    public void onConnectionStateChanged(boolean connected, String ip) {
+        if (!isAdded()) return;
+        Log.d(TAG, "Connection state changed: connected=" + connected + ", ip=" + ip);
+        if (connected) {
+            Toast.makeText(getContext(), "Connected to server: " + ip, Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    @Override
+    public void onMessageReceived(Message message) {
+        if (!isAdded()) return;
+        List<Message> updated = new ArrayList<>(adapter.getCurrentList());
+        updated.add(message);
+        adapter.submitList(updated, () -> {
+            if (binding != null) {
+                binding.recyclerviewMessages.smoothScrollToPosition(updated.size() - 1);
+            }
+        });
+    }
+
+    @Override
+    public void onError(String errorMessage) {
+        if (!isAdded()) return;
+        Log.e(TAG, "Server connection error: " + errorMessage);
     }
 
     @Override
     public void onDestroyView() {
         super.onDestroyView();
+        if (connectionManager != null) {
+            connectionManager.removeListener(this);
+        }
         binding = null;
     }
-
-    // ---------- placeholder data (remove when server exists) ----------
 
     private List<Message> generatePlaceholderMessages() {
         long now = System.currentTimeMillis();
         List<Message> messages = new ArrayList<>();
-        for (int i = 1; i <= 20; i++) {
-            String sender = (i % 3 == 0) ? "Alice" : ((i % 3 == 1) ? "Bob" : "Charlie");
+        for (int i = 1; i <= 5; i++) {
+            String sender = (i % 2 == 0) ? "Alice" : "Bob";
             messages.add(new Message(
                     UUID.randomUUID().toString(),
-                    "This is placeholder message #" + i,
+                    "Welcome to #" + (roomName != null ? roomName : "channel") + "! Message " + i,
                     sender,
-                    now - (20L - i) * 60_000L
+                    now - (5L - i) * 60_000L
             ));
         }
         return messages;
@@ -147,8 +173,6 @@ public class MessagesFragment extends Fragment {
     // ---------- adapter & view holder ----------
 
     private static class MessageAdapter extends ListAdapter<Message, MessageViewHolder> {
-
-        private boolean isLoading = false;
 
         protected MessageAdapter() {
             super(new DiffUtil.ItemCallback<Message>() {
@@ -164,10 +188,6 @@ public class MessagesFragment extends Fragment {
                             && oldItem.getTimestamp() == newItem.getTimestamp();
                 }
             });
-        }
-
-        public boolean isLoading() {
-            return isLoading;
         }
 
         @NonNull

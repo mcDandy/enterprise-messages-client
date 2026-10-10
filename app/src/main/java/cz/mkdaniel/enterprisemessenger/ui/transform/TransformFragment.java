@@ -11,6 +11,7 @@ import android.widget.ImageView;
 import android.widget.TextView;
 
 import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 import androidx.core.content.res.ResourcesCompat;
 import androidx.fragment.app.Fragment;
 import androidx.lifecycle.ViewModelProvider;
@@ -35,11 +36,11 @@ public class TransformFragment extends Fragment {
     private static final String TAG = "TransformGrid";
 
     private FragmentTransformBinding binding;
+    private TransformViewModel transformViewModel;
 
     public View onCreateView(@NonNull LayoutInflater inflater,
                              ViewGroup container, Bundle savedInstanceState) {
-        TransformViewModel transformViewModel =
-                new ViewModelProvider(this).get(TransformViewModel.class);
+        transformViewModel = new ViewModelProvider(requireActivity()).get(TransformViewModel.class);
 
         binding = FragmentTransformBinding.inflate(inflater, container, false);
         View root = binding.getRoot();
@@ -65,8 +66,6 @@ public class TransformFragment extends Fragment {
         recyclerView.setLayoutManager(gridLayoutManager);
 
         // 2. Exact adjustment after layout measurement (accounts for notch, insets, margins, desktop resizing).
-        // Calling v.post() defers setSpanCount() until AFTER the current layout pass completes,
-        // allowing RecyclerView to cleanly re-measure and re-bind items.
         recyclerView.addOnLayoutChangeListener((v, left, top, right, bottom,
                                                oldLeft, oldTop, oldRight, oldBottom) -> {
             int widthPx = right - left;
@@ -113,6 +112,14 @@ public class TransformFragment extends Fragment {
         });
 
         return root;
+    }
+
+    @Override
+    public void onResume() {
+        super.onResume();
+        if (transformViewModel != null) {
+            transformViewModel.loadServers();
+        }
     }
 
     @Override

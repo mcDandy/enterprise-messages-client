@@ -11,6 +11,11 @@
         android:label="@string/menu_transform"
         tools:layout="@layout/fragment_transform" />
 
+    <dialog
+        android:id="@+id/nav_add_server"
+        android:name="cz.mkdaniel.enterprisemessenger.ui.server.AddServerDialogFragment"
+        android:label="@string/menu_add_server" />
+
     <fragment
         android:id="@+id/nav_settings"
         android:name="cz.mkdaniel.enterprisemessenger.ui.settings.SettingsFragment"
