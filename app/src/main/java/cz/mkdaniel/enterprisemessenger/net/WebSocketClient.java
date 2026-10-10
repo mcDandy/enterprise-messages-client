@@ -29,6 +29,11 @@ public class WebSocketClient {
     private static final String TAG = "WebSocketClient";
     private static final int DEFAULT_TIMEOUT_SECONDS = 10;
 
+    /**
+     * Path of the binary chat WebSocket endpoint on the server (see server's {@code WebSocketConfig}).
+     */
+    public static final String WS_ENDPOINT_PATH = "/ws/chat";
+
     private final CryptoManager cryptoManager;
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private final AtomicBoolean isConnected = new AtomicBoolean(false);
@@ -74,20 +79,19 @@ public class WebSocketClient {
 
     /**
      * Asynchronously connects to the remote WebSocket server using host and port.
-     * E.g. host="127.0.0.1", port=8080 -> ws://127.0.0.1:8080/ws
+     * E.g. host="127.0.0.1", port=8080 -> ws://127.0.0.1:8080/ws/chat
      */
     public void connectAsync(String host, int port) {
-        String url;
-        if (host.startsWith("ws://") || host.startsWith("wss://")) {
-            url = host;
-        } else {
-            url = "ws://" + host + ":" + port + "/ws";
+        if (host == null || host.isEmpty()) {
+            Log.w(TAG, "Cannot connect: host is empty");
+            return;
         }
-        connectAsync(url);
+        boolean alreadyAbsolute = host.startsWith("ws://") || host.startsWith("wss://");
+        connectAsync(alreadyAbsolute ? host : host + ":" + port);
     }
 
     /**
-     * Asynchronously connects to the remote WebSocket URL (e.g., ws://10.0.2.2:8080/ws or wss://...).
+     * Asynchronously connects to the remote WebSocket URL (e.g., ws://10.0.2.2:8080/ws/chat or wss://...).
      */
     public void connectAsync(String url) {
         executor.execute(() -> {
@@ -258,19 +262,37 @@ public class WebSocketClient {
         }
     }
 
+    /**
+     * Normalizes whatever is stored for a server (bare {@code ip:port}, {@code http(s)://…} or
+     * {@code ws(s)://…}) into an absolute WebSocket URL pointing at the server's chat endpoint.
+     * <p>
+     * Stored values usually carry no path at all (e.g. {@code 192.168.1.115:8080}); in that case the
+     * canonical {@link #WS_ENDPOINT_PATH} is appended, otherwise the handshake request would hit {@code /}
+     * and the server would answer with a 404 instead of upgrading the connection.
+     */
     private static String formatWebSocketUrl(String input) {
         if (input == null || input.isEmpty()) {
-            return "ws://127.0.0.1:8080/ws";
+            return "ws://127.0.0.1:8080" + WS_ENDPOINT_PATH;
         }
-        if (!input.startsWith("ws://") && !input.startsWith("wss://") && !input.startsWith("http://") && !input.startsWith("https://")) {
-            return "ws://" + input;
+
+        String url = input.trim();
+        if (url.startsWith("http://")) {
+            url = "ws://" + url.substring(7);
+        } else if (url.startsWith("https://")) {
+            url = "wss://" + url.substring(8);
+        } else if (!url.startsWith("ws://") && !url.startsWith("wss://")) {
+            url = "ws://" + url;
         }
-        if (input.startsWith("http://")) {
-            return "ws://" + input.substring(7);
+
+        int schemeEnd = url.indexOf("//") + 2;
+        int pathStart = url.indexOf('/', schemeEnd);
+        String authority = pathStart < 0 ? url : url.substring(0, pathStart);
+        String path = pathStart < 0 ? "" : url.substring(pathStart);
+
+        // Empty path or the old "/ws" placeholder -> point at the real endpoint.
+        if (path.isEmpty() || path.equals("/") || path.equals("/ws") || path.equals("/ws/")) {
+            return authority + WS_ENDPOINT_PATH;
         }
-        if (input.startsWith("https://")) {
-            return "wss://" + input.substring(8);
-        }
-        return input;
+        return url;
     }
 }

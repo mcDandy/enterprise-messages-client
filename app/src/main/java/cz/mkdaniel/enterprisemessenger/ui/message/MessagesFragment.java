@@ -1,7 +1,11 @@
 package cz.mkdaniel.enterprisemessenger.ui.message;
 
+import android.Manifest;
+import android.annotation.SuppressLint;
+import android.content.pm.PackageManager;
 import android.content.res.ColorStateList;
 import android.graphics.Color;
+import android.os.Build;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.LayoutInflater;
@@ -12,6 +16,8 @@ import android.widget.ImageButton;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import androidx.activity.result.ActivityResultLauncher;
+import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.annotation.NonNull;
 import androidx.fragment.app.Fragment;
 import androidx.recyclerview.widget.DiffUtil;
@@ -37,6 +43,9 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
 
     private static final String TAG = "MessagesFragment";
 
+    /** Android 17 (API 37) is where the Local Network Permission became mandatory for all apps. */
+    private static final int LOCAL_NETWORK_PERMISSION_API = 37;
+
     private FragmentMessagesBinding binding;
     private MessageAdapter adapter;
     private ServerConnectionManager connectionManager;
@@ -48,6 +57,21 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
     private String roomId;
     private String roomName;
     private String encryptionKey;
+
+    /**
+     * Android 17 (targetSdk 37) blocks every socket to a LAN address until the user grants
+     * ACCESS_LOCAL_NETWORK; without it connect() just times out. Requested before connecting.
+     */
+    private final ActivityResultLauncher<String> localNetworkPermissionLauncher =
+            registerForActivityResult(new ActivityResultContracts.RequestPermission(), isGranted -> {
+                if (isGranted) {
+                    Log.d(TAG, "ACCESS_LOCAL_NETWORK granted, connecting to " + serverIp);
+                    startConnection();
+                } else {
+                    Log.w(TAG, "ACCESS_LOCAL_NETWORK denied - cannot reach local server " + serverIp);
+                    updateInputUnderline(false);
+                }
+            });
 
     @Override
     public View onCreateView(@NonNull LayoutInflater inflater,
@@ -91,9 +115,13 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
         connectionManager = ServerConnectionManager.getInstance(requireContext());
         connectionManager.addListener(this);
 
-        if (serverIp != null && !serverIp.isEmpty()) {
-            connectionManager.connectToServer(serverIp);
-            connectionManager.joinRoom(roomId);
+        // Local network traffic is dropped by the platform without ACCESS_LOCAL_NETWORK (targetSdk 37),
+        // so ask for it before dialling a private address such as 192.168.x.x.
+        if (hasLocalNetworkPermission()) {
+            startConnection();
+        } else {
+            Log.w(TAG, "ACCESS_LOCAL_NETWORK not granted yet, requesting it before connecting to " + serverIp);
+            requestLocalNetworkPermission();
         }
 
         // Set initial underline state based on connection
@@ -109,6 +137,29 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
             sendMessageFromInput(inputField);
             return true;
         });
+    }
+
+    @SuppressLint("InlinedApi") // String constants are inlined at compile time, safe on older releases.
+    private void requestLocalNetworkPermission() {
+        localNetworkPermissionLauncher.launch(Manifest.permission.ACCESS_LOCAL_NETWORK);
+    }
+
+    @SuppressLint("InlinedApi")
+    private boolean hasLocalNetworkPermission() {
+        if (Build.VERSION.SDK_INT < LOCAL_NETWORK_PERMISSION_API) {
+            // Below API 37 local network access is implicitly granted by INTERNET.
+            return true;
+        }
+        return requireContext().checkSelfPermission(Manifest.permission.ACCESS_LOCAL_NETWORK)
+                == PackageManager.PERMISSION_GRANTED;
+    }
+
+    private void startConnection() {
+        if (connectionManager == null || serverIp == null || serverIp.isEmpty()) {
+            return;
+        }
+        connectionManager.connectToServer(serverIp);
+        connectionManager.joinRoom(roomId);
     }
 
     private void updateInputUnderline(boolean isConnected) {

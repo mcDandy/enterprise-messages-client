@@ -4,6 +4,12 @@
 
     <uses-permission android:name="android.permission.INTERNET"/>
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <!--
+        Android 17 (targetSdk 37) enforces the Local Network Permission: opening a TCP socket to a
+        LAN address such as 192.168.x.x is blocked by default and every connect() silently times out
+        until ACCESS_LOCAL_NETWORK is granted. INTERNET alone is no longer enough for local traffic.
+    -->
+    <uses-permission android:name="android.permission.ACCESS_LOCAL_NETWORK"/>
 
     <application
         android:allowBackup="true"

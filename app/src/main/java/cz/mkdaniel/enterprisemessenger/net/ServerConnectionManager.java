@@ -108,8 +108,28 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
         String pubKey = cryptoManager.getPublicKeyBase64();
         if (pubKey == null) pubKey = "dummyPublicKeyBase64StringForE2EE";
 
+        // 1. Try login first.
+        jwtToken = login(httpUrl, username, password);
+
+        // 2. Unknown user / failed login -> register and take the token from the response.
+        // Guarded separately so a failing login (404, timeout, ...) never skips registration.
+        if (jwtToken.isEmpty()) {
+            jwtToken = register(httpUrl, username, password, pubKey);
+        }
+
+        if (jwtToken.isEmpty()) {
+            Log.w(TAG, "No JWT token obtained from " + httpUrl + ", server will reject unauthenticated packets");
+        }
+
+        // Connect WebSocket regardless (will send token in Handshake if present)
+        webSocketClient.connectAsync(serverIp);
+    }
+
+    /**
+     * Posts credentials to {@code /api/auth/login} and returns the JWT token, or "" on any failure.
+     */
+    private String login(String httpUrl, String username, String password) {
         try {
-            // 1. Try login
             JSONObject loginJson = new JSONObject();
             loginJson.put("username", username);
             loginJson.put("password", password);
@@ -128,43 +148,52 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
                 if (response.isSuccessful() && response.body() != null) {
                     String resStr = response.body().string();
                     JSONObject resObj = new JSONObject(resStr);
-                    jwtToken = resObj.optString("token", "");
+                    String token = resObj.optString("token", "");
                     Log.d(TAG, "Authentication successful, obtained JWT token");
+                    return token;
                 }
-            }
-
-            // 2. If login failed/unauthorized, attempt registration
-            if (jwtToken.isEmpty()) {
-                JSONObject regJson = new JSONObject();
-                regJson.put("username", username);
-                regJson.put("password", password);
-                regJson.put("publicKey", pubKey);
-
-                RequestBody regBody = RequestBody.create(
-                        regJson.toString(),
-                        MediaType.parse("application/json; charset=utf-8")
-                );
-
-                Request regRequest = new Request.Builder()
-                        .url(httpUrl + "/api/auth/register")
-                        .post(regBody)
-                        .build();
-
-                try (Response regResponse = httpClient.newCall(regRequest).execute()) {
-                    if (regResponse.body() != null) {
-                        String resStr = regResponse.body().string();
-                        JSONObject resObj = new JSONObject(resStr);
-                        jwtToken = resObj.optString("token", "");
-                        Log.d(TAG, "Registration response, obtained token: " + !jwtToken.isEmpty());
-                    }
-                }
+                Log.w(TAG, "Login failed with HTTP " + response.code());
             }
         } catch (Exception e) {
-            Log.w(TAG, "HTTP Auth request failed or skipped: " + e.getMessage());
+            Log.w(TAG, "Login request failed: " + e.getMessage());
         }
+        return "";
+    }
 
-        // Connect WebSocket regardless (will send token in Handshake if present)
-        webSocketClient.connectAsync(serverIp);
+    /**
+     * Registers a new user on {@code /api/auth/register} and returns the JWT token, or "" on any failure.
+     */
+    private String register(String httpUrl, String username, String password, String publicKey) {
+        try {
+            JSONObject regJson = new JSONObject();
+            regJson.put("username", username);
+            regJson.put("password", password);
+            regJson.put("publicKey", publicKey);
+
+            RequestBody regBody = RequestBody.create(
+                    regJson.toString(),
+                    MediaType.parse("application/json; charset=utf-8")
+            );
+
+            Request regRequest = new Request.Builder()
+                    .url(httpUrl + "/api/auth/register")
+                    .post(regBody)
+                    .build();
+
+            try (Response regResponse = httpClient.newCall(regRequest).execute()) {
+                if (regResponse.body() != null) {
+                    String resStr = regResponse.body().string();
+                    JSONObject resObj = new JSONObject(resStr);
+                    String token = resObj.optString("token", "");
+                    Log.d(TAG, "Registration response, obtained token: " + !token.isEmpty());
+                    return token;
+                }
+                Log.w(TAG, "Registration failed with HTTP " + regResponse.code());
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "Registration request failed: " + e.getMessage());
+        }
+        return "";
     }
 
     /**
