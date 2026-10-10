@@ -35,7 +35,7 @@ import javax.crypto.spec.SecretKeySpec;
  * Generates an EC (secp256r1) key pair on first app start using Android KeyStore.
  * Provides methods for ECDH key exchange, AES-GCM payload encryption, and decryption.
  */
-public class CryptoManager {
+public class CryptoManager { // TODO: this is a god class anti-pattern, and it must be split into several others
 
     private static final String TAG = "CryptoManager";
     private static final String KEY_ALIAS = "EnterpriseMessenger_EC_Key";
@@ -45,7 +45,9 @@ public class CryptoManager {
     private static volatile CryptoManager instance;
     private final Context appContext;
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
-
+    private final Map<String, byte[]> keyHashLookupRegistry = new CuncurrentHashMap<>();
+    
+    private String currentKeyHash = new String();
     private KeyPair keyPair;
 
     private CryptoManager(Context context) {
@@ -61,6 +63,14 @@ public class CryptoManager {
             }
         }
         return instance;
+    }
+
+    public String checkCurrentKeyHash() {
+	    return currentKeyHash;
+    }
+
+    public byte[] lookupKeyByHash(final String hash) {
+	return keyHashLookupRegistry.get(hash);
     }
 
     /**
@@ -197,5 +207,11 @@ public class CryptoManager {
         // SHA-256 hash to get a 256-bit key for AES
         MessageDigest sha256 = MessageDigest.getInstance("SHA-256");
         return sha256.digest(sharedSecret);
+    }
+
+    public hashKey(final byte[] key) {
+	return MessageDigest
+		.getInstance("SHA-256")
+		.digest(key);
     }
 }
