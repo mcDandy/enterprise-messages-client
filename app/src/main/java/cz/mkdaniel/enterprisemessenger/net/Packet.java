@@ -17,11 +17,8 @@ import cz.mkdaniel.enterprisemessenger.crypto.CryptoManager;
  * +-----------------------------------+-----------------------------------+
  * | Field                             | Size                              |
  * +-----------------------------------+-----------------------------------+
- * | Payload Length (Unencrypted)      | 4 bytes (int32, Big-Endian)       |
- * | Packet Type                       | 2 bytes (int16, Big-Endian)       |
- * | Flags (0x01 = Encrypted)          | 1 byte                            |
- * | Reserved                          | 1 byte                            |
- * | Timestamp                         | 8 bytes (int64, Big-Endian)       |
+ * | Packet Type                       | 1 bytes (int16, Big-Endian)       |
+ * | Payload Length                    | 4 bytes (int32, Big-Endian)       |
  * | Payload Data                      | [Payload Length] bytes            |
  * +-----------------------------------+-----------------------------------+
  * </pre>
@@ -30,24 +27,10 @@ import cz.mkdaniel.enterprisemessenger.crypto.CryptoManager;
  * frame incoming stream packets without needing to decrypt the header first.
  */
 public class Packet {
-
-    // Packet Types
     public static final short TYPE_UNKNOWN = 0x0000;
-    public static final short TYPE_HANDSHAKE = 0x0001;
-    public static final short TYPE_CHAT_MESSAGE = 0x0002;
-    public static final short TYPE_ROOM_JOIN = 0x0003;
-    public static final short TYPE_PING = 0x0004;
-    public static final short TYPE_PONG = 0x0005;
-
-    public static final short TYPE_SERVER_JOIN = 0x0102;
-    public static final short TYPE_CHANNEL_JOIN = 0x0202;
-
-    public static final short TYPE_KEY_EXCHANGE_REQ = (short) 0x0400;
-    public static final short TYPE_KEY_EXCHANGE_RESP = (short) 0x0401;
-
-    // Flags
-    public static final byte FLAG_NONE = 0x00;
-    public static final byte FLAG_ENCRYPTED = 0x01;
+    public static final short TYPE_CHAT_MESSAGE_ENC = 0x0002;
+    public static final short TYPE_ROTATE_KEY = 0xa;
+    public static final short TYPE_MULTICAST_ROTATED_KEY = 0xb;
 
     private final short type;
     private final byte flags;
@@ -100,19 +83,18 @@ public class Packet {
         }
 
         int payloadLength = dataToSend.length;
-        // Total wire size = 4 (length) + 2 (type) + 1 (flags) + 1 (reserved) + 8 (timestamp) + payloadLength
-        int totalWireSize = 4 + 2 + 1 + 1 + 8 + payloadLength;
+        int totalWireSize = 4 + 2 + SIZE_OF_SD + 1 + 8 + payloadLength; // magic, must be made from constants, a comment will not fix that
 
         byte[] result = new byte[totalWireSize];
         ByteBuffer buffer = ByteBuffer.wrap(result);
-        buffer.order(ByteOrder.BIG_ENDIAN);
 
-        buffer.putInt(payloadLength);  // Unencrypted length (4 bytes)
-        buffer.putShort(type);         // Packet type (2 bytes)
-        buffer.put(finalFlags);        // Flags (1 byte)
-        buffer.put((byte) 0x00);       // Reserved (1 byte)
-        buffer.putLong(timestamp);     // Timestamp (8 bytes)
-        buffer.put(dataToSend);        // Payload (encrypted or plain)
+        buffer.order(ByteOrder.BIG_ENDIAN);
+        buffer.putInt(payloadLength);
+        buffer.putShort(type);
+        buffer.put(finalFlags);
+        buffer.put((byte) 0x00);
+        buffer.putLong(timestamp);
+        buffer.put(dataToSend);
 
         return result;
     }
