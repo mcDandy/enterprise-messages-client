@@ -5,8 +5,9 @@ import android.util.Log;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
-import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -23,11 +24,18 @@ import okio.ByteString;
  * <p>
  * Handles asynchronous connection via OkHttp WebSocket, continuous handling of incoming
  * binary/text frames, and packet transmission over WebSockets.
+ * <p>
+ * Includes keep-alive ping interval (to prevent socket read timeouts / connection aborts)
+ * and automatic reconnection logic.
  */
 public class WebSocketClient {
 
     private static final String TAG = "WebSocketClient";
-    private static final int DEFAULT_TIMEOUT_SECONDS = 10;
+    private static final int CONNECT_TIMEOUT_SECONDS = 10;
+    private static final int PING_INTERVAL_SECONDS = 15;
+
+    private static final long INITIAL_RECONNECT_DELAY_MS = 2_000L;
+    private static final long MAX_RECONNECT_DELAY_MS = 30_000L;
 
     /**
      * Path of the binary chat WebSocket endpoint on the server (see server's {@code WebSocketConfig}).
@@ -35,14 +43,18 @@ public class WebSocketClient {
     public static final String WS_ENDPOINT_PATH = "/ws/chat";
 
     private final CryptoManager cryptoManager;
-    private final ExecutorService executor = Executors.newSingleThreadExecutor();
+    private final ScheduledExecutorService executor = Executors.newSingleThreadScheduledExecutor();
     private final AtomicBoolean isConnected = new AtomicBoolean(false);
+    private final AtomicBoolean shouldConnect = new AtomicBoolean(false);
 
     private final OkHttpClient okHttpClient;
     private WebSocket webSocket;
     private WebSocketClientListener listener;
     private byte[] channelEncryptionKey;
     private String currentUrl;
+
+    private long reconnectDelayMs = INITIAL_RECONNECT_DELAY_MS;
+    private ScheduledFuture<?> reconnectTask;
 
     public interface WebSocketClientListener {
         void onConnected(String url);
@@ -55,9 +67,12 @@ public class WebSocketClient {
     public WebSocketClient(CryptoManager cryptoManager) {
         this.cryptoManager = cryptoManager;
         this.okHttpClient = new OkHttpClient.Builder()
-                .connectTimeout(DEFAULT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-                .readTimeout(DEFAULT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-                .writeTimeout(DEFAULT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                .connectTimeout(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                .writeTimeout(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                // Long-lived WebSocket connection: readTimeout MUST be 0 (no timeout)
+                .readTimeout(0, TimeUnit.MILLISECONDS)
+                // Send PING frames every 15s to keep the TCP socket alive against NAT/router timeouts
+                .pingInterval(PING_INTERVAL_SECONDS, TimeUnit.SECONDS)
                 .build();
     }
 
@@ -94,6 +109,9 @@ public class WebSocketClient {
      * Asynchronously connects to the remote WebSocket URL (e.g., ws://10.0.2.2:8080/ws/chat or wss://...).
      */
     public void connectAsync(String url) {
+        shouldConnect.set(true);
+        cancelScheduledReconnect();
+
         executor.execute(() -> {
             try {
                 disconnectInternal(false); // Close existing connection if any
@@ -113,6 +131,7 @@ public class WebSocketClient {
                 if (listener != null) {
                     listener.onError(e);
                 }
+                scheduleReconnect();
             }
         });
     }
@@ -123,6 +142,7 @@ public class WebSocketClient {
             public void onOpen(@NonNull WebSocket webSocket, @NonNull Response response) {
                 Log.d(TAG, "WebSocket connected: " + currentUrl);
                 isConnected.set(true);
+                reconnectDelayMs = INITIAL_RECONNECT_DELAY_MS; // Reset reconnect delay on success
                 if (listener != null) {
                     listener.onConnected(currentUrl);
                 }
@@ -168,11 +188,14 @@ public class WebSocketClient {
                 if (wasConnected && listener != null) {
                     listener.onDisconnected();
                 }
+                if (shouldConnect.get()) {
+                    scheduleReconnect();
+                }
             }
 
             @Override
             public void onFailure(@NonNull WebSocket webSocket, @NonNull Throwable t, @Nullable Response response) {
-                Log.e(TAG, "WebSocket failure", t);
+                Log.w(TAG, "WebSocket failure: " + t.getMessage());
                 boolean wasConnected = isConnected.getAndSet(false);
                 if (listener != null) {
                     listener.onError(t);
@@ -180,8 +203,45 @@ public class WebSocketClient {
                         listener.onDisconnected();
                     }
                 }
+                if (shouldConnect.get()) {
+                    scheduleReconnect();
+                }
             }
         };
+    }
+
+    private synchronized void scheduleReconnect() {
+        if (!shouldConnect.get()) {
+            return;
+        }
+        cancelScheduledReconnect();
+
+        long delay = reconnectDelayMs;
+        Log.d(TAG, "Scheduling WebSocket reconnect in " + delay + " ms");
+        reconnectDelayMs = Math.min(reconnectDelayMs * 2, MAX_RECONNECT_DELAY_MS);
+
+        reconnectTask = executor.schedule(() -> {
+            if (shouldConnect.get() && currentUrl != null) {
+                Log.d(TAG, "Attempting automatic WebSocket reconnection...");
+                try {
+                    disconnectInternal(false);
+                    Request request = new Request.Builder()
+                            .url(currentUrl)
+                            .build();
+                    webSocket = okHttpClient.newWebSocket(request, createWebSocketListener());
+                } catch (Exception e) {
+                    Log.e(TAG, "Error during WebSocket reconnect attempt", e);
+                    scheduleReconnect();
+                }
+            }
+        }, delay, TimeUnit.MILLISECONDS);
+    }
+
+    private synchronized void cancelScheduledReconnect() {
+        if (reconnectTask != null && !reconnectTask.isDone()) {
+            reconnectTask.cancel(true);
+            reconnectTask = null;
+        }
     }
 
     /**
@@ -239,9 +299,11 @@ public class WebSocketClient {
     }
 
     /**
-     * Closes the WebSocket connection.
+     * Closes the WebSocket connection and disables automatic reconnection.
      */
     public synchronized void disconnect() {
+        shouldConnect.set(false);
+        cancelScheduledReconnect();
         disconnectInternal(true);
     }
 
@@ -265,10 +327,6 @@ public class WebSocketClient {
     /**
      * Normalizes whatever is stored for a server (bare {@code ip:port}, {@code http(s)://…} or
      * {@code ws(s)://…}) into an absolute WebSocket URL pointing at the server's chat endpoint.
-     * <p>
-     * Stored values usually carry no path at all (e.g. {@code 192.168.1.115:8080}); in that case the
-     * canonical {@link #WS_ENDPOINT_PATH} is appended, otherwise the handshake request would hit {@code /}
-     * and the server would answer with a 404 instead of upgrading the connection.
      */
     private static String formatWebSocketUrl(String input) {
         if (input == null || input.isEmpty()) {
