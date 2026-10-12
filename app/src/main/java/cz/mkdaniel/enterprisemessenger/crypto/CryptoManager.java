@@ -5,6 +5,7 @@ import android.security.keystore.KeyGenParameterSpec;
 import android.security.keystore.KeyProperties;
 import android.util.Base64;
 import android.util.Log;
+import java.util.Map;
 
 import java.security.InvalidAlgorithmParameterException;
 import java.security.KeyFactory;
@@ -19,8 +20,10 @@ import java.security.PublicKey;
 import java.security.SecureRandom;
 import java.security.spec.ECGenParameterSpec;
 import java.security.spec.X509EncodedKeySpec;
+
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ConcurrentHashMap;
 
 import javax.crypto.Cipher;
 import javax.crypto.KeyAgreement;
@@ -36,7 +39,6 @@ import javax.crypto.spec.SecretKeySpec;
  * Provides methods for ECDH key exchange, AES-GCM payload encryption, and decryption.
  */
 public class CryptoManager { // TODO: this is a god class anti-pattern, and it must be split into several others
-
     private static final String TAG = "CryptoManager";
     private static final String KEY_ALIAS = "EnterpriseMessenger_EC_Key";
     private static final String ANDROID_KEYSTORE = "AndroidKeyStore";
@@ -45,7 +47,7 @@ public class CryptoManager { // TODO: this is a god class anti-pattern, and it m
     private static volatile CryptoManager instance;
     private final Context appContext;
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
-    private final Map<String, byte[]> keyHashLookupRegistry = new CuncurrentHashMap<>();
+    private final Map<String, byte[]> keyHashLookupRegistry = new ConcurrentHashMap<>();
     
     private String currentKeyHash = new String();
     private KeyPair keyPair;
@@ -66,7 +68,7 @@ public class CryptoManager { // TODO: this is a god class anti-pattern, and it m
     }
 
     public String checkCurrentKeyHash() {
-	    return currentKeyHash;
+	    return new String(currentKeyHash);
     }
 
     public byte[] lookupKeyByHash(final String hash) {
@@ -209,7 +211,7 @@ public class CryptoManager { // TODO: this is a god class anti-pattern, and it m
         return sha256.digest(sharedSecret);
     }
 
-    public hashKey(final byte[] key) {
+    public byte[] hashKey(final byte[] key) throws Exception {
 	return MessageDigest
 		.getInstance("SHA-256")
 		.digest(key);

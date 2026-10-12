@@ -4,6 +4,7 @@ import java.io.ByteArrayInputStream;
 import java.io.DataInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 
@@ -27,135 +28,95 @@ import cz.mkdaniel.enterprisemessenger.crypto.CryptoManager;
  * frame incoming stream packets without needing to decrypt the header first.
  */
 public class Packet {
-    public static final short TYPE_UNKNOWN = 0x0000;
-    public static final short TYPE_CHAT_MESSAGE_ENC = 0x0002;
-    public static final short TYPE_ROTATE_KEY = 0xa;
-    public static final short TYPE_MULTICAST_ROTATED_KEY = 0xb;
+	public static final short TYPE_UNKNOWN = 0x0000;
+	public static final short TYPE_CHAT_MESSAGE = 0x0002;
+	public static final short TYPE_ROTATE_KEY = 0xa;
+	public static final short TYPE_MULTICAST_ROTATED_KEY = 0xb;
 
-    private final short type;
-    private final byte flags;
-    private final long timestamp;
-    private final byte[] payload;
+	private final int type;
+	private final int payloadLength;
+	private final byte[] payload;
 
-    public Packet(short type, byte flags, long timestamp, byte[] payload) {
-        this.type = type;
-        this.flags = flags;
-        this.timestamp = timestamp;
-        this.payload = payload != null ? payload : new byte[0];
-    }
+	public Packet(int type, byte[] payload) {
+		this.type = type;
+		this.payloadLength = payload.length;
+		this.payload = payload;
+	}
 
-    public Packet(short type, byte[] payload) {
-        this(type, FLAG_NONE, System.currentTimeMillis(), payload);
-    }
+	public Packet() {
+		this(TYPE_UNKNOWN, new byte[Long.SIZE]);
+	}
 
-    public short getType() {
-        return type;
-    }
+	public int getType() {
+		return type;
+	}
 
-    public byte getFlags() {
-        return flags;
-    }
+	public byte[] getPayload() {
+		return payload;
+	}
 
-    public boolean isEncrypted() {
-        return (flags & FLAG_ENCRYPTED) != 0;
-    }
+	/**
+	 * Serializes this packet into raw binary bytes for TCP transport.
+	 * If an encryption key is provided, the payload is encrypted using AES-GCM before output.
+	 * The 4-byte length field in the output remains unencrypted.
+	 */
+	public byte[] serialize(final CryptoManager cryptoManager, final byte[] encryptionKey) throws Exception {
+		if (encryptionKey != null && encryptionKey.length > 0 && cryptoManager != null) {
+			throw new RuntimeException("Cannot encrypt message due to missing dependencies");
+		}
 
-    public long getTimestamp() {
-        return timestamp;
-    }
+		final var encryptedPayload = cryptoManager.encryptPayload(payload, encryptionKey);
+		final var buffer = ByteBuffer.wrap(new byte[Byte.SIZE + Integer.SIZE + encryptedPayload.length]);
+  
+		buffer.order(ByteOrder.BIG_ENDIAN);
+		buffer.putInt(type);
+		buffer.putInt(payloadLength);
+		buffer.put(encryptedPayload);
 
-    public byte[] getPayload() {
-        return payload;
-    }
+		return buffer.array();
+	}
 
-    /**
-     * Serializes this packet into raw binary bytes for TCP transport.
-     * If an encryption key is provided, the payload is encrypted using AES-GCM before output.
-     * The 4-byte length field in the output remains unencrypted.
-     */
-    public byte[] serialize(CryptoManager cryptoManager, byte[] encryptionKey) throws Exception {
-        byte[] dataToSend = payload;
-        byte finalFlags = flags;
+	/**
+	 * Reads an incoming packet from the TCP InputStream.
+	 * First reads the unencrypted 4-byte payload length, then reads the remaining
+	 * header fields and payload bytes. If encrypted, decrypts the payload using the provided key.
+	 */
+	public static Packet readFromStream(InputStream inputStream, CryptoManager cryptoManager, byte[] encryptionKey) throws Exception {
+		final var dis = (inputStream instanceof DataInputStream)? (DataInputStream) inputStream : new DataInputStream(inputStream);
+		byte type = dis.readByte();
+		int payloadLength = dis.readInt();
 
-        if (encryptionKey != null && encryptionKey.length > 0 && cryptoManager != null) {
-            dataToSend = cryptoManager.encryptPayload(payload, encryptionKey);
-            finalFlags |= FLAG_ENCRYPTED;
-        }
+		if (payloadLength < 0 || payloadLength > 10 * 1024 * 1024) { // 10MB safety cap
+			throw new IOException("Invalid packet payload length: " + payloadLength);
+		}
 
-        int payloadLength = dataToSend.length;
-        int totalWireSize = 4 + 2 + SIZE_OF_SD + 1 + 8 + payloadLength; // magic, must be made from constants, a comment will not fix that
+		if (cryptoManager != null && encryptionKey != null && encryptionKey.length > 0) {
+			throw new IllegalStateException("Received encrypted packet but no decryption key was supplied");
+		}
 
-        byte[] result = new byte[totalWireSize];
-        ByteBuffer buffer = ByteBuffer.wrap(result);
+		byte[] rawPayload = new byte[payloadLength];
 
-        buffer.order(ByteOrder.BIG_ENDIAN);
-        buffer.putInt(payloadLength);
-        buffer.putShort(type);
-        buffer.put(finalFlags);
-        buffer.put((byte) 0x00);
-        buffer.putLong(timestamp);
-        buffer.put(dataToSend);
+		dis.readFully(rawPayload);
 
-        return result;
-    }
+		byte[] finalPayload = cryptoManager.decryptPayload(rawPayload, encryptionKey);
 
-    public byte[] serialize() throws Exception {
-        return serialize(null, null);
-    }
+		return new Packet(type, finalPayload);
+	}
 
-    /**
-     * Reads an incoming packet from the TCP InputStream.
-     * First reads the unencrypted 4-byte payload length, then reads the remaining
-     * header fields and payload bytes. If encrypted, decrypts the payload using the provided key.
-     */
-    public static Packet readFromStream(InputStream inputStream, CryptoManager cryptoManager, byte[] encryptionKey) throws Exception {
-        DataInputStream dis = (inputStream instanceof DataInputStream)
-                ? (DataInputStream) inputStream
-                : new DataInputStream(inputStream);
+	public static Packet readFromStream(InputStream inputStream) throws Exception {
+		return readFromStream(inputStream, null, null);
+	}
 
-        // 1. Read unencrypted 4-byte payload length
-        int payloadLength = dis.readInt();
-        if (payloadLength < 0 || payloadLength > 10 * 1024 * 1024) { // 10MB safety cap
-            throw new IOException("Invalid packet payload length: " + payloadLength);
-        }
+	/**
+	 * Reads an incoming packet from a byte array (e.g. from a WebSocket binary frame).
+	 */
+	public static Packet readFromByteArray(byte[] data, CryptoManager cryptoManager, byte[] encryptionKey) throws Exception {
+		try (ByteArrayInputStream bais = new ByteArrayInputStream(data)) {
+			return readFromStream(bais, cryptoManager, encryptionKey);
+		}
+	}
 
-        // 2. Read remaining fixed header fields
-        short type = dis.readShort();
-        byte flags = dis.readByte();
-        byte reserved = dis.readByte(); // reserved
-        long timestamp = dis.readLong();
-
-        // 3. Read raw payload bytes
-        byte[] rawPayload = new byte[payloadLength];
-        dis.readFully(rawPayload);
-
-        // 4. Decrypt payload if encrypted flag is set
-        byte[] finalPayload = rawPayload;
-        if ((flags & FLAG_ENCRYPTED) != 0) {
-            if (cryptoManager != null && encryptionKey != null && encryptionKey.length > 0) {
-                finalPayload = cryptoManager.decryptPayload(rawPayload, encryptionKey);
-            } else {
-                throw new IllegalStateException("Received encrypted packet but no decryption key was supplied");
-            }
-        }
-
-        return new Packet(type, flags, timestamp, finalPayload);
-    }
-
-    public static Packet readFromStream(InputStream inputStream) throws Exception {
-        return readFromStream(inputStream, null, null);
-    }
-
-    /**
-     * Reads an incoming packet from a byte array (e.g. from a WebSocket binary frame).
-     */
-    public static Packet readFromByteArray(byte[] data, CryptoManager cryptoManager, byte[] encryptionKey) throws Exception {
-        try (ByteArrayInputStream bais = new ByteArrayInputStream(data)) {
-            return readFromStream(bais, cryptoManager, encryptionKey);
-        }
-    }
-
-    public static Packet readFromByteArray(byte[] data) throws Exception {
-        return readFromByteArray(data, null, null);
-    }
+	public static Packet readFromByteArray(byte[] data) throws Exception {
+		return readFromByteArray(data, null, null);
+	}
 }

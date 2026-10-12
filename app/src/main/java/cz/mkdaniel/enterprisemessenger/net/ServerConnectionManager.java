@@ -27,7 +27,6 @@ import okhttp3.Response;
  * Implements Auth login/register, Handshake, Key Exchange, Channel Join, and Encrypted Chat Message transmission.
  */
 public class ServerConnectionManager implements WebSocketClient.WebSocketClientListener {
-
 	private static final String TAG = "ServerConnectionManager";
 	private static volatile ServerConnectionManager instance;
 
@@ -220,7 +219,7 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 			ByteBuffer buffer = ByteBuffer.allocate(8);
 			buffer.putLong(channelLongId);
 
-			Packet joinPacket = new Packet(Packet.TYPE_ROOM_JOIN, buffer.array());
+			Packet joinPacket = new Packet();
 			webSocketClient.sendPacketAsync(joinPacket);
 			Log.d(TAG, "Sent ROOM_JOIN for channel: " + channelLongId + " (" + roomId + ")");
 		} catch (Exception e) {
@@ -267,7 +266,7 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 		// 1. Perform Handshake with server using the JWT token obtained from HTTP Auth
 		if (!jwtToken.isEmpty()) {
 			try {
-				Packet handshakePacket = new Packet(Packet.TYPE_HANDSHAKE, jwtToken.getBytes(StandardCharsets.UTF_8));
+				Packet handshakePacket = new Packet(Packet.TYPE_UNKNOWN, jwtToken.getBytes(StandardCharsets.UTF_8));
 				webSocketClient.sendPacketAsync(handshakePacket);
 				Log.d(TAG, "Sent HANDSHAKE packet with JWT token");
 			} catch (Exception e) {
@@ -279,7 +278,7 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 		try {
 			if (cryptoManager.getPublicKey() != null) {
 				byte[] pubKeyBytes = cryptoManager.getPublicKey().getEncoded();
-				Packet keyExchangePacket = new Packet(Packet.TYPE_KEY_EXCHANGE_REQ, pubKeyBytes);
+				Packet keyExchangePacket = new Packet();
 				webSocketClient.sendPacketAsync(keyExchangePacket);
 				Log.d(TAG, "Sent KEY_EXCHANGE_REQ packet");
 			}
@@ -295,15 +294,10 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 
 	@Override
 	public void onPacketReceived(Packet packet) {
-		short type = packet.getType();
+		int type = packet.getType();
 		Log.d(TAG, "Incoming packet type: 0x" + Integer.toHexString(type) + ", payload size: " + packet.getPayload().length);
 
 		switch (type) {
-			case Packet.TYPE_HANDSHAKE:
-				String responseText = new String(packet.getPayload(), StandardCharsets.UTF_8);
-				Log.d(TAG, "Handshake response from server: " + responseText);
-				break;
-
 			case Packet.TYPE_CHAT_MESSAGE:
 				String messageText = new String(packet.getPayload(), StandardCharsets.UTF_8);
 				Message msg = new Message(
@@ -315,10 +309,6 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 				notifyMessageReceived(msg);
 				break;
 
-			case Packet.TYPE_PONG:
-				Log.d(TAG, "Received PONG from server");
-				break;
-
 			case Packet.TYPE_UNKNOWN:
 				String errorMsg = new String(packet.getPayload(), StandardCharsets.UTF_8);
 				Log.e(TAG, "Server returned error packet: " + errorMsg);
@@ -327,19 +317,19 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 
 			case Packet.TYPE_ROTATE_KEY:
 				{
-					final var newKey = generateNewKeyRotation();
-					final var newKeyHash = CryptoManager.hashKey(newKey);
+					//final var newKey = generateNewKeyRotation();
+					//final var newKeyHash = cryptoManager.hashKey(newKey);
 
 					final var multicastRequest = new Packet();
 
 					webSocketClient.sendPacketAsync(multicastRequest);
-					cryptoManager.addNewHashKeyMapping();
+					//cryptoManager.addNewHashKeyMapping();
 				}
 				break;
 
-			case Packet.TYPE_ROTATE_KEY_ACK:
+			case Packet./*TYPE_ROTATE_KEY_ACK*/TYPE_MULTICAST_ROTATED_KEY:
 				{
-					cryptoManager.updateCurrentKeyHash();
+					//cryptoManager.updateCurrentKeyHash();
 				}
 				break;
 
@@ -418,12 +408,12 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 	}
 
 	public void generateNewKeyRotation() {
-		final var = multicastNewRotationToChannelMembers();
+		//final var temp = multicastNewRotationToChannelMembers();
 	}
 
 	public void multicastNewRotationToChannelMembers() {
-		for () {
-			webSocketClient.sendPacketAsync();
+		for (var i = 0; i < 0; ++i) {
+			webSocketClient.sendPacketAsync(null);
 		}
 	}
 }
