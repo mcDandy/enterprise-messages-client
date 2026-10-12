@@ -1,5 +1,7 @@
 plugins {
     alias(libs.plugins.android.application)
+    // Needs app/google-services.json from the Firebase console (same project as the server's service account)
+    alias(libs.plugins.google.services)
 }
 
 android {
@@ -43,6 +45,8 @@ dependencies {
     implementation libs.navigation.fragment
     implementation libs.navigation.ui
     implementation libs.okhttp
+    implementation platform(libs.firebase.bom)
+    implementation libs.firebase.messaging
     implementation libs.recyclerview
     testImplementation libs.junit
     androidTestImplementation libs.espresso.core

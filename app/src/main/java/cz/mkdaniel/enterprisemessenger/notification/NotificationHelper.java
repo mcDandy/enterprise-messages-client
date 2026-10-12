@@ -7,6 +7,7 @@ import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.os.Build;
 
@@ -27,6 +28,7 @@ public class NotificationHelper {
     public static final String CHANNEL_NAME = "Enterprise Messages";
     public static final String CHANNEL_DESC = "Notifications for new messages";
     public static final int PERMISSION_REQUEST_CODE = 1001;
+    private static final String PREF_UNREAD = "EnterpriseMessenger_Unread";
 
     private static int notificationIdCounter = 1000;
 
@@ -38,7 +40,7 @@ public class NotificationHelper {
             NotificationChannel channel = new NotificationChannel(
                     CHANNEL_ID,
                     CHANNEL_NAME,
-                    NotificationManager.IMPORTANCE_DEFAULT
+                    NotificationManager.IMPORTANCE_HIGH
             );
             channel.setDescription(CHANNEL_DESC);
 
@@ -120,6 +122,36 @@ public class NotificationHelper {
             int notificationId = serverName != null ? Math.abs(serverName.hashCode()) : ++notificationIdCounter;
             manager.notify(notificationId, builder.build());
         }
+    }
+
+    /**
+     * Shows (or updates) the "N new messages" notification of a channel, used for pushes
+     * that arrive while the app is in the foreground.
+     */
+    public static void showChannelMessageNotification(Context context, long channelId, String channelName) {
+        // Keyed by channel id so cancelNotificationForChannel() finds it again
+        String name = (channelId >= 0 || channelName == null) ? "Channel #" + channelId : channelName;
+        int count;
+        synchronized (NotificationHelper.class) {
+            SharedPreferences prefs = context.getSharedPreferences(PREF_UNREAD, Context.MODE_PRIVATE);
+            count = prefs.getInt(unreadKey(name), 0) + 1;
+            prefs.edit().putInt(unreadKey(name), count).apply();
+        }
+        showMessageNotification(context, name, count);
+    }
+
+    /**
+     * Cancels the notification of a channel and resets its unread counter (user opened the channel).
+     */
+    public static void cancelNotificationForChannel(Context context, long channelId) {
+        if (context == null) return;
+        String name = "Channel #" + channelId;
+        context.getSharedPreferences(PREF_UNREAD, Context.MODE_PRIVATE).edit().remove(unreadKey(name)).apply();
+        cancelNotificationForServer(context, name);
+    }
+
+    private static String unreadKey(String name) {
+        return "unread_" + name;
     }
 
     /**

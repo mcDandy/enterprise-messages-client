@@ -2,6 +2,7 @@ package cz.mkdaniel.enterprisemessenger.ui.transform;
 
 import android.graphics.Typeface;
 import android.os.Bundle;
+import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -20,12 +21,15 @@ import java.util.Arrays;
 import java.util.List;
 
 import cz.mkdaniel.enterprisemessenger.R;
+import cz.mkdaniel.enterprisemessenger.net.ServerConnectionManager;
 
 /**
  * Displays rooms/channels for the selected server.
  * Channels with unread messages are displayed with bold font.
  */
 public class RoomsFragment extends Fragment {
+
+    private static final String TAG = "RoomsFragment";
 
     @Override
     public View onCreateView(@NonNull LayoutInflater inflater,
@@ -58,16 +62,30 @@ public class RoomsFragment extends Fragment {
         );
         recyclerView.setAdapter(adapter);
 
-        // Placeholder rooms with encryption keys — channels with hasNewMessages=true will be displayed in bold
+        // Placeholder rooms until (or if) the server's channel list arrives
         List<Room> placeholderRooms = Arrays.asList(
-                new Room("r1", "general", "key_aes256_gen_01", true),
-                new Room("r2", "random", "key_aes256_rnd_02", false),
-                new Room("r3", "announcements", "key_aes256_ann_03", false),
-                new Room("r4", "development", "key_aes256_dev_04", true),
-                new Room("r5", "design", "key_aes256_dsg_05", false),
-                new Room("r6", "support", "key_aes256_spt_06", false)
+                new Room("r1", "general", ServerConnectionManager.defaultChannelSecret(1), true),
+                new Room("r2", "random", ServerConnectionManager.defaultChannelSecret(2), false),
+                new Room("r3", "announcements", ServerConnectionManager.defaultChannelSecret(3), false),
+                new Room("r4", "development", ServerConnectionManager.defaultChannelSecret(4), true),
+                new Room("r5", "design", ServerConnectionManager.defaultChannelSecret(5), false),
+                new Room("r6", "support", ServerConnectionManager.defaultChannelSecret(6), false)
         );
         adapter.submitList(placeholderRooms);
+
+        ServerConnectionManager.getInstance(requireContext()).fetchChannels(serverIp,
+                new ServerConnectionManager.Callback<List<Room>>() {
+                    @Override
+                    public void onResult(List<Room> rooms) {
+                        Log.d(TAG, "Loaded " + rooms.size() + " channels from " + serverIp);
+                        adapter.submitList(rooms);
+                    }
+
+                    @Override
+                    public void onFailure(String error) {
+                        Log.w(TAG, "Keeping placeholder rooms, channel list unavailable: " + error);
+                    }
+                });
 
         return recyclerView;
     }
