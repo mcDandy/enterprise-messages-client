@@ -25,24 +25,26 @@ import okio.ByteString;
  * binary/text frames, and packet transmission over WebSockets.
  */
 public class WebSocketClient {
-
     private static final String TAG = "WebSocketClient";
     private static final int DEFAULT_TIMEOUT_SECONDS = 10;
-
     /**
      * Path of the binary chat WebSocket endpoint on the server (see server's {@code WebSocketConfig}).
      */
-    public static final String WS_ENDPOINT_PATH = "/ws/chat";
+    public static final String WS_PROTOCOL = "wss";
+    public static final String WS_HOST = "172.18.0.1";
+    public static final Short WS_PORT = 8443;
+    public static final String WS_ENDPOINT_PATH = "ws";
 
     private final CryptoManager cryptoManager;
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private final AtomicBoolean isConnected = new AtomicBoolean(false);
-
     private final OkHttpClient okHttpClient;
+    private final String currentUrl = String.format("%s://%s:%d/%s", WS_PROTOCOL, WS_HOST, WS_PORT, WS_ENDPOINT_PATH);
+
     private WebSocket webSocket;
     private WebSocketClientListener listener;
     private byte[] channelEncryptionKey;
-    private String currentUrl;
+    private String token = "Invalid";
 
     public interface WebSocketClientListener {
         void onConnected(String url);
@@ -78,38 +80,27 @@ public class WebSocketClient {
     }
 
     /**
-     * Asynchronously connects to the remote WebSocket server using host and port.
-     * E.g. host="127.0.0.1", port=8080 -> ws://127.0.0.1:8080/ws/chat
+     * Asynchronously connects to the remote WebSocket URL.
+     *
+     * Close existing connection, if any.
      */
-    public void connectAsync(String host, int port) {
-        if (host == null || host.isEmpty()) {
-            Log.w(TAG, "Cannot connect: host is empty");
-            return;
-        }
-        boolean alreadyAbsolute = host.startsWith("ws://") || host.startsWith("wss://");
-        connectAsync(alreadyAbsolute ? host : host + ":" + port);
-    }
-
-    /**
-     * Asynchronously connects to the remote WebSocket URL (e.g., ws://10.0.2.2:8080/ws/chat or wss://...).
-     */
-    public void connectAsync(String url) {
+    public void connectAsync(final String url) {
         executor.execute(() -> {
             try {
-                disconnectInternal(false); // Close existing connection if any
-
-                this.currentUrl = formatWebSocketUrl(url);
+                disconnectInternal(false);
                 Log.d(TAG, "Connecting to WebSocket URL: " + currentUrl);
 
-                Request request = new Request.Builder()
-                        .url(currentUrl)
-                        .build();
-
+                final var request = new Request
+		    .Builder()
+		    .url(currentUrl)
+		    .addHeader("Authorization", String.format("Bearer %s", token))
+		    .build();
                 webSocket = okHttpClient.newWebSocket(request, createWebSocketListener());
 
             } catch (Exception e) {
                 Log.e(TAG, "Failed to initiate WebSocket connection to " + url, e);
                 isConnected.set(false);
+
                 if (listener != null) {
                     listener.onError(e);
                 }
@@ -215,30 +206,6 @@ public class WebSocketClient {
     }
 
     /**
-     * Sends a text frame asynchronously over the WebSocket connection.
-     */
-    public void sendTextAsync(String text) {
-        if (!isConnected()) {
-            Log.w(TAG, "Cannot send text: WebSocket client is not connected");
-            return;
-        }
-
-        executor.execute(() -> {
-            try {
-                if (webSocket != null) {
-                    webSocket.send(text);
-                    Log.d(TAG, "Sent text frame: " + text);
-                }
-            } catch (Exception e) {
-                Log.e(TAG, "Error sending text frame", e);
-                if (listener != null) {
-                    listener.onError(e);
-                }
-            }
-        });
-    }
-
-    /**
      * Closes the WebSocket connection.
      */
     public synchronized void disconnect() {
@@ -260,39 +227,5 @@ public class WebSocketClient {
         if (wasConnected && notifyListener && listener != null) {
             listener.onDisconnected();
         }
-    }
-
-    /**
-     * Normalizes whatever is stored for a server (bare {@code ip:port}, {@code http(s)://…} or
-     * {@code ws(s)://…}) into an absolute WebSocket URL pointing at the server's chat endpoint.
-     * <p>
-     * Stored values usually carry no path at all (e.g. {@code 192.168.1.115:8080}); in that case the
-     * canonical {@link #WS_ENDPOINT_PATH} is appended, otherwise the handshake request would hit {@code /}
-     * and the server would answer with a 404 instead of upgrading the connection.
-     */
-    private static String formatWebSocketUrl(String input) {
-        if (input == null || input.isEmpty()) {
-            return "ws://127.0.0.1:8080" + WS_ENDPOINT_PATH;
-        }
-
-        String url = input.trim();
-        if (url.startsWith("http://")) {
-            url = "ws://" + url.substring(7);
-        } else if (url.startsWith("https://")) {
-            url = "wss://" + url.substring(8);
-        } else if (!url.startsWith("ws://") && !url.startsWith("wss://")) {
-            url = "ws://" + url;
-        }
-
-        int schemeEnd = url.indexOf("//") + 2;
-        int pathStart = url.indexOf('/', schemeEnd);
-        String authority = pathStart < 0 ? url : url.substring(0, pathStart);
-        String path = pathStart < 0 ? "" : url.substring(pathStart);
-
-        // Empty path or the old "/ws" placeholder -> point at the real endpoint.
-        if (path.isEmpty() || path.equals("/") || path.equals("/ws") || path.equals("/ws/")) {
-            return authority + WS_ENDPOINT_PATH;
-        }
-        return url;
     }
 }

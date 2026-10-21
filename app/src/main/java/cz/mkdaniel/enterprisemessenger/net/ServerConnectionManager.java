@@ -62,6 +62,7 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 				}
 			}
 		}
+
 		return instance;
 	}
 
@@ -105,6 +106,7 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 		String username = "android_user";
 		String password = "GuestPassword123";
 		String pubKey = cryptoManager.getPublicKeyBase64();
+
 		if (pubKey == null) pubKey = "dummyPublicKeyBase64StringForE2EE";
 
 		// 1. Try login first.
@@ -317,19 +319,42 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 
 			case Packet.TYPE_ROTATE_KEY:
 				{
-					//final var newKey = generateNewKeyRotation();
-					//final var newKeyHash = cryptoManager.hashKey(newKey);
+				    // get number of neighbours from payload
+				    // generate new private key
+				    // generate hash of new private key
+				    // add entry to key hash mapping
+				    // cryptoManager.addNewHashKeyMapping();
+				    // create rotate key message with current key hash
+				    // send rotate key message to server
+				    // create N public key unicast messages, where n is the number of client in this chat
+				    // send N unicast messages to server
+				    
+				    //final var newKey = generateNewKeyRotation();
+				    //final var newKeyHash = cryptoManager.hashKey(newKey);
 
-					final var multicastRequest = new Packet();
+				    final var multicastRequest = new Packet();
 
-					webSocketClient.sendPacketAsync(multicastRequest);
-					//cryptoManager.addNewHashKeyMapping();
+				    webSocketClient.sendPacketAsync(multicastRequest);
 				}
 				break;
 
-			case Packet./*TYPE_ROTATE_KEY_ACK*/TYPE_MULTICAST_ROTATED_KEY:
+			case Packet.TYPE_UNICAST_ROTATED_KEY:
 				{
-					//cryptoManager.updateCurrentKeyHash();
+				    // update current private shared key hash
+				    //cryptoManager.updateCurrentKeyHash();
+				}
+				break;
+			case Packet.TYPE_SOLICITE_PUBLIC_KEY:
+				{
+				    // create public key message
+				    // send to server
+				}
+				break;
+			case Packet.TYPE_ADVERTISE_PUBLIC_KEY:
+				{
+				    // extract public key from message
+				    // create new keypair
+				    // store public key with new keypair
 				}
 				break;
 
