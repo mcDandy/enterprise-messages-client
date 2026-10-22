@@ -25,7 +25,6 @@ import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.ListAdapter;
 import androidx.recyclerview.widget.RecyclerView;
 
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
@@ -33,6 +32,7 @@ import java.util.UUID;
 import cz.mkdaniel.enterprisemessenger.R;
 import cz.mkdaniel.enterprisemessenger.databinding.FragmentMessagesBinding;
 import cz.mkdaniel.enterprisemessenger.net.ServerConnectionManager;
+import cz.mkdaniel.enterprisemessenger.notification.NotificationHelper;
 
 /**
  * Chat screen showing messages in a room.
@@ -159,7 +159,26 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
             return;
         }
         connectionManager.connectToServer(serverIp);
-        connectionManager.joinRoom(roomId);
+        connectionManager.joinChannel(roomId, encryptionKey);
+    }
+
+    @Override
+    public void onResume() {
+        super.onResume();
+        long channelId = ServerConnectionManager.parseChannelId(roomId);
+        // Suppress push notifications for the channel being looked at and clear the pending one
+        if (connectionManager != null) {
+            connectionManager.setVisibleChannel(channelId);
+        }
+        NotificationHelper.cancelNotificationForChannel(requireContext(), channelId);
+    }
+
+    @Override
+    public void onPause() {
+        super.onPause();
+        if (connectionManager != null) {
+            connectionManager.setVisibleChannel(-1L);
+        }
     }
 
     private void updateInputUnderline(boolean isConnected) {
@@ -181,7 +200,8 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
             return;
         }
 
-        Message sent = new Message(UUID.randomUUID().toString(), text, "You", System.currentTimeMillis());
+        String messageId = UUID.randomUUID().toString();
+        Message sent = new Message(messageId, text, "You", System.currentTimeMillis());
         List<Message> updated = new ArrayList<>(adapter.getCurrentList());
         updated.add(sent);
         adapter.submitList(updated, () -> {
@@ -190,11 +210,8 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
             }
         });
 
-        // Transmit over WebSocket
-        byte[] keyBytes = (encryptionKey != null && !encryptionKey.isEmpty())
-                ? encryptionKey.getBytes(StandardCharsets.UTF_8)
-                : null;
-        connectionManager.sendChatMessage(text, "You", keyBytes);
+        // Encrypt with the channel key and transmit over WebSocket
+        connectionManager.sendChatMessage(messageId, text);
 
         inputField.setText("");
     }
@@ -214,6 +231,12 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
     @Override
     public void onMessageReceived(Message message) {
         if (!isAdded()) return;
+        // The server broadcasts to the whole channel including the sender - skip our own echo
+        for (Message existing : adapter.getCurrentList()) {
+            if (existing.getId().equals(message.getId())) {
+                return;
+            }
+        }
         List<Message> updated = new ArrayList<>(adapter.getCurrentList());
         updated.add(message);
         adapter.submitList(updated, () -> {

@@ -5,17 +5,26 @@ import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
 
+import com.google.android.gms.tasks.Tasks;
+import com.google.firebase.messaging.FirebaseMessaging;
+
+import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 import cz.mkdaniel.enterprisemessenger.crypto.CryptoManager;
 import cz.mkdaniel.enterprisemessenger.ui.message.Message;
+import cz.mkdaniel.enterprisemessenger.ui.transform.Room;
 import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
@@ -24,7 +33,9 @@ import okhttp3.Response;
 
 /**
  * Singleton manager handling WebSocket protocol exchanges and HTTP Auth with Enterprise Messenger servers.
- * Implements Auth login/register, Handshake, Key Exchange, Channel Join, and Encrypted Chat Message transmission.
+ * <p>
+ * Flow: REST login/register -> FCM token upload -> WebSocket {@code /ws?token=JWT} -> CHANNEL_JOIN ->
+ * end-to-end encrypted CHAT_MESSAGE_ENC packets.
  */
 public class ServerConnectionManager implements WebSocketClient.WebSocketClientListener {
 	private static final String TAG = "ServerConnectionManager";
