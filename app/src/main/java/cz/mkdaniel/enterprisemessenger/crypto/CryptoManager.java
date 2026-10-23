@@ -52,6 +52,7 @@ public class CryptoManager { // TODO: this is a god class anti-pattern, and it m
 
     private String currentKeyHash = new String();
     private KeyPair keyPair;
+    private byte[] senderKey;
 
     private CryptoManager(Context context) {
 	this.appContext = context.getApplicationContext();
@@ -65,6 +66,7 @@ public class CryptoManager { // TODO: this is a god class anti-pattern, and it m
 		}
 	    }
 	}
+
 	return instance;
     }
 
@@ -92,7 +94,7 @@ public class CryptoManager { // TODO: this is a god class anti-pattern, and it m
 		return keyPair;
 	    }
 
-	    KeyStore keyStore = KeyStore.getInstance(ANDROID_KEYSTORE);
+	    final var keyStore = KeyStore.getInstance(ANDROID_KEYSTORE);
 	    keyStore.load(null);
 
 	    if (!keyStore.containsAlias(KEY_ALIAS)) {

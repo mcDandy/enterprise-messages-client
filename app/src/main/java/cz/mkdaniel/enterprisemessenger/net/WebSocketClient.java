@@ -30,16 +30,18 @@ public class WebSocketClient {
     /**
      * Path of the binary chat WebSocket endpoint on the server (see server's {@code WebSocketConfig}).
      */
-    public static final String WS_PROTOCOL = "wss";
-    public static final String WS_HOST = "172.18.0.1";
-    public static final Short WS_PORT = 8443;
-    public static final String WS_ENDPOINT_PATH = "ws";
+    //public static final String WS_PROTOCOL = "wss"; 
+    //public static final String WS_HOST = "172.18.0.1";
+    //public static final Short WS_PORT = 32769/*8443*/;
+    //public static final Integer WS_PORT = 32778/*8443*/;
+    //public static final String WS_ENDPOINT_PATH = "wss";
 
     private final CryptoManager cryptoManager;
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private final AtomicBoolean isConnected = new AtomicBoolean(false);
     private final OkHttpClient okHttpClient;
-    private final String currentUrl = String.format("%s://%s:%d/%s", WS_PROTOCOL, WS_HOST, WS_PORT, WS_ENDPOINT_PATH);
+    //private final String currentUrl = String.format("%s://%s:%d/%s", WS_PROTOCOL, WS_HOST, WS_PORT, WS_ENDPOINT_PATH);
+    private final currentUrl;
 
     private WebSocket webSocket;
     private WebSocketClientListener listener;
@@ -49,12 +51,12 @@ public class WebSocketClient {
     public interface WebSocketClientListener {
         void onConnected(String url);
         void onPacketReceived(Packet packet);
-        default void onTextMessageReceived(String text) {}
         void onDisconnected();
         void onError(Throwable t);
     }
 
-    public WebSocketClient(CryptoManager cryptoManager) {
+    public WebSocketClient(final CryptoManager cryptoManager, final String currentServerIp) {
+	currentUrl = currentServerIp;
         this.cryptoManager = cryptoManager;
         this.okHttpClient = new OkHttpClient.Builder()
                 .connectTimeout(DEFAULT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
@@ -84,19 +86,21 @@ public class WebSocketClient {
      *
      * Close existing connection, if any.
      */
-    public void connectAsync(final String url) {
+    public void connectAsync(final String url, final String token) {
         executor.execute(() -> {
             try {
                 disconnectInternal(false);
-                Log.d(TAG, "Connecting to WebSocket URL: " + currentUrl);
+                Log.d(TAG, "Connecting to WebSocket URL: " + currentUrl + " with token: " + token);
 
                 final var request = new Request
 		    .Builder()
 		    .url(currentUrl)
 		    .addHeader("Authorization", String.format("Bearer %s", token))
+		    .addHeader("Upgrade", "websocket")
+		    .addHeader("Connection", "Upgrade")
 		    .build();
-                webSocket = okHttpClient.newWebSocket(request, createWebSocketListener());
 
+                webSocket = okHttpClient.newWebSocket(request, createWebSocketListener());
             } catch (Exception e) {
                 Log.e(TAG, "Failed to initiate WebSocket connection to " + url, e);
                 isConnected.set(false);
