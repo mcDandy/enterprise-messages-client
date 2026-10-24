@@ -5,16 +5,29 @@ import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
 
+import com.google.android.gms.tasks.Tasks;
+import com.google.firebase.messaging.FirebaseMessaging;
+
+import org.json.JSONArray;
 import org.json.JSONObject;
 import org.json.JSONArray;
 
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 
+import java.security.MessageDigest;
+
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+
+import cz.mkdaniel.enterprisemessenger.crypto.CryptoManager;
+import cz.mkdaniel.enterprisemessenger.ui.message.Message;
+import cz.mkdaniel.enterprisemessenger.ui.transform.Room;
 
 import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
@@ -27,7 +40,9 @@ import cz.mkdaniel.enterprisemessenger.ui.message.Message;
 
 /**
  * Singleton manager handling WebSocket protocol exchanges and HTTP Auth with Enterprise Messenger servers.
- * Implements Auth login/register, Handshake, Key Exchange, Channel Join, and Encrypted Chat Message transmission.
+ * <p>
+ * Flow: REST login/register -> FCM token upload -> WebSocket {@code /ws?token=JWT} -> CHANNEL_JOIN ->
+ * end-to-end encrypted CHAT_MESSAGE_ENC packets.
  */
 public class ServerConnectionManager implements WebSocketClient.WebSocketClientListener {
     public static final String HTTPS_PROTOCOL = "https";
@@ -51,11 +66,45 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 
     private String currentRoomId = "";
     private String jwtToken = "";
+    private long visibleChannelId;
 
     public interface ConnectionListener {
 	void onConnectionStateChanged(boolean connected, String serverIp);
 	void onMessageReceived(Message message);
 	void onError(String errorMessage);
+    }
+
+    public void setVisibleChannel(long channelId) {
+        visibleChannelId = channelId;
+    }
+
+    public boolean isChannelVisible(long channelId) {
+        return channelId >= 0 && channelId == visibleChannelId;
+    }
+
+    /**
+     * Shared secret a channel's AES key is derived from.
+     * <p>
+     * TODO: the server only stores channel key hashes and has no key distribution yet, so every
+     * member derives the same key from the channel id. Replace once channel keys are exchanged
+     * via the members' public keys.
+     */
+    public static String defaultChannelSecret(long channelId) {
+        return "ems-channel-" + channelId;
+    }
+
+    /**
+     * Room ids are server channel ids ("42"); legacy placeholder ids ("r1") map to their digits.
+     */
+    public static long parseChannelId(String roomId) {
+        if (roomId == null) return -1L;
+        String numericOnly = roomId.replaceAll("\\D+", "");
+        if (numericOnly.isEmpty()) return -1L;
+        try {
+            return Long.parseLong(numericOnly);
+        } catch (NumberFormatException e) {
+            return -1L;
+        }
     }
 
     private ServerConnectionManager(Context context) {
@@ -396,7 +445,7 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 		return;
 	    }
 
-	    webSocketClient.setChannelEncryptionKey(encryptionKey);
+//	    webSocketClient.setChannelEncryptionKey(encryptionKey);
 	    byte[] textBytes = text.getBytes(StandardCharsets.UTF_8);
 
 	    Packet messagePacket = new Packet(Packet.TYPE_CHAT_MESSAGE, textBytes);

@@ -57,7 +57,7 @@ public class CryptoManager { // TODO: this is a god class anti-pattern, and it m
     /**
      * private byte[] senderKey;
      */
-    private final map<UUID, PrivateKey> messageKeyLookupRegistry = new ConcurrentHashMap<>();
+    private final Map<UUID, PrivateKey> messageKeyLookupRegistry = new ConcurrentHashMap<>();
     /** 
      * n keyPair for n members?
      */    
@@ -229,7 +229,7 @@ public class CryptoManager { // TODO: this is a god class anti-pattern, and it m
      * Generate new AES 512 key rotation secret symmetric sender key.
      */
     public byte[] generateSenderSymmetricSecretRotatedKey() {
-	return new byte[];
+	return new byte[0];
     }
 
     /*public byte[] hashKey(final byte[] key) throws Exception {

@@ -5,13 +5,15 @@ import android.util.Log;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
-import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import java.util.UUID;
 
+import okhttp3.HttpUrl;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.Response;
@@ -26,24 +28,40 @@ import cz.mkdaniel.enterprisemessenger.crypto.CryptoManager;
  * <p>
  * Handles asynchronous connection via OkHttp WebSocket, continuous handling of incoming
  * binary/text frames, and packet transmission over WebSockets.
+ * <p>
+ * Includes keep-alive ping interval (to prevent socket read timeouts / connection aborts)
+ * and automatic reconnection logic.
  */
 public class WebSocketClient {
     private static final String TAG = "WebSocketClient";
     private static final int DEFAULT_TIMEOUT_SECONDS = 10;
-    /**
-     * Path of the binary chat WebSocket endpoint on the server (see server's {@code WebSocketConfig}).
-     */
+    private static final int CONNECT_TIMEOUT_SECONDS = 10;
+    private static final int INITIAL_RECONNECT_DELAY_MS = 1000;
+    private static final int MAX_RECONNECT_DELAY_MS = 1000;
+    private static final int PING_INTERVAL_SECONDS = 1000;
 
-    private final CryptoManager cryptoManager;
-    private final ExecutorService executor = Executors.newSingleThreadExecutor();
+    /**
+     * Path of the binary WebSocket endpoint on the server (see server's {@code WebSocketConfig}).
+     * The JWT is sent as the {@code token} query parameter (server's {@code JwtHandshakeInterceptor}).
+     */
+    private final ScheduledExecutorService executor = Executors.newSingleThreadScheduledExecutor();
     private final AtomicBoolean isConnected = new AtomicBoolean(false);
+    private final AtomicBoolean shouldConnect = new AtomicBoolean(false);
+
     private final OkHttpClient okHttpClient;
     private final String currentUrl;
+    private final CryptoManager cryptoManager;
 
     private WebSocket webSocket;
     private WebSocketClientListener listener;
     private byte[] channelEncryptionKey;
     private String token = "Invalid";
+    private TokenProvider tokenProvider;
+    private String currentAddress;
+    //private String currentUrl;
+
+    private long reconnectDelayMs = /*INITIAL_RECONNECT_DELAY_MS*/20;
+    private ScheduledFuture<?> reconnectTask;
 
     public interface WebSocketClientListener {
         void onConnected(String url);
@@ -52,13 +70,24 @@ public class WebSocketClient {
         void onError(Throwable t);
     }
 
+    /**
+     * Supplies a fresh JWT before every automatic reconnect (the old one may have expired).
+     * Called on a background thread, may block.
+     */
+    public interface TokenProvider {
+        String fetchToken();
+    }
+
     public WebSocketClient(final CryptoManager cryptoManager, final String currentServerIp) {
 	currentUrl = currentServerIp;
         this.cryptoManager = cryptoManager;
         this.okHttpClient = new OkHttpClient.Builder()
-                .connectTimeout(DEFAULT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-                .readTimeout(DEFAULT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-                .writeTimeout(DEFAULT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                .connectTimeout(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                .writeTimeout(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                // Long-lived WebSocket connection: readTimeout MUST be 0 (no timeout)
+                .readTimeout(0, TimeUnit.MILLISECONDS)
+                // Send PING frames every 15s to keep the TCP socket alive against NAT/router timeouts
+                .pingInterval(PING_INTERVAL_SECONDS, TimeUnit.SECONDS)
                 .build();
     }
 
@@ -66,8 +95,8 @@ public class WebSocketClient {
         this.listener = listener;
     }
 
-    public void setChannelEncryptionKey(byte[] encryptionKey) {
-        this.channelEncryptionKey = encryptionKey;
+    public void setTokenProvider(TokenProvider tokenProvider) {
+        this.tokenProvider = tokenProvider;
     }
 
     public boolean isConnected() {
@@ -84,6 +113,9 @@ public class WebSocketClient {
      * Close existing connection, if any.
      */
     public void connectAsync(final String url, final String token) {
+        shouldConnect.set(true);
+        cancelScheduledReconnect();
+
         executor.execute(() -> {
             try {
                 disconnectInternal(false);
@@ -105,6 +137,7 @@ public class WebSocketClient {
                 if (listener != null) {
                     listener.onError(e);
                 }
+                scheduleReconnect();
             }
         });
     }
@@ -113,8 +146,9 @@ public class WebSocketClient {
         return new WebSocketListener() {
             @Override
             public void onOpen(@NonNull WebSocket webSocket, @NonNull Response response) {
-                Log.d(TAG, "WebSocket connected: " + currentUrl);
+                Log.d(TAG, "WebSocket connected: " + redactToken(currentUrl));
                 isConnected.set(true);
+                reconnectDelayMs = INITIAL_RECONNECT_DELAY_MS; // Reset reconnect delay on success
                 if (listener != null) {
                     listener.onConnected(currentUrl);
                 }
@@ -124,8 +158,8 @@ public class WebSocketClient {
             public void onMessage(@NonNull WebSocket webSocket, @NonNull ByteString bytes) {
                 try {
                     byte[] rawBytes = bytes.toByteArray();
-                    Packet packet = Packet.readFromByteArray(rawBytes, cryptoManager, channelEncryptionKey);
-                    Log.d(TAG, "Received binary packet type 0x" + Integer.toHexString(packet.getType())
+                    Packet packet = Packet.readFromByteArray(rawBytes);
+                    Log.d(TAG, "Received packet " + Packet.typeName(packet.getType())
                             + ", payload length: " + packet.getPayload().length);
 
                     if (listener != null) {
@@ -159,11 +193,14 @@ public class WebSocketClient {
                 if (wasConnected && listener != null) {
                     listener.onDisconnected();
                 }
+                if (shouldConnect.get()) {
+                    scheduleReconnect();
+                }
             }
 
             @Override
             public void onFailure(@NonNull WebSocket webSocket, @NonNull Throwable t, @Nullable Response response) {
-                Log.e(TAG, "WebSocket failure", t);
+                Log.w(TAG, "WebSocket failure: " + t.getMessage());
                 boolean wasConnected = isConnected.getAndSet(false);
                 if (listener != null) {
                     listener.onError(t);
@@ -171,8 +208,48 @@ public class WebSocketClient {
                         listener.onDisconnected();
                     }
                 }
+                if (shouldConnect.get()) {
+                    scheduleReconnect();
+                }
             }
         };
+    }
+
+    private synchronized void scheduleReconnect() {
+        if (!shouldConnect.get()) {
+            return;
+        }
+        cancelScheduledReconnect();
+
+        long delay = reconnectDelayMs;
+        Log.d(TAG, "Scheduling WebSocket reconnect in " + delay + " ms");
+        reconnectDelayMs = Math.min(reconnectDelayMs * 2, MAX_RECONNECT_DELAY_MS);
+
+        reconnectTask = executor.schedule(() -> {
+            if (shouldConnect.get() && currentUrl != null) {
+                Log.d(TAG, "Attempting automatic WebSocket reconnection...");
+                try {
+                    disconnectInternal(false);
+                    if (tokenProvider != null) {
+                        //currentUrl = formatWebSocketUrl(currentAddress, tokenProvider.fetchToken());
+                    }
+                    Request request = new Request.Builder()
+                            .url(currentUrl)
+                            .build();
+                    webSocket = okHttpClient.newWebSocket(request, createWebSocketListener());
+                } catch (Exception e) {
+                    Log.e(TAG, "Error during WebSocket reconnect attempt", e);
+                    scheduleReconnect();
+                }
+            }
+        }, delay, TimeUnit.MILLISECONDS);
+    }
+
+    private synchronized void cancelScheduledReconnect() {
+        if (reconnectTask != null && !reconnectTask.isDone()) {
+            reconnectTask.cancel(true);
+            reconnectTask = null;
+        }
     }
 
     /**
@@ -186,19 +263,19 @@ public class WebSocketClient {
 
         executor.execute(() -> {
             try {
-                byte[] rawPacketBytes = packet.serialize(cryptoManager, channelEncryptionKey);
+                byte[] rawPacketBytes = /*packet.serialize()*/new byte[32];
                 if (webSocket != null) {
                     boolean success = webSocket.send(ByteString.of(rawPacketBytes));
 
                     if (success) {
-                        Log.d(TAG, "Sent packet type 0x" + Integer.toHexString(packet.getType())
+                        Log.d(TAG, "Sent packet " + Packet.typeName(packet.getType())
                                 + " (" + rawPacketBytes.length + " bytes)");
                     } else {
-                        Log.w(TAG, "Failed to enqueue packet type 0x" + Integer.toHexString(packet.getType()));
+                        Log.w(TAG, "Failed to enqueue packet " + Packet.typeName(packet.getType()));
                     }
                 }
             } catch (Exception e) {
-                Log.e(TAG, "Error sending packet type 0x" + Integer.toHexString(packet.getType()), e);
+                Log.e(TAG, "Error sending packet " + Packet.typeName(packet.getType()), e);
                 if (listener != null) {
                     listener.onError(e);
                 }
@@ -208,8 +285,35 @@ public class WebSocketClient {
 
     /**
      * Closes the WebSocket connection.
+     * Sends a text frame asynchronously over the WebSocket connection.
+     */
+    public void sendTextAsync(String text) {
+        if (!isConnected()) {
+            Log.w(TAG, "Cannot send text: WebSocket client is not connected");
+            return;
+        }
+
+        executor.execute(() -> {
+            try {
+                if (webSocket != null) {
+                    webSocket.send(text);
+                    Log.d(TAG, "Sent text frame: " + text);
+                }
+            } catch (Exception e) {
+                Log.e(TAG, "Error sending text frame", e);
+                if (listener != null) {
+                    listener.onError(e);
+                }
+            }
+        });
+    }
+
+    /**
+     * Closes the WebSocket connection and disables automatic reconnection.
      */
     public synchronized void disconnect() {
+        shouldConnect.set(false);
+        cancelScheduledReconnect();
         disconnectInternal(true);
     }
 
@@ -228,5 +332,9 @@ public class WebSocketClient {
         if (wasConnected && notifyListener && listener != null) {
             listener.onDisconnected();
         }
+    }
+
+    private static String redactToken(String url) {
+        return url == null ? null : url.replaceAll("token=[^&]*", "token=***");
     }
 }

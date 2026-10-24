@@ -1,9 +1,9 @@
 package cz.mkdaniel.enterprisemessenger.net;
 
-import java.io.ByteArrayInputStream;
-import java.io.DataInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.DataInputStream;
+import java.io.ByteArrayInputStream;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -11,9 +11,11 @@ import java.nio.ByteOrder;
 import cz.mkdaniel.enterprisemessenger.crypto.CryptoManager;
 
 /**
- * Represents a binary TCP packet for Enterprise Messenger.
+ * Represents a binary WebSocket packet for Enterprise Messenger.
  * <p>
- * Binary Wire Format:
+ * Must stay in sync with the server's {@code PacketCodec} / {@code PacketType}.
+ * <p>
+ * Binary Wire Format (one WebSocket binary frame = one packet):
  * <pre>
  * +-----------------------------------+-----------------------------------+
  * | Field                             | Size                              |
@@ -24,15 +26,14 @@ import cz.mkdaniel.enterprisemessenger.crypto.CryptoManager;
  * +-----------------------------------+-----------------------------------+
  * </pre>
  * <p>
- * The 4-byte Payload Length header remains UNENCRYPTED so the TCP receiver can
- * frame incoming stream packets without needing to decrypt the header first.
+ * Authentication is no longer a packet: the JWT is passed as the {@code token} query
+ * parameter of the WebSocket handshake. End-to-end encryption of chat payloads is done
+ * by the caller before the payload is put into a packet (the server only stores ciphertext).
  */
 public class Packet {
 	public static final short TYPE_UNKNOWN = 0x0000; // rename to ERROR
 	public static final short TYPE_CHAT_MESSAGE = 0x1;
 	public static final short TYPE_KEY_ROTATION = 0xa;
-	//public static final short TYPE_SOLICITE_PUBLIC_KEY = 0xb; // inspired by ipv6
-	//public static final short TYPE_ADVERTISE_PUBLIC_KEY = 0xc; // inspired by ipv6
 	public static final short TYPE_UNICAST_ROTATED_KEY = 0xd;
 
 	private final int type;
@@ -118,7 +119,27 @@ public class Packet {
 		}
 	}
 
+	public static String typeName(byte type) {
+	    switch (type) {
+		case TYPE_UNKNOWN: return "UNKNOWN";
+		case TYPE_CHAT_MESSAGE: return "CHAT_MESSAGE";
+		case TYPE_KEY_ROTATION: return "KEY_ROTATION";
+		case TYPE_UNICAST_ROTATED_KEY: return "UNICAST_ROTATED_KEY";
+		default: return String.format("0x%02x", type);
+	    }
+	}
+
+	public static String typeName(int type) {
+	    switch (type) {
+		case TYPE_UNKNOWN: return "UNKNOWN";
+		case TYPE_CHAT_MESSAGE: return "CHAT_MESSAGE";
+		case TYPE_KEY_ROTATION: return "KEY_ROTATION";
+		case TYPE_UNICAST_ROTATED_KEY: return "UNICAST_ROTATED_KEY";
+		default: return String.format("0x%02x", type);
+	    }
+	}
+
 	public static Packet readFromByteArray(byte[] data) throws Exception {
-		return readFromByteArray(data, null, null);
+	    return readFromByteArray(data, null, null);
 	}
 }

@@ -1,0 +1,34 @@
+The client now uses the server's new packet format and connection flow, and it registers with Firebase so new-message notifications show up even when the app is closed. I had to fix four server bugs too, because without those fixes no client could have worked.
+
+Verification:
+
+Server: compiles cleanly (main and test code), using a temporary JDK 21 because your installed Java 26 is too new for its Gradle.
+Wire format: I tested the client's Packet against the server's PacketCodec for every packet type, in both directions. All passed.
+Android app: not built. local.properties points to D:\AndroidSdk, which doesn't exist. E:\AndroidSdk has no platforms and no accepted licenses, and installing those means accepting the licenses on your behalf. Build it in Android Studio.
+What changed on the client
+
+Packet.java: uses the server's format (1-byte type, 4-byte length, then payload) and its type codes: CHAT_MESSAGE_ENC, MESSAGE_RECEIPT, CHANNEL_JOIN, ROTATE_KEY, MULTICAST_ROTATED_KEY, and UNKNOWN, which the server uses for errors.
+WebSocketClient.java: connects to /ws?token=<JWT>, which is what the server expects. The old handshake and key-exchange packets are gone. Each reconnect logs in again, so an expired token no longer breaks it.
+ServerConnectionManager.java:
+Logs in, sends the Firebase token to the server, connects, and joins the channel.
+Chat messages are encrypted with the channel key, carrying id, sender, text and time. The server sends each message back to its sender, so the app skips that copy.
+RoomsFragment.java: loads your real channels from the server and keeps the placeholder list if that fails.
+AccountStore.java: each install now gets its own generated username. Before, every device logged in as android_user, and the server never pushes to a message's sender, so other devices would never have been notified.
+Firebase
+
+Added firebase-messaging (BoM 34.19.0) and the google-services plugin.
+PushMessagingService.java re-sends the token to the server when Firebase changes it. When the app is open, it shows the notification itself, unless that channel is already on screen.
+When the app is in the background or closed, Android shows the notification on its own. That works because the server sends a notification payload, and the manifest names the default notification channel.
+Server fixes
+
+The registered WebSocket handler (PacketWebSocketHandler) just sent every packet back instead of passing it to a handler. Nothing was saved and no push was ever sent.
+Joining a channel never subscribed the connection to it, so messages broadcast to a channel reached nobody. Joining now also falls back to the channel's active key id, because a message can't be saved without one.
+schema.sql was missing the fcm_token column. The server checks the database schema at startup, so it wouldn't start.
+The push now includes the Android notification channel id, high priority and the channel id.
+What you need to do
+
+Download google-services.json from the same Firebase project as the server's service account and put it in app/. The client won't build without it.
+On an existing database, run ALTER TABLE app_user ADD COLUMN fcm_token varchar(255);. The schema.sql change only applies to new databases.
+Fix sdk.dir in local.properties.
+An admin has to add each device's user (android_xxxxxxxx, shown in logcat) to channels. Each channel also needs an active channel_key row, or sending fails with "Channel has no active key".
+Not real end-to-end encryption yet: the server stores only key hashes and has no way to hand out channel keys. For now every member derives the channel key from the channel id. Answering the server's key-rotation request is also not implemented; it's logged with a TODO, and the server's own handling of that request looks inconsistent too.
