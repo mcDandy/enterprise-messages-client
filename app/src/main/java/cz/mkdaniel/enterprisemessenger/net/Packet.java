@@ -2,9 +2,13 @@ package cz.mkdaniel.enterprisemessenger.net;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.DataInputStream;
+import java.io.ByteArrayInputStream;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+
+import cz.mkdaniel.enterprisemessenger.crypto.CryptoManager;
 
 /**
  * Represents a binary WebSocket packet for Enterprise Messenger.
@@ -27,10 +31,10 @@ import java.nio.ByteOrder;
  * by the caller before the payload is put into a packet (the server only stores ciphertext).
  */
 public class Packet {
-	public static final short TYPE_UNKNOWN = 0x0000;
-	public static final short TYPE_CHAT_MESSAGE = 0x0002;
-	public static final short TYPE_ROTATE_KEY = 0xa;
-	public static final short TYPE_MULTICAST_ROTATED_KEY = 0xb;
+	public static final short TYPE_UNKNOWN = 0x0000; // rename to ERROR
+	public static final short TYPE_CHAT_MESSAGE = 0x1;
+	public static final short TYPE_KEY_ROTATION = 0xa;
+	public static final short TYPE_UNICAST_ROTATED_KEY = 0xd;
 
 	private final int type;
 	private final int payloadLength;
@@ -115,7 +119,27 @@ public class Packet {
 		}
 	}
 
+	public static String typeName(byte type) {
+	    switch (type) {
+		case TYPE_UNKNOWN: return "UNKNOWN";
+		case TYPE_CHAT_MESSAGE: return "CHAT_MESSAGE";
+		case TYPE_KEY_ROTATION: return "KEY_ROTATION";
+		case TYPE_UNICAST_ROTATED_KEY: return "UNICAST_ROTATED_KEY";
+		default: return String.format("0x%02x", type);
+	    }
+	}
+
+	public static String typeName(int type) {
+	    switch (type) {
+		case TYPE_UNKNOWN: return "UNKNOWN";
+		case TYPE_CHAT_MESSAGE: return "CHAT_MESSAGE";
+		case TYPE_KEY_ROTATION: return "KEY_ROTATION";
+		case TYPE_UNICAST_ROTATED_KEY: return "UNICAST_ROTATED_KEY";
+		default: return String.format("0x%02x", type);
+	    }
+	}
+
 	public static Packet readFromByteArray(byte[] data) throws Exception {
-		return readFromByteArray(data, null, null);
+	    return readFromByteArray(data, null, null);
 	}
 }

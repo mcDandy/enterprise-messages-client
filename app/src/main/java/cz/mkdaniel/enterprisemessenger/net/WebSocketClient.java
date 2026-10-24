@@ -11,6 +11,8 @@ import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import java.util.UUID;
+
 import okhttp3.HttpUrl;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
@@ -18,6 +20,8 @@ import okhttp3.Response;
 import okhttp3.WebSocket;
 import okhttp3.WebSocketListener;
 import okio.ByteString;
+
+import cz.mkdaniel.enterprisemessenger.crypto.CryptoManager;
 
 /**
  * Manages WebSocket connections for binary packet transport and messaging.
@@ -29,38 +33,39 @@ import okio.ByteString;
  * and automatic reconnection logic.
  */
 public class WebSocketClient {
-
     private static final String TAG = "WebSocketClient";
+    private static final int DEFAULT_TIMEOUT_SECONDS = 10;
     private static final int CONNECT_TIMEOUT_SECONDS = 10;
-    private static final int PING_INTERVAL_SECONDS = 15;
-
-    private static final long INITIAL_RECONNECT_DELAY_MS = 2_000L;
-    private static final long MAX_RECONNECT_DELAY_MS = 30_000L;
+    private static final int INITIAL_RECONNECT_DELAY_MS = 1000;
+    private static final int MAX_RECONNECT_DELAY_MS = 1000;
+    private static final int PING_INTERVAL_SECONDS = 1000;
 
     /**
      * Path of the binary WebSocket endpoint on the server (see server's {@code WebSocketConfig}).
      * The JWT is sent as the {@code token} query parameter (server's {@code JwtHandshakeInterceptor}).
      */
-    public static final String WS_ENDPOINT_PATH = "/ws";
-
     private final ScheduledExecutorService executor = Executors.newSingleThreadScheduledExecutor();
     private final AtomicBoolean isConnected = new AtomicBoolean(false);
     private final AtomicBoolean shouldConnect = new AtomicBoolean(false);
 
     private final OkHttpClient okHttpClient;
+    private final String currentUrl;
+    private final CryptoManager cryptoManager;
+
     private WebSocket webSocket;
     private WebSocketClientListener listener;
+    private byte[] channelEncryptionKey;
+    private String token = "Invalid";
     private TokenProvider tokenProvider;
     private String currentAddress;
-    private String currentUrl;
+    //private String currentUrl;
 
-    private long reconnectDelayMs = INITIAL_RECONNECT_DELAY_MS;
+    private long reconnectDelayMs = /*INITIAL_RECONNECT_DELAY_MS*/20;
     private ScheduledFuture<?> reconnectTask;
 
     public interface WebSocketClientListener {
         void onConnected(String url);
         void onPacketReceived(Packet packet);
-        default void onTextMessageReceived(String text) {}
         void onDisconnected();
         void onError(Throwable t);
     }
@@ -73,7 +78,9 @@ public class WebSocketClient {
         String fetchToken();
     }
 
-    public WebSocketClient() {
+    public WebSocketClient(final CryptoManager cryptoManager, final String currentServerIp) {
+	currentUrl = currentServerIp;
+        this.cryptoManager = cryptoManager;
         this.okHttpClient = new OkHttpClient.Builder()
                 .connectTimeout(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
                 .writeTimeout(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
@@ -101,32 +108,32 @@ public class WebSocketClient {
     }
 
     /**
-     * Asynchronously connects to the remote WebSocket server (e.g. 10.0.2.2:8080 -> ws://10.0.2.2:8080/ws?token=...).
+     * Asynchronously connects to the remote WebSocket URL.
      *
-     * @param url      server address in any form accepted by {@link #formatWebSocketUrl(String, String)}
-     * @param jwtToken JWT obtained from {@code /api/auth/login}; the server rejects the handshake without it
+     * Close existing connection, if any.
      */
-    public void connectAsync(String url, String jwtToken) {
+    public void connectAsync(final String url, final String token) {
         shouldConnect.set(true);
         cancelScheduledReconnect();
 
         executor.execute(() -> {
             try {
-                disconnectInternal(false); // Close existing connection if any
+                disconnectInternal(false);
+                Log.d(TAG, "Connecting to WebSocket URL: " + currentUrl + " with token: " + token);
 
-                this.currentAddress = url;
-                this.currentUrl = formatWebSocketUrl(url, jwtToken);
-                Log.d(TAG, "Connecting to WebSocket URL: " + redactToken(currentUrl));
-
-                Request request = new Request.Builder()
-                        .url(currentUrl)
-                        .build();
+                final var request = new Request
+		    .Builder()
+		    .url(currentUrl)
+		    .addHeader("Authorization", String.format("Bearer %s", token))
+		    .addHeader("Upgrade", "websocket")
+		    .addHeader("Connection", "Upgrade")
+		    .build();
 
                 webSocket = okHttpClient.newWebSocket(request, createWebSocketListener());
-
             } catch (Exception e) {
                 Log.e(TAG, "Failed to initiate WebSocket connection to " + url, e);
                 isConnected.set(false);
+
                 if (listener != null) {
                     listener.onError(e);
                 }
@@ -170,7 +177,6 @@ public class WebSocketClient {
             public void onMessage(@NonNull WebSocket webSocket, @NonNull String text) {
                 Log.d(TAG, "Received text frame: " + text);
                 if (listener != null) {
-                    listener.onTextMessageReceived(text);
                 }
             }
 
@@ -225,7 +231,7 @@ public class WebSocketClient {
                 try {
                     disconnectInternal(false);
                     if (tokenProvider != null) {
-                        currentUrl = formatWebSocketUrl(currentAddress, tokenProvider.fetchToken());
+                        //currentUrl = formatWebSocketUrl(currentAddress, tokenProvider.fetchToken());
                     }
                     Request request = new Request.Builder()
                             .url(currentUrl)
@@ -257,9 +263,10 @@ public class WebSocketClient {
 
         executor.execute(() -> {
             try {
-                byte[] rawPacketBytes = packet.serialize();
+                byte[] rawPacketBytes = /*packet.serialize()*/new byte[32];
                 if (webSocket != null) {
                     boolean success = webSocket.send(ByteString.of(rawPacketBytes));
+
                     if (success) {
                         Log.d(TAG, "Sent packet " + Packet.typeName(packet.getType())
                                 + " (" + rawPacketBytes.length + " bytes)");
@@ -277,6 +284,7 @@ public class WebSocketClient {
     }
 
     /**
+     * Closes the WebSocket connection.
      * Sends a text frame asynchronously over the WebSocket connection.
      */
     public void sendTextAsync(String text) {
@@ -324,40 +332,6 @@ public class WebSocketClient {
         if (wasConnected && notifyListener && listener != null) {
             listener.onDisconnected();
         }
-    }
-
-    /**
-     * Normalizes whatever is stored for a server (bare {@code ip:port}, {@code http(s)://…} or
-     * {@code ws(s)://…}) into an absolute WebSocket URL pointing at the server's {@code /ws}
-     * endpoint, with the JWT appended as the {@code token} query parameter.
-     */
-    static String formatWebSocketUrl(String input, String jwtToken) {
-        String url = (input == null || input.trim().isEmpty()) ? "127.0.0.1:8080" : input.trim();
-        if (url.startsWith("ws://")) {
-            url = "http://" + url.substring(5);
-        } else if (url.startsWith("wss://")) {
-            url = "https://" + url.substring(6);
-        } else if (!url.startsWith("http://") && !url.startsWith("https://")) {
-            url = "http://" + url;
-        }
-
-        HttpUrl parsed = HttpUrl.parse(url);
-        if (parsed == null) {
-            throw new IllegalArgumentException("Invalid server address: " + input);
-        }
-
-        HttpUrl.Builder builder = parsed.newBuilder().query(null);
-        // Empty path or old placeholders ("/ws", "/ws/chat") -> point at the real endpoint.
-        String path = parsed.encodedPath();
-        if (path.isEmpty() || path.equals("/") || path.startsWith("/ws")) {
-            builder.encodedPath(WS_ENDPOINT_PATH);
-        }
-        if (jwtToken != null && !jwtToken.isEmpty()) {
-            builder.addQueryParameter("token", jwtToken);
-        }
-
-        // OkHttp accepts http(s) URLs for WebSockets and upgrades them to ws(s) itself.
-        return builder.build().toString();
     }
 
     private static String redactToken(String url) {

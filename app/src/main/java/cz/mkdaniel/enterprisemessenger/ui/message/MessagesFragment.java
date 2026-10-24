@@ -158,8 +158,10 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
         if (connectionManager == null || serverIp == null || serverIp.isEmpty()) {
             return;
         }
+
         connectionManager.connectToServer(serverIp);
-        connectionManager.joinChannel(roomId, encryptionKey);
+        //connectionManager.joinRoom(roomId);
+        connectionManager.joinChannel(roomId/*, encryptionKey*/);
     }
 
     @Override
@@ -211,7 +213,7 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
         });
 
         // Encrypt with the channel key and transmit over WebSocket
-        connectionManager.sendChatMessage(messageId, text);
+        //connectionManager.sendChatMessage(messageId, "", text);
 
         inputField.setText("");
     }
