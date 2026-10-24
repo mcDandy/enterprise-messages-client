@@ -10,13 +10,16 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-import cz.mkdaniel.enterprisemessenger.crypto.CryptoManager;
+import java.util.UUID;
+
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.Response;
 import okhttp3.WebSocket;
 import okhttp3.WebSocketListener;
 import okio.ByteString;
+
+import cz.mkdaniel.enterprisemessenger.crypto.CryptoManager;
 
 /**
  * Manages WebSocket connections for binary packet transport and messaging.
@@ -30,18 +33,12 @@ public class WebSocketClient {
     /**
      * Path of the binary chat WebSocket endpoint on the server (see server's {@code WebSocketConfig}).
      */
-    //public static final String WS_PROTOCOL = "wss"; 
-    //public static final String WS_HOST = "172.18.0.1";
-    //public static final Short WS_PORT = 32769/*8443*/;
-    //public static final Integer WS_PORT = 32778/*8443*/;
-    //public static final String WS_ENDPOINT_PATH = "wss";
 
     private final CryptoManager cryptoManager;
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private final AtomicBoolean isConnected = new AtomicBoolean(false);
     private final OkHttpClient okHttpClient;
-    //private final String currentUrl = String.format("%s://%s:%d/%s", WS_PROTOCOL, WS_HOST, WS_PORT, WS_ENDPOINT_PATH);
-    private final currentUrl;
+    private final String currentUrl;
 
     private WebSocket webSocket;
     private WebSocketClientListener listener;
@@ -146,7 +143,6 @@ public class WebSocketClient {
             public void onMessage(@NonNull WebSocket webSocket, @NonNull String text) {
                 Log.d(TAG, "Received text frame: " + text);
                 if (listener != null) {
-                    listener.onTextMessageReceived(text);
                 }
             }
 
@@ -193,6 +189,7 @@ public class WebSocketClient {
                 byte[] rawPacketBytes = packet.serialize(cryptoManager, channelEncryptionKey);
                 if (webSocket != null) {
                     boolean success = webSocket.send(ByteString.of(rawPacketBytes));
+
                     if (success) {
                         Log.d(TAG, "Sent packet type 0x" + Integer.toHexString(packet.getType())
                                 + " (" + rawPacketBytes.length + " bytes)");

@@ -30,9 +30,9 @@ import cz.mkdaniel.enterprisemessenger.crypto.CryptoManager;
 public class Packet {
 	public static final short TYPE_UNKNOWN = 0x0000; // rename to ERROR
 	public static final short TYPE_CHAT_MESSAGE = 0x1;
-	public static final short TYPE_ROTATE_KEY = 0xa;
-	public static final short TYPE_SOLICITE_PUBLIC_KEY = 0xb; // inspired by ipv6
-	public static final short TYPE_ADVERTISE_PUBLIC_KEY = 0xc; // inspired by ipv6
+	public static final short TYPE_KEY_ROTATION = 0xa;
+	//public static final short TYPE_SOLICITE_PUBLIC_KEY = 0xb; // inspired by ipv6
+	//public static final short TYPE_ADVERTISE_PUBLIC_KEY = 0xc; // inspired by ipv6
 	public static final short TYPE_UNICAST_ROTATED_KEY = 0xd;
 
 	private final int type;

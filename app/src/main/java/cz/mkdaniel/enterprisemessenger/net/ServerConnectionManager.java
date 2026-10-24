@@ -6,30 +6,34 @@ import android.os.Looper;
 import android.util.Log;
 
 import org.json.JSONObject;
+import org.json.JSONArray;
 
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-import cz.mkdaniel.enterprisemessenger.crypto.CryptoManager;
-import cz.mkdaniel.enterprisemessenger.ui.message.Message;
 import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.RequestBody;
 import okhttp3.Response;
 
+import cz.mkdaniel.enterprisemessenger.crypto.CryptoManager;
+import cz.mkdaniel.enterprisemessenger.ui.message.Message;
+
 /**
  * Singleton manager handling WebSocket protocol exchanges and HTTP Auth with Enterprise Messenger servers.
  * Implements Auth login/register, Handshake, Key Exchange, Channel Join, and Encrypted Chat Message transmission.
  */
 public class ServerConnectionManager implements WebSocketClient.WebSocketClientListener {
-    public static final String WS_PROTOCOL = "wss"; 
+    public static final String HTTPS_PROTOCOL = "https";
+    public static final String WS_PROTOCOL = "wss";
     public static final String WS_HOST = "172.18.0.1";
-    public static final Integer WS_PORT = 32778;
+    public static final Integer WS_PORT = 32779;
     public static final String WS_ENDPOINT_PATH = "wss";
 
     private static final String TAG = "ServerConnectionManager";
@@ -42,9 +46,9 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final Set<ConnectionListener> listeners = new CopyOnWriteArraySet<>();
-    private final String currentServerIp = String.format("%s://%s:%d/%s", WS_PROTOCOL, WS_HOST, WS_PORT, WS_ENDPOINT_PATH);
+    private final String currentServerHTTPIp = String.format("%s://%s:%d", HTTPS_PROTOCOL, WS_HOST, WS_PORT);
+    private final String currentServerWSIp = String.format("%s://%s:%d/%s", WS_PROTOCOL, WS_HOST, WS_PORT, WS_ENDPOINT_PATH);
 
-    //private String currentServerIp = "";
     private String currentRoomId = "";
     private String jwtToken = "";
 
@@ -56,7 +60,7 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 
     private ServerConnectionManager(Context context) {
 	this.cryptoManager = CryptoManager.getInstance(context);
-	this.webSocketClient = new WebSocketClient(cryptoManager, currentServerIp);
+	this.webSocketClient = new WebSocketClient(cryptoManager, currentServerWSIp);
 	this.webSocketClient.setListener(this);
 	this.httpClient = new OkHttpClient();
     }
@@ -86,45 +90,69 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
     }
 
     public String getCurrentServerIp() {
-	return currentServerIp;
+	return currentServerHTTPIp;
     }
 
     /**
      * Authenticates via REST API (if needed) and connects to remote WebSocket server.
      */
     public void connectToServer(String serverIp) {
-	if (webSocketClient.isConnected() && serverIp.equalsIgnoreCase(currentServerIp)) {
+	if (webSocketClient.isConnected() && serverIp.equalsIgnoreCase(currentServerHTTPIp)) {
 	    Log.d(TAG, "Already connected to " + serverIp);
 	    notifyStateChanged(true, serverIp);
 
 	    return;
 	}
 
-	this.currentServerIp = serverIp;
-
-	Log.d(TAG, "Initiating authentication & connection to: " + serverIp);
-	executor.execute(() -> fetchJwtTokenAndConnect(serverIp));
+	Log.d(TAG, "Initiating authentication & connection to: " + currentServerHTTPIp);
+	executor.execute(() -> fetchJwtTokenAndConnect(currentServerHTTPIp));
     }
 
     private void fetchJwtTokenAndConnect(String serverIp) {
-	String httpUrl = "https://172.18.0.1:32778"/*formatHttpUrl(serverIp)*/;
-	String username = "android_user";
-	String password = "GuestPassword123";
-	String pubKey = cryptoManager.getPublicKeyBase64();
+	try {
+	final var username = "android_user";
+	final var password = "GuestPassword123";
+	var pubKey = cryptoManager.getPublicKeyBase64();
 
 	if (pubKey == null) pubKey = "dummyPublicKeyBase64StringForE2EE";
 
-	jwtToken = login(httpUrl, username, password);
+	jwtToken = login("", username, password);
 
 	if (jwtToken.isEmpty()) {
-	    jwtToken = register(httpUrl, username, password, pubKey);
+	    jwtToken = register("", username, password, pubKey);
 	}
 
 	if (jwtToken.isEmpty()) {
-	    Log.w(TAG, "No JWT token obtained from " + httpUrl + ", server will reject unauthenticated packets");
+	    Log.w(TAG, "No JWT token obtained from " + currentServerHTTPIp + ", server will reject unauthenticated packets");
 	}
 
 	webSocketClient.connectAsync(serverIp, jwtToken);
+
+	Log.d(TAG, "retrieving servers");
+//makePOSTRequest("/api/servers", new JSONObject().put("name", "test").put("type", "ORGANIZATION"));
+	final var servers = makeGETRequestCollection("/api/servers");
+
+	Log.d(TAG, servers.toString());
+//makePOSTRequest("/api/servers/1/channels", new JSONObject().put("name", "test"));
+
+	final var channels = makeGETRequestCollection("/api/servers/1/channels");
+
+	Log.d(TAG, channels.toString());
+
+//makePOSTRequest("/api/servers/1/channels/1/members", new JSONObject().put("username", "android_user"));
+	final var memberships = makeGETRequestCollection("/api/servers/1/channels/1/members");
+
+	Log.d(TAG, memberships.toString());
+
+	for (var i = 0; i < memberships.length(); ++i) {
+	    Log.d(TAG, makeGETRequest("/api/users/" + memberships.getJSONObject(i).get("userId") +  "/key").toString());
+	
+	    // update key map/store
+	}
+	}
+	catch (final Exception exception) {
+	    Log.e(TAG, exception.toString());
+	}
     }
 
     /**
@@ -132,35 +160,158 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
      */
     private String login(String httpUrl, String username, String password) {
 	try {
-	    JSONObject loginJson = new JSONObject();
+	    final var loginJson = new JSONObject();
+
 	    loginJson.put("username", username);
 	    loginJson.put("password", password);
 
-	    RequestBody body = RequestBody.create(
-		    loginJson.toString(),
-		    MediaType.parse("application/json; charset=utf-8")
-		    );
+	    final var resObj = makePOSTRequest("/api/auth/login", loginJson);
+	    final var token = resObj.optString("token", "");
 
-	    Request loginRequest = new Request.Builder()
-		.url(httpUrl + "/api/auth/login")
-		.post(body)
-		.build();
+	    Log.d(TAG, "Authentication successful, obtained JWT token");
 
-	    try (Response response = httpClient.newCall(loginRequest).execute()) {
-		if (response.isSuccessful() && response.body() != null) {
-		    String resStr = response.body().string();
-		    JSONObject resObj = new JSONObject(resStr);
-		    String token = resObj.optString("token", "");
-		    Log.d(TAG, "Authentication successful, obtained JWT token");
-
-		    return token;
-		}
-		Log.w(TAG, "Login failed with HTTP " + response.code());
-	    }
+	    return token;
 	} catch (Exception e) {
 	    Log.w(TAG, "Login request failed: " + e.getMessage());
+	
+	    return "";
 	}
-	return "";
+    }
+
+    private JSONObject makeGETRequest(final String endpoint) {
+	    final var loginRequest = new Request
+		.Builder()
+		.url(String.format("%s%s", currentServerHTTPIp, endpoint))
+		.addHeader("Authorization", String.format("Bearer %s", jwtToken))
+		.get()
+		.build();
+
+	    try (final var response = httpClient.newCall(loginRequest).execute()) {
+		Log.w(TAG, String.format("GET %s%s", currentServerHTTPIp, endpoint));
+
+		if (response.isSuccessful() && response.body() != null) {
+		    return new JSONObject(response.body().string());
+		}
+
+		Log.w(TAG, String.format("GET failed with HTTP status code: %s, and response: %s", response.code(), response));
+
+		return null;
+	    }
+	    catch (final Exception exception) {
+		Log.e(TAG, exception.toString());
+		exception.printStackTrace();
+
+		return null;
+	    }
+    }
+
+    private JSONArray makeGETRequestCollection(final String endpoint) {
+	    final var loginRequest = new Request
+		.Builder()
+		.url(String.format("%s%s", currentServerHTTPIp, endpoint))
+		.addHeader("Authorization", String.format("Bearer %s", jwtToken))
+		.get()
+		.build();
+
+	    try (final var response = httpClient.newCall(loginRequest).execute()) {
+		Log.w(TAG, String.format("GET %s%s", currentServerHTTPIp, endpoint));
+
+		if (response.isSuccessful() && response.body() != null) {
+		    final var resStr = response.body().string();
+
+		    return new JSONArray(resStr);
+		}
+
+		Log.w(TAG, String.format("GET failed with HTTP status code: %s, and response: %s", response.code(), response));
+
+		return null;
+	    }
+	    catch (final Exception exception) {
+		Log.e(TAG, exception.toString());
+		exception.printStackTrace();
+
+		return null;
+	    }
+    }
+    private JSONObject makePOSTRequest(final String endpoint, final JSONObject body) {
+	    final var requestBody = RequestBody.create(body.toString(), MediaType.parse("application/json; charset=utf-8"));
+	    final var loginRequest = new Request
+		.Builder()
+		.url(String.format("%s%s", currentServerHTTPIp, endpoint))
+		.addHeader("Authorization", String.format("Bearer %s", jwtToken))
+		.post(requestBody)
+		.build();
+
+	    try (final var response = httpClient.newCall(loginRequest).execute()) {
+		if (response.isSuccessful() && response.body() != null) {
+		    final var resStr = response.body().string();
+		    final var resObj = new JSONObject(resStr);
+		    
+		    return resObj;
+		}
+
+		Log.w(TAG, "POST failed with HTTP " + response.code());
+
+		return null;
+	    }
+	    catch (final Exception exception) {
+		Log.e(TAG, exception.toString());
+
+		return null;
+	    }
+    }
+
+    private JSONObject makePUTRequest(final String endpoint, final JSONObject body) {
+	    final var requestBody = RequestBody.create(body.toString(), MediaType.parse("application/json; charset=utf-8"));
+	    final var loginRequest = new Request
+		.Builder()
+		.url(String.format("%s%s", currentServerHTTPIp, endpoint))
+		.addHeader("Authorization", String.format("Bearer %s", jwtToken))
+		.post(requestBody)
+		.build();
+
+	    try (final var response = httpClient.newCall(loginRequest).execute()) {
+		if (response.isSuccessful() && response.body() != null) {
+		    final var resStr = response.body().string();
+		    final var resObj = new JSONObject(resStr);
+		    
+		    return resObj;
+		}
+		
+		Log.w(TAG, "Login failed with HTTP " + response.code());
+		return null;
+	    }
+	    catch (final Exception exception) {
+		Log.e(TAG, "Login failed with HTTP ");
+
+		return null;
+	    }
+    }
+
+    private JSONObject makeDELETERequest(final String endpoint) {
+	    final var loginRequest = new Request
+		.Builder()
+		.url(String.format("%s%s", currentServerHTTPIp, endpoint))
+		.addHeader("Authorization", String.format("Bearer %s", jwtToken))
+		.build();
+
+	    try (final var response = httpClient.newCall(loginRequest).execute()) {
+		if (response.isSuccessful() && response.body() != null) {
+		    final var resStr = response.body().string();
+		    final var resObj = new JSONObject(resStr);
+		    
+		    return resObj;
+		}
+
+		Log.w(TAG, "Login failed with HTTP " + response.code());
+
+		return null;
+	    }
+	    catch (final Exception exception) {
+		Log.e(TAG, "Login failed with HTTP ");
+
+		return null;
+	    }
     }
 
     /**
@@ -200,17 +351,19 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
     }
 
     /**
-     * Sends ROOM_JOIN packet for a specific channel ID/room.
+     * Send REST request to join channel with the supplied ID.
      */
-    public void joinRoom(String roomId) {
-	this.currentRoomId = roomId;
-	if (!webSocketClient.isConnected()) {
-	    Log.w(TAG, "Cannot join room " + roomId + ": Not connected to server");
-	    return;
-	}
-
+    public void joinChannel(final String iD) {
 	try {
+	    /*this.currentRoomId = roomId;
+
+	    if (!webSocketClient.isConnected()) {
+		Log.w(TAG, "Cannot join room " + roomId + ": Not connected to server");
+		return;
+	    }
+
 	    long channelLongId = 1L;
+
 	    if (roomId != null) {
 		String numericOnly = roomId.replaceAll("\\D+", "");
 		if (!numericOnly.isEmpty()) {
@@ -225,7 +378,7 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 
 	    Packet joinPacket = new Packet();
 	    webSocketClient.sendPacketAsync(joinPacket);
-	    Log.d(TAG, "Sent ROOM_JOIN for channel: " + channelLongId + " (" + roomId + ")");
+	    Log.d(TAG, "Sent ROOM_JOIN for channel: " + channelLongId + " (" + roomId + ")");*/
 	} catch (Exception e) {
 	    Log.e(TAG, "Error sending ROOM_JOIN packet", e);
 	}
@@ -239,6 +392,7 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 	    if (!webSocketClient.isConnected()) {
 		Log.w(TAG, "Cannot send message: Not connected to WebSocket server");
 		notifyError("Not connected to server");
+
 		return;
 	    }
 
@@ -262,9 +416,9 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
     @Override
     public void onConnected(String url) {
 	Log.d(TAG, "WebSocket connected successfully: " + url);
-	notifyStateChanged(true, currentServerIp);
+	notifyStateChanged(true, currentServerHTTPIp);
 
-	if (!jwtToken.isEmpty()) {
+	/*if (!jwtToken.isEmpty()) {
 	    try {
 		Packet handshakePacket = new Packet(Packet.TYPE_UNKNOWN, jwtToken.getBytes(StandardCharsets.UTF_8));
 		webSocketClient.sendPacketAsync(handshakePacket);
@@ -286,13 +440,14 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 	}
 
 	if (!currentRoomId.isEmpty()) {
-	    joinRoom(currentRoomId);
-	}
+	    joinChannel(currentRoomId);
+	}*/
     }
 
     @Override
     public void onPacketReceived(Packet packet) {
-	int type = packet.getType();
+	final var type = packet.getType();
+
 	Log.d(TAG, "Incoming packet type: 0x" + Integer.toHexString(type) + ", payload size: " + packet.getPayload().length);
 
 	switch (type) {
@@ -313,7 +468,7 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 		notifyError(errorMsg);
 		break;
 
-	    case Packet.TYPE_ROTATE_KEY:
+	    case Packet.TYPE_KEY_ROTATION:
 		{
 		    // get number of neighbours from payload
 		    // generate new private key
@@ -328,29 +483,10 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 		    //final var newKey = generateNewKeyRotation();
 		    //final var newKeyHash = cryptoManager.hashKey(newKey);
 
-		    final var multicastRequest = new Packet();
-
-		    webSocketClient.sendPacketAsync(multicastRequest);
-		}
-		break;
-
-	    case Packet.TYPE_UNICAST_ROTATED_KEY:
-		{
-		    // update current private shared key hash
-		    //cryptoManager.updateCurrentKeyHash();
-		}
-		break;
-	    case Packet.TYPE_SOLICITE_PUBLIC_KEY:
-		{
-		    // create public key message
-		    // send to server
-		}
-		break;
-	    case Packet.TYPE_ADVERTISE_PUBLIC_KEY:
-		{
-		    // extract public key from message
-		    // create new keypair
-		    // store public key with new keypair
+		    //for (peer : peers) {
+			// send n Packet.TYPE_UNICAST_ROTATED_KEY
+			//webSocketClient.sendPacketAsync(multicastRequest);
+		    //}
 		}
 		break;
 
@@ -361,21 +497,9 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
     }
 
     @Override
-    public void onTextMessageReceived(String text) {
-	Log.d(TAG, "Received text frame: " + text);
-	Message msg = new Message(
-		String.valueOf(System.currentTimeMillis()),
-		text,
-		"Server",
-		System.currentTimeMillis()
-		);
-	notifyMessageReceived(msg);
-    }
-
-    @Override
     public void onDisconnected() {
-	Log.d(TAG, "WebSocket disconnected from " + currentServerIp);
-	notifyStateChanged(false, currentServerIp);
+	Log.d(TAG, "WebSocket disconnected from " + currentServerHTTPIp);
+	notifyStateChanged(false, currentServerHTTPIp);
     }
 
     @Override
@@ -383,8 +507,6 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 	Log.e(TAG, "WebSocket error", t);
 	notifyError(t != null ? t.getMessage() : "Unknown connection error");
     }
-
-    // --- Helper notification methods on Main UI thread ---
 
     private void notifyStateChanged(boolean connected, String serverIp) {
 	mainHandler.post(() -> {
@@ -409,14 +531,4 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 	    }
 	});
     }
-
-    //public void generateNewKeyRotation() {
-    //final var temp = multicastNewRotationToChannelMembers();
-    //}
-
-    /*public void multicastNewRotationToChannelMembers() {
-      for (var i = 0; i < 0; ++i) {
-      webSocketClient.sendPacketAsync(null);
-      }
-      }*/
 }

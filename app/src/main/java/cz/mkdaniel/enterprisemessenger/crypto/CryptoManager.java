@@ -5,7 +5,9 @@ import android.security.keystore.KeyGenParameterSpec;
 import android.security.keystore.KeyProperties;
 import android.util.Base64;
 import android.util.Log;
+
 import java.util.Map;
+import java.util.UUID;
 
 import java.security.InvalidAlgorithmParameterException;
 import java.security.KeyFactory;
@@ -47,12 +49,19 @@ public class CryptoManager { // TODO: this is a god class anti-pattern, and it m
     private static volatile CryptoManager instance;
     private final Context appContext;
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
-    private final Map<String, PrivateKey> keyHashLookupRegistry = new ConcurrentHashMap<>();
-    private final Map<PublicKey, KeyPair> publicKeyPeersRegistry = new ConcurrentHashMap<>();
+    //private final Map<String, PrivateKey> keyHashLookupRegistry = new ConcurrentHashMap<>();
+    //private final Map<PublicKey, KeyPair> publicKeyPeersRegistry = new ConcurrentHashMap<>();
 
-    private String currentKeyHash = new String();
+    //private String currentKeyHash = new String();
     private KeyPair keyPair;
-    private byte[] senderKey;
+    /**
+     * private byte[] senderKey;
+     */
+    private final map<UUID, PrivateKey> messageKeyLookupRegistry = new ConcurrentHashMap<>();
+    /** 
+     * n keyPair for n members?
+     */    
+    private final Map<Integer, byte[]> userKeyLookupRegistry = new ConcurrentHashMap<>();
 
     private CryptoManager(Context context) {
 	this.appContext = context.getApplicationContext();
@@ -70,13 +79,13 @@ public class CryptoManager { // TODO: this is a god class anti-pattern, and it m
 	return instance;
     }
 
-    public String checkCurrentKeyHash() {
-	return new String(currentKeyHash);
-    }
+//    public String checkCurrentKeyHash() {
+//	return new String(currentKeyHash);
+ //   }
 
-    public PrivateKey lookupKeyByHash(final String hash) {
-	return keyHashLookupRegistry.get(hash);
-    }
+  //  public PrivateKey lookupKeyByHash(final String hash) {
+//	return keyHashLookupRegistry.get(hash);
+ //   }
 
     /**
      * Initializes or loads the EC key pair asynchronously on first app launch.
@@ -132,6 +141,7 @@ public class CryptoManager { // TODO: this is a god class anti-pattern, and it m
 	    KeyPairGenerator keyPairGenerator = KeyPairGenerator.getInstance("EC");
 	    keyPairGenerator.initialize(new ECGenParameterSpec("secp256r1"));
 	    keyPair = keyPairGenerator.generateKeyPair();
+
 	    Log.d(TAG, "Software EC key pair generated successfully!");
 	} catch (Exception e) {
 	    Log.e(TAG, "Failed to generate software EC key pair", e);
@@ -146,6 +156,7 @@ public class CryptoManager { // TODO: this is a god class anti-pattern, and it m
     public String getPublicKeyBase64() {
 	PublicKey pk = getPublicKey();
 	if (pk == null) return null;
+
 	return Base64.encodeToString(pk.getEncoded(), Base64.NO_WRAP);
     }
 
@@ -200,23 +211,30 @@ public class CryptoManager { // TODO: this is a god class anti-pattern, and it m
      * to derive a shared 256-bit AES secret key.
      */
     public byte[] deriveSharedSecret(byte[] remotePublicKeyBytes) throws Exception {
-	KeyFactory keyFactory = KeyFactory.getInstance("EC");
-	X509EncodedKeySpec keySpec = new X509EncodedKeySpec(remotePublicKeyBytes);
-	PublicKey remotePublicKey = keyFactory.generatePublic(keySpec);
+	final var keyFactory = KeyFactory.getInstance("EC");
+	final var keySpec = new X509EncodedKeySpec(remotePublicKeyBytes);
+	final var remotePublicKey = keyFactory.generatePublic(keySpec);
+	final var keyAgreement = KeyAgreement.getInstance("ECDH");
 
-	KeyAgreement keyAgreement = KeyAgreement.getInstance("ECDH");
 	keyAgreement.init(getOrCreateKeyPair().getPrivate());
 	keyAgreement.doPhase(remotePublicKey, true);
 
-	byte[] sharedSecret = keyAgreement.generateSecret();
-	// SHA-256 hash to get a 256-bit key for AES
-	MessageDigest sha256 = MessageDigest.getInstance("SHA-256");
+	final var sharedSecret = keyAgreement.generateSecret();
+	final var sha256 = MessageDigest.getInstance("SHA-256");
+
 	return sha256.digest(sharedSecret);
     }
 
-    public byte[] hashKey(final byte[] key) throws Exception {
+    /**
+     * Generate new AES 512 key rotation secret symmetric sender key.
+     */
+    public byte[] generateSenderSymmetricSecretRotatedKey() {
+	return new byte[];
+    }
+
+    /*public byte[] hashKey(final byte[] key) throws Exception {
 	return MessageDigest
 	    .getInstance("SHA-256")
 	    .digest(key);
-    }
+    }*/
 }

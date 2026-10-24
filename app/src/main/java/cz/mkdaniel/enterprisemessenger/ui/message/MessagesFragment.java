@@ -159,7 +159,7 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
             return;
         }
         connectionManager.connectToServer(serverIp);
-        connectionManager.joinRoom(roomId);
+        //connectionManager.joinRoom(roomId);
     }
 
     private void updateInputUnderline(boolean isConnected) {
