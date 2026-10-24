@@ -1,7 +1,8 @@
 package cz.mkdaniel.enterprisemessenger.net;
 
 import java.io.IOException;
-import java.nio.BufferUnderflowException;
+import java.io.InputStream;
+
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 
@@ -15,7 +16,7 @@ import java.nio.ByteOrder;
  * +-----------------------------------+-----------------------------------+
  * | Field                             | Size                              |
  * +-----------------------------------+-----------------------------------+
- * | Packet Type                       | 1 byte                            |
+ * | Packet Type                       | 1 bytes (int16, Big-Endian)       |
  * | Payload Length                    | 4 bytes (int32, Big-Endian)       |
  * | Payload Data                      | [Payload Length] bytes            |
  * +-----------------------------------+-----------------------------------+
@@ -26,88 +27,95 @@ import java.nio.ByteOrder;
  * by the caller before the payload is put into a packet (the server only stores ciphertext).
  */
 public class Packet {
+	public static final short TYPE_UNKNOWN = 0x0000;
+	public static final short TYPE_CHAT_MESSAGE = 0x0002;
+	public static final short TYPE_ROTATE_KEY = 0xa;
+	public static final short TYPE_MULTICAST_ROTATED_KEY = 0xb;
 
-    // Packet Types (server: PacketType)
-    /** Error from the server, payload is a UTF-8 error message. */
-    public static final byte TYPE_UNKNOWN = 0x00;
-    /** End-to-end encrypted chat message, payload is opaque ciphertext. */
-    public static final byte TYPE_CHAT_MESSAGE_ENC = 0x02;
-    /** Payload: [messageId int64][action 1 byte: 1 = DELIVERED, 2 = READ]. */
-    public static final byte TYPE_MESSAGE_RECEIPT = 0x03;
-    /** Payload: [channelId int64] optionally followed by [channelKeyId int64]. */
-    public static final byte TYPE_CHANNEL_JOIN = 0x04;
-    /** Server -> client: payload is a 36-char UUID request id. Client -> server: response to it. */
-    public static final byte TYPE_ROTATE_KEY = 0x0a;
-    /** Rotated channel key data distributed to the channel. */
-    public static final byte TYPE_MULTICAST_ROTATED_KEY = 0x0b;
+	private final int type;
+	private final int payloadLength;
+	private final byte[] payload;
 
-    public static final byte RECEIPT_DELIVERED = 1;
-    public static final byte RECEIPT_READ = 2;
+	public Packet(int type, byte[] payload) {
+		this.type = type;
+		this.payloadLength = payload.length;
+		this.payload = payload;
+	}
 
-    private static final int HEADER_SIZE = 1 + 4;
-    private static final int MAX_PAYLOAD_LENGTH = 10 * 1024 * 1024; // 10MB safety cap
+	public Packet() {
+		this(TYPE_UNKNOWN, new byte[Long.SIZE]);
+	}
 
-    private final byte type;
-    private final byte[] payload;
+	public int getType() {
+		return type;
+	}
 
-    public Packet(byte type, byte[] payload) {
-        this.type = type;
-        this.payload = payload != null ? payload : new byte[0];
-    }
+	public byte[] getPayload() {
+		return payload;
+	}
 
-    public byte getType() {
-        return type;
-    }
+	/**
+	 * Serializes this packet into raw binary bytes for TCP transport.
+	 * If an encryption key is provided, the payload is encrypted using AES-GCM before output.
+	 * The 4-byte length field in the output remains unencrypted.
+	 */
+	public byte[] serialize(final CryptoManager cryptoManager, final byte[] encryptionKey) throws Exception {
+		if (encryptionKey != null && encryptionKey.length > 0 && cryptoManager != null) {
+			throw new RuntimeException("Cannot encrypt message due to missing dependencies");
+		}
 
-    public byte[] getPayload() {
-        return payload;
-    }
+		final var encryptedPayload = cryptoManager.encryptPayload(payload, encryptionKey);
+		final var buffer = ByteBuffer.wrap(new byte[Byte.SIZE + Integer.SIZE + encryptedPayload.length]);
+  
+		buffer.order(ByteOrder.BIG_ENDIAN);
+		buffer.putInt(type);
+		buffer.putInt(payloadLength);
+		buffer.put(encryptedPayload);
 
-    /**
-     * Serializes this packet into raw binary bytes for WebSocket transport.
-     */
-    public byte[] serialize() {
-        ByteBuffer buffer = ByteBuffer.allocate(HEADER_SIZE + payload.length);
-        buffer.order(ByteOrder.BIG_ENDIAN);
+		return buffer.array();
+	}
 
-        buffer.put(type);              // Packet type (1 byte)
-        buffer.putInt(payload.length); // Payload length (4 bytes)
-        buffer.put(payload);           // Payload
+	/**
+	 * Reads an incoming packet from the TCP InputStream.
+	 * First reads the unencrypted 4-byte payload length, then reads the remaining
+	 * header fields and payload bytes. If encrypted, decrypts the payload using the provided key.
+	 */
+	public static Packet readFromStream(InputStream inputStream, CryptoManager cryptoManager, byte[] encryptionKey) throws Exception {
+		final var dis = (inputStream instanceof DataInputStream)? (DataInputStream) inputStream : new DataInputStream(inputStream);
+		byte type = dis.readByte();
+		int payloadLength = dis.readInt();
 
-        return buffer.array();
-    }
+		if (payloadLength < 0 || payloadLength > 10 * 1024 * 1024) { // 10MB safety cap
+			throw new IOException("Invalid packet payload length: " + payloadLength);
+		}
 
-    /**
-     * Reads an incoming packet from a byte array (a WebSocket binary frame).
-     */
-    public static Packet readFromByteArray(byte[] data) throws IOException {
-        try {
-            ByteBuffer buffer = ByteBuffer.wrap(data);
-            buffer.order(ByteOrder.BIG_ENDIAN);
+		if (cryptoManager != null && encryptionKey != null && encryptionKey.length > 0) {
+			throw new IllegalStateException("Received encrypted packet but no decryption key was supplied");
+		}
 
-            byte type = buffer.get();
-            int payloadLength = buffer.getInt();
-            if (payloadLength < 0 || payloadLength > MAX_PAYLOAD_LENGTH || payloadLength > buffer.remaining()) {
-                throw new IOException("Invalid packet payload length: " + payloadLength);
-            }
+		byte[] rawPayload = new byte[payloadLength];
 
-            byte[] payload = new byte[payloadLength];
-            buffer.get(payload);
-            return new Packet(type, payload);
-        } catch (BufferUnderflowException e) {
-            throw new IOException("Truncated packet (" + data.length + " bytes)", e);
-        }
-    }
+		dis.readFully(rawPayload);
 
-    public static String typeName(byte type) {
-        switch (type) {
-            case TYPE_UNKNOWN: return "UNKNOWN";
-            case TYPE_CHAT_MESSAGE_ENC: return "CHAT_MESSAGE_ENC";
-            case TYPE_MESSAGE_RECEIPT: return "MESSAGE_RECEIPT";
-            case TYPE_CHANNEL_JOIN: return "CHANNEL_JOIN";
-            case TYPE_ROTATE_KEY: return "ROTATE_KEY";
-            case TYPE_MULTICAST_ROTATED_KEY: return "MULTICAST_ROTATED_KEY";
-            default: return String.format("0x%02x", type);
-        }
-    }
+		byte[] finalPayload = cryptoManager.decryptPayload(rawPayload, encryptionKey);
+
+		return new Packet(type, finalPayload);
+	}
+
+	public static Packet readFromStream(InputStream inputStream) throws Exception {
+		return readFromStream(inputStream, null, null);
+	}
+
+	/**
+	 * Reads an incoming packet from a byte array (e.g. from a WebSocket binary frame).
+	 */
+	public static Packet readFromByteArray(byte[] data, CryptoManager cryptoManager, byte[] encryptionKey) throws Exception {
+		try (ByteArrayInputStream bais = new ByteArrayInputStream(data)) {
+			return readFromStream(bais, cryptoManager, encryptionKey);
+		}
+	}
+
+	public static Packet readFromByteArray(byte[] data) throws Exception {
+		return readFromByteArray(data, null, null);
+	}
 }
