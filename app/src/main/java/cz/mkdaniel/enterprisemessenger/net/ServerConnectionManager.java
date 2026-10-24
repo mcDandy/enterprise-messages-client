@@ -5,17 +5,11 @@ import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
 
-import com.google.android.gms.tasks.Tasks;
-import com.google.firebase.messaging.FirebaseMessaging;
 
-import org.json.JSONArray;
 import org.json.JSONObject;
 import org.json.JSONArray;
 
-import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
-
-import java.security.MessageDigest;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -23,11 +17,6 @@ import java.util.Set;
 import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
-
-import cz.mkdaniel.enterprisemessenger.crypto.CryptoManager;
-import cz.mkdaniel.enterprisemessenger.ui.message.Message;
-import cz.mkdaniel.enterprisemessenger.ui.transform.Room;
 
 import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
@@ -36,7 +25,9 @@ import okhttp3.RequestBody;
 import okhttp3.Response;
 
 import cz.mkdaniel.enterprisemessenger.crypto.CryptoManager;
+import cz.mkdaniel.enterprisemessenger.notification.NotificationHelper;
 import cz.mkdaniel.enterprisemessenger.ui.message.Message;
+import cz.mkdaniel.enterprisemessenger.ui.transform.Room;
 
 /**
  * Singleton manager handling WebSocket protocol exchanges and HTTP Auth with Enterprise Messenger servers.
@@ -509,6 +500,10 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 			System.currentTimeMillis()
 			);
 		notifyMessageReceived(msg);
+
+		if (!isChannelVisible(visibleChannelId)) {
+		    NotificationHelper.showChannelMessageNotification(context, visibleChannelId, null);
+		}
 		break;
 
 	    case Packet.TYPE_UNKNOWN:
