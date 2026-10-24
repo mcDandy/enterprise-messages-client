@@ -5,6 +5,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
 
+import java.nio.ByteBuffer;
 
 import org.json.JSONObject;
 import org.json.JSONArray;
@@ -14,6 +15,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -39,7 +41,7 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
     public static final String HTTPS_PROTOCOL = "https";
     public static final String WS_PROTOCOL = "wss";
     public static final String WS_HOST = "172.18.0.1";
-    public static final Integer WS_PORT = 32779;
+    public static final Integer WS_PORT = 8443;
     public static final String WS_ENDPOINT_PATH = "wss";
 
     private static final String TAG = "ServerConnectionManager";
@@ -181,7 +183,7 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 
     private void fetchJwtTokenAndConnect(String serverIp) {
 	try {
-	final var username = "android_user";
+	final var username = "android_user1";
 	final var password = "GuestPassword123";
 	var pubKey = cryptoManager.getPublicKeyBase64();
 
@@ -516,8 +518,9 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
     }
 
     @Override
-    public void onPacketReceived(Packet packet) {
+    public void onPacketReceived(final Packet packet) {
 	final var type = packet.getType();
+	final var wrappedPayload = ByteBuffer.wrap(packet.getPayload());
 
 	Log.d(TAG, "Incoming packet type: 0x" + Integer.toHexString(type) + ", payload size: " + packet.getPayload().length);
 
@@ -541,27 +544,40 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 		String errorMsg = new String(packet.getPayload(), StandardCharsets.UTF_8);
 		Log.e(TAG, "Server returned error packet: " + errorMsg);
 		notifyError(errorMsg);
+		
 		break;
 
 	    case Packet.TYPE_KEY_ROTATION:
 		{
-		    // get number of neighbours from payload
-		    // generate new private key
-		    // generate hash of new private key
-		    // add entry to key hash mapping
-		    // cryptoManager.addNewHashKeyMapping();
-		    // create rotate key message with current key hash
-		    // send rotate key message to server
-		    // create N public key unicast messages, where n is the number of client in this chat
-		    // send N unicast messages to server
+		    Log.d(TAG, "Key rotation initiated by the server");
 
-		    //final var newKey = generateNewKeyRotation();
-		    //final var newKeyHash = cryptoManager.hashKey(newKey);
+		    var offset = 0;
 
-		    //for (peer : peers) {
-			// send n Packet.TYPE_UNICAST_ROTATED_KEY
-			//webSocketClient.sendPacketAsync(multicastRequest);
-		    //}
+		    final var rotationUUID = UUID.nameUUIDFromBytes(wrappedPayload.slice(offset, offset + 40).array());
+
+		    offset += 40;
+		    
+		    Log.d(TAG, "New key rotation UUID is set to: " + rotationUUID);
+		    // get channel id from message
+		    // generate new key rotation
+		    // add UUID to new rotated key mapping
+		    // find all peers from channelId, and their PublicKeys, using peerId to SharedKey mapping
+		    final var peers = List.of();
+
+		    for (final var peer : peers) {
+			// encrypt the new key rotation with shared ECDH key
+			final var rotationUnicast = new Packet(Packet.TYPE_UNICAST_ROTATED_KEY, new byte[33]);
+
+			webSocketClient.sendPacketAsync(rotationUnicast);
+		    }
+		}
+		break;
+
+	    case Packet.TYPE_UNICAST_ROTATED_KEY:
+		{	
+		    Log.d(TAG, "Key rotation unicast received from the server");
+
+		    // add UUID to new rotated key mapping
 		}
 		break;
 

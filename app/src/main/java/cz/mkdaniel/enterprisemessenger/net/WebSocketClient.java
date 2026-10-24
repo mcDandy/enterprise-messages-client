@@ -9,6 +9,11 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
+
+import java.util.Arrays;
+
+import java.nio.ByteBuffer;
+
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import okhttp3.OkHttpClient;
@@ -16,6 +21,7 @@ import okhttp3.Request;
 import okhttp3.Response;
 import okhttp3.WebSocket;
 import okhttp3.WebSocketListener;
+
 import okio.ByteString;
 
 import cz.mkdaniel.enterprisemessenger.crypto.CryptoManager;
@@ -154,10 +160,13 @@ public class WebSocketClient {
             @Override
             public void onMessage(@NonNull WebSocket webSocket, @NonNull ByteString bytes) {
                 try {
-                    byte[] rawBytes = bytes.toByteArray();
-                    Packet packet = Packet.readFromByteArray(rawBytes);
-                    Log.d(TAG, "Received packet " + Packet.typeName(packet.getType())
-                            + ", payload length: " + packet.getPayload().length);
+		    final var rawBytes = ByteBuffer.wrap(bytes.toByteArray());
+
+                    //Log.d(TAG, "Received packet " + Arrays.toString(bytes.toByteArray()));
+
+                    final var packet = new Packet(rawBytes.get(0), rawBytes.slice(1, rawBytes.array().length - 1).array());
+
+                    Log.d(TAG, "Received packet " + Packet.typeName(packet.getType()) + ", payload length: " + packet.getPayload().length);
 
                     if (listener != null) {
                         listener.onPacketReceived(packet);
