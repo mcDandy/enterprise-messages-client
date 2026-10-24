@@ -46,6 +46,7 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 
     private static volatile ServerConnectionManager instance;
 
+    private final Context context;
     private final CryptoManager cryptoManager;
     private final WebSocketClient webSocketClient;
     private final OkHttpClient httpClient;
@@ -63,6 +64,35 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 	void onConnectionStateChanged(boolean connected, String serverIp);
 	void onMessageReceived(Message message);
 	void onError(String errorMessage);
+    }
+
+    public interface Callback<T> {
+        void onResult(T result);
+        void onFailure(String error);
+    }
+
+    public void fetchChannels(String serverIp, Callback<List<Room>> callback) {
+        executor.execute(() -> {
+            try {
+                JSONArray channelsArray = makeGETRequestCollection("/api/servers/1/channels");
+                if (channelsArray == null) {
+                    mainHandler.post(() -> callback.onFailure("Failed to fetch channels from server"));
+                    return;
+                }
+                List<Room> rooms = new ArrayList<>();
+                for (int i = 0; i < channelsArray.length(); i++) {
+                    JSONObject obj = channelsArray.getJSONObject(i);
+                    String id = String.valueOf(obj.optLong("id", i + 1));
+                    String name = obj.optString("name", "channel-" + id);
+                    long channelId = parseChannelId(id);
+                    String encKey = defaultChannelSecret(channelId);
+                    rooms.add(new Room(id, name, encKey, false));
+                }
+                mainHandler.post(() -> callback.onResult(rooms));
+            } catch (Exception e) {
+                mainHandler.post(() -> callback.onFailure(e.getMessage()));
+            }
+        });
     }
 
     public void setVisibleChannel(long channelId) {
@@ -99,6 +129,7 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
     }
 
     private ServerConnectionManager(Context context) {
+	this.context = context.getApplicationContext();
 	this.cryptoManager = CryptoManager.getInstance(context);
 	this.webSocketClient = new WebSocketClient(cryptoManager, currentServerWSIp);
 	this.webSocketClient.setListener(this);
