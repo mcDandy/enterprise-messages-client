@@ -549,22 +549,31 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 
 	    case Packet.TYPE_KEY_ROTATION:
 		{
+		    final Byte uUIDSizeBytes = 16;
+
 		    Log.d(TAG, "Key rotation initiated by the server");
 
 		    var offset = 0;
 
-		    final var rotationUUID = UUID.nameUUIDFromBytes(wrappedPayload.slice(offset, offset + 40).array());
+		    final var rotationUUID = UUID.nameUUIDFromBytes(wrappedPayload.slice(offset, offset + uUIDSizeBytes).array());
 
-		    offset += 40;
+		    offset += uUIDSizeBytes;
 		    
 		    Log.d(TAG, "New key rotation UUID is set to: " + rotationUUID);
-		    // get channel id from message
+
+		    final var channelId = wrappedPayload.getLong(offset);
+
+		    offset += Long.SIZE;
+		    
+		    Log.d(TAG, "New key rotation channelId is set to: " + channelId);
+
 		    // generate new key rotation
 		    // add UUID to new rotated key mapping
-		    // find all peers from channelId, and their PublicKeys, using peerId to SharedKey mapping
-		    final var peers = List.of();
+		    
+		    final var peers = makeGETRequestCollection(String.format("/api/servers//channels/%d/keys", channelId));
 
-		    for (final var peer : peers) {
+		    //for (final var peer : peers) {
+		    for (var i = 0; i < peers.length(); ++i) {
 			// encrypt the new key rotation with shared ECDH key
 			final var rotationUnicast = new Packet(Packet.TYPE_UNICAST_ROTATED_KEY, new byte[33]);
 

@@ -1,8 +1,10 @@
 package cz.mkdaniel.enterprisemessenger.crypto;
 
 import android.content.Context;
+
 import android.security.keystore.KeyGenParameterSpec;
 import android.security.keystore.KeyProperties;
+
 import android.util.Base64;
 import android.util.Log;
 
@@ -27,6 +29,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import javax.crypto.Cipher;
 import javax.crypto.KeyAgreement;
 import javax.crypto.SecretKey;
+import javax.crypto.KeyGenerator;
+
 import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
 
@@ -43,18 +47,16 @@ public class CryptoManager { // TODO: this is a god class anti-pattern, and it m
     private static final String EC_CURVE = "secp256r1";
 
     private static volatile CryptoManager instance;
+
     private final Context appContext;
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
-    //private final Map<String, PrivateKey> keyHashLookupRegistry = new ConcurrentHashMap<>();
-    //private final Map<PublicKey, KeyPair> publicKeyPeersRegistry = new ConcurrentHashMap<>();
 
-    //private String currentKeyHash = new String();
     private KeyPair keyPair;
     /**
      * private byte[] senderKey;
      */
-    private final Map<UUID, PrivateKey> messageKeyLookupRegistry = new ConcurrentHashMap<>();
-    /** 
+    private final Map<UUID, SecretKey> messageKeyLookupRegistry = new ConcurrentHashMap<>();
+    /**
      * n keyPair for n members?
      */    
     private final Map<Integer, byte[]> userKeyLookupRegistry = new ConcurrentHashMap<>();
@@ -62,7 +64,6 @@ public class CryptoManager { // TODO: this is a god class anti-pattern, and it m
     private CryptoManager(Context context) {
 	this.appContext = context.getApplicationContext();
     }
-
     public static CryptoManager getInstance(Context context) {
 	if (instance == null) {
 	    synchronized (CryptoManager.class) {
@@ -74,14 +75,6 @@ public class CryptoManager { // TODO: this is a god class anti-pattern, and it m
 
 	return instance;
     }
-
-//    public String checkCurrentKeyHash() {
-//	return new String(currentKeyHash);
- //   }
-
-  //  public PrivateKey lookupKeyByHash(final String hash) {
-//	return keyHashLookupRegistry.get(hash);
- //   }
 
     /**
      * Initializes or loads the EC key pair asynchronously on first app launch.
@@ -104,18 +97,17 @@ public class CryptoManager { // TODO: this is a god class anti-pattern, and it m
 
 	    if (!keyStore.containsAlias(KEY_ALIAS)) {
 		Log.d(TAG, "Generating new Elliptic Curve (EC) key pair on first launch...");
-		KeyPairGenerator keyPairGenerator = KeyPairGenerator.getInstance(
-			KeyProperties.KEY_ALGORITHM_EC, ANDROID_KEYSTORE);
+		KeyPairGenerator keyPairGenerator = KeyPairGenerator.getInstance(KeyProperties.KEY_ALGORITHM_EC, ANDROID_KEYSTORE);
 
-		KeyGenParameterSpec parameterSpec = new KeyGenParameterSpec.Builder(
-			KEY_ALIAS,
-			KeyProperties.PURPOSE_AGREE_KEY | KeyProperties.PURPOSE_SIGN | KeyProperties.PURPOSE_VERIFY)
+		KeyGenParameterSpec parameterSpec = new KeyGenParameterSpec
+		    .Builder(KEY_ALIAS, KeyProperties.PURPOSE_AGREE_KEY | KeyProperties.PURPOSE_SIGN | KeyProperties.PURPOSE_VERIFY)
 		    .setAlgorithmParameterSpec(new ECGenParameterSpec(EC_CURVE))
 		    .setDigests(KeyProperties.DIGEST_SHA256, KeyProperties.DIGEST_SHA512)
 		    .build();
 
 		keyPairGenerator.initialize(parameterSpec);
 		keyPair = keyPairGenerator.generateKeyPair();
+
 		Log.d(TAG, "EC key pair generated successfully!");
 	    } else {
 		Log.d(TAG, "Loading existing EC key pair from KeyStore...");
@@ -196,6 +188,7 @@ public class CryptoManager { // TODO: this is a god class anti-pattern, and it m
 	byte[] cipherText = cipher.doFinal(plainBytes);
 
 	byte[] result = new byte[12 + cipherText.length];
+
 	System.arraycopy(iv, 0, result, 0, 12);
 	System.arraycopy(cipherText, 0, result, 12, cipherText.length);
 
@@ -224,13 +217,22 @@ public class CryptoManager { // TODO: this is a god class anti-pattern, and it m
     /**
      * Generate new AES 512 key rotation secret symmetric sender key.
      */
-    public byte[] generateSenderSymmetricSecretRotatedKey() {
-	return new byte[0];
-    }
+    public String generateSenderSymmetricSecretRotatedKey(final UUID rotationId) {
+	try {
+	    final var keyGenerator = KeyGenerator.getInstance("AES");
 
-    /*public byte[] hashKey(final byte[] key) throws Exception {
-	return MessageDigest
-	    .getInstance("SHA-256")
-	    .digest(key);
-    }*/
+	    keyGenerator.init(256);
+
+	    final var rotatedKey = keyGenerator.generateKey();
+
+	    messageKeyLookupRegistry.put(rotationId, rotatedKey);
+
+	    return Base64.encodeToString(rotatedKey.getEncoded(), Base64.NO_WRAP);
+	}
+	catch (final Exception exception) {
+	    Log.e(TAG, exception.toString());
+
+	    return null;
+	}
+    }
 }
