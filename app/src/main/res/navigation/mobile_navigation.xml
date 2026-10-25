@@ -6,15 +6,22 @@
     app:startDestination="@+id/nav_transform">
 
     <fragment
+        android:id="@+id/nav_login"
+        android:name="cz.mkdaniel.enterprisemessenger.ui.auth.LoginFragment"
+        android:label="@string/title_login"
+        tools:layout="@layout/fragment_login" />
+
+    <fragment
+        android:id="@+id/nav_register"
+        android:name="cz.mkdaniel.enterprisemessenger.ui.auth.RegisterFragment"
+        android:label="@string/title_register"
+        tools:layout="@layout/fragment_register" />
+
+    <fragment
         android:id="@+id/nav_transform"
         android:name="cz.mkdaniel.enterprisemessenger.ui.transform.TransformFragment"
         android:label="@string/menu_transform"
         tools:layout="@layout/fragment_transform" />
-
-    <dialog
-        android:id="@+id/nav_add_server"
-        android:name="cz.mkdaniel.enterprisemessenger.ui.server.AddServerDialogFragment"
-        android:label="@string/menu_add_server" />
 
     <fragment
         android:id="@+id/nav_settings"

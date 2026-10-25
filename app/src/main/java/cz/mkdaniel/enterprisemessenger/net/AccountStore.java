@@ -9,10 +9,6 @@ import java.util.Set;
 
 /**
  * Persists this installation's account credentials and the servers it is logged in to.
- * <p>
- * Each installation gets its own generated username so that two devices are two different
- * users on the server (the server keys WebSocket sessions by username and skips the sender
- * when sending push notifications).
  */
 public class AccountStore {
 
@@ -20,11 +16,39 @@ public class AccountStore {
     private static final String KEY_USERNAME = "username";
     private static final String KEY_PASSWORD = "password";
     private static final String KEY_SERVERS = "authenticated_servers";
+    private static final String KEY_JWT_TOKEN = "jwt_token";
+    private static final String KEY_LOGGED_IN = "is_logged_in";
 
     private final SharedPreferences prefs;
 
     public AccountStore(Context context) {
         this.prefs = context.getApplicationContext().getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE);
+    }
+
+    public synchronized boolean isLoggedIn() {
+        return prefs.getBoolean(KEY_LOGGED_IN, false);
+    }
+
+    public synchronized void saveSession(String username, String password, String token) {
+        prefs.edit()
+                .putString(KEY_USERNAME, username)
+                .putString(KEY_PASSWORD, password)
+                .putString(KEY_JWT_TOKEN, token)
+                .putBoolean(KEY_LOGGED_IN, true)
+                .apply();
+    }
+
+    public synchronized void clearSession() {
+        prefs.edit()
+                .remove(KEY_USERNAME)
+                .remove(KEY_PASSWORD)
+                .remove(KEY_JWT_TOKEN)
+                .putBoolean(KEY_LOGGED_IN, false)
+                .apply();
+    }
+
+    public synchronized String getJwtToken() {
+        return prefs.getString(KEY_JWT_TOKEN, "");
     }
 
     public synchronized String getUsername() {
