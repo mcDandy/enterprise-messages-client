@@ -3,6 +3,8 @@ package cz.mkdaniel.enterprisemessenger;
 import android.os.Bundle;
 import android.view.MenuItem;
 import android.view.Menu;
+import android.view.View;
+import android.widget.TextView;
 
 import com.google.android.material.bottomnavigation.BottomNavigationView;
 import com.google.android.material.navigation.NavigationView;
@@ -17,6 +19,8 @@ import androidx.appcompat.app.AppCompatActivity;
 
 import cz.mkdaniel.enterprisemessenger.crypto.CryptoManager;
 import cz.mkdaniel.enterprisemessenger.databinding.ActivityMainBinding;
+import cz.mkdaniel.enterprisemessenger.net.AccountStore;
+import cz.mkdaniel.enterprisemessenger.net.ServerConnectionManager;
 import cz.mkdaniel.enterprisemessenger.notification.NotificationHelper;
 
 public class MainActivity extends AppCompatActivity {
@@ -46,11 +50,25 @@ public class MainActivity extends AppCompatActivity {
         NavigationView navigationView = binding.navView;
         if (navigationView != null) {
             mAppBarConfiguration = new AppBarConfiguration.Builder(
-                    R.id.nav_transform, R.id.nav_add_server, R.id.nav_settings)
+                    R.id.nav_transform, R.id.nav_settings, R.id.nav_login)
                     .setOpenableLayout(binding.drawerLayout)
                     .build();
             NavigationUI.setupActionBarWithNavController(this, navController, mAppBarConfiguration);
             NavigationUI.setupWithNavController(navigationView, navController);
+
+            // Update header with logged in user info
+            View headerView = navigationView.getHeaderView(0);
+            if (headerView != null) {
+                TextView subtitleText = headerView.findViewById(R.id.textView);
+                if (subtitleText != null) {
+                    AccountStore accountStore = new AccountStore(this);
+                    if (accountStore.isLoggedIn()) {
+                        subtitleText.setText(accountStore.getUsername());
+                    } else {
+                        subtitleText.setText(R.string.nav_header_subtitle);
+                    }
+                }
+            }
         }
 
         BottomNavigationView bottomNavigationView = binding.appBarMain.contentMain.bottomNavView;
@@ -61,17 +79,21 @@ public class MainActivity extends AppCompatActivity {
             NavigationUI.setupActionBarWithNavController(this, navController, mAppBarConfiguration);
             NavigationUI.setupWithNavController(bottomNavigationView, navController);
         }
+
+        AccountStore accountStore = new AccountStore(this);
+        if (!accountStore.isLoggedIn()) {
+            navController.navigate(R.id.nav_login);
+        } else {
+            ServerConnectionManager conn = ServerConnectionManager.getInstance(this);
+            conn.connectToServer(conn.getCurrentServerIp());
+        }
     }
 
     @Override
     public boolean onCreateOptionsMenu(Menu menu) {
         boolean result = super.onCreateOptionsMenu(menu);
-        // Using findViewById because NavigationView exists in different layout files
-        // between w600dp and w1240dp
         NavigationView navView = findViewById(R.id.nav_view);
         if (navView == null) {
-            // The navigation drawer already has the items including the items in the overflow menu
-            // We only inflate the overflow menu if the navigation drawer isn't visible
             getMenuInflater().inflate(R.menu.overflow, menu);
         }
         return result;
@@ -79,11 +101,7 @@ public class MainActivity extends AppCompatActivity {
 
     @Override
     public boolean onOptionsItemSelected(@NonNull MenuItem item) {
-        if (item.getItemId() == R.id.nav_add_server) {
-            NavController navController = Navigation.findNavController(this, R.id.nav_host_fragment_content_main);
-            navController.navigate(R.id.nav_add_server);
-            return true;
-        } else if (item.getItemId() == R.id.nav_settings) {
+        if (item.getItemId() == R.id.nav_settings) {
             NavController navController = Navigation.findNavController(this, R.id.nav_host_fragment_content_main);
             navController.navigate(R.id.nav_settings);
             return true;

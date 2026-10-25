@@ -58,7 +58,6 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
     private final String currentServerHTTPIp = String.format("%s://%s:%d", HTTPS_PROTOCOL, WS_HOST, WS_PORT);
     private final String currentServerWSIp = String.format("%s://%s:%d/%s", WS_PROTOCOL, WS_HOST, WS_PORT, WS_ENDPOINT_PATH);
 
-    private String currentRoomId = "";
     private String jwtToken = "";
     private long visibleChannelId;
 
@@ -185,14 +184,18 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 	try {
 	final var username = "android_user1";
 	final var password = "GuestPassword123";
+
 	var pubKey = cryptoManager.getPublicKeyBase64();
+	AccountStore accountStore = new AccountStore(context);
 
-	if (pubKey == null) pubKey = "dummyPublicKeyBase64StringForE2EE";
+	if (jwtToken == null || jwtToken.isEmpty()) {
+	    jwtToken = accountStore.getJwtToken();
+	}
 
-	jwtToken = login("", username, password);
-
-	if (jwtToken.isEmpty()) {
-	    jwtToken = register("", username, password, pubKey);
+	if (jwtToken.isEmpty() && accountStore.isLoggedIn()) {
+	    String username = accountStore.getUsername();
+	    String password = accountStore.getPassword();
+	    jwtToken = login(currentServerHTTPIp, username, password);
 	}
 
 	if (jwtToken.isEmpty()) {
@@ -202,20 +205,23 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 	webSocketClient.connectAsync(serverIp, jwtToken);
 
 	Log.d(TAG, "retrieving servers");
-//makePOSTRequest("/api/servers", new JSONObject().put("name", "test").put("type", "ORGANIZATION"));
+
 	final var servers = makeGETRequestCollection("/api/servers");
 
-	Log.d(TAG, servers.toString());
-//makePOSTRequest("/api/servers/1/channels", new JSONObject().put("name", "test"));
+	if (servers != null) {
+	    Log.d(TAG, servers.toString());
+	}
 
 	final var channels = makeGETRequestCollection("/api/servers/1/channels");
 
-	Log.d(TAG, channels.toString());
+	if (channels != null) {
+	    Log.d(TAG, channels.toString());
+	}
 
-//makePOSTRequest("/api/servers/1/channels/1/members", new JSONObject().put("username", "android_user"));
 	final var memberships = makeGETRequestCollection("/api/servers/1/channels/1/members");
 
-	Log.d(TAG, memberships.toString());
+	if (memberships != null) {
+	    Log.d(TAG, memberships.toString());
 
 	for (var i = 0; i < memberships.length(); ++i) {
 	    Log.d(TAG, makeGETRequest("/api/users/" + memberships.getJSONObject(i).get("userId") +  "/key").toString());
@@ -231,7 +237,7 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
     /**
      * Posts credentials to {@code /api/auth/login} and returns the JWT token, or "" on any failure.
      */
-    private String login(String httpUrl, String username, String password) {
+    public String login(String httpUrl, String username, String password) {
 	try {
 	    final var loginJson = new JSONObject();
 
@@ -239,11 +245,15 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 	    loginJson.put("password", password);
 
 	    final var resObj = makePOSTRequest("/api/auth/login", loginJson);
-	    final var token = resObj.optString("token", "");
-
-	    Log.d(TAG, "Authentication successful, obtained JWT token");
-
-	    return token;
+	    if (resObj != null) {
+	        final var token = resObj.optString("token", "");
+	        Log.d(TAG, "Authentication successful, obtained JWT token");
+	        if (!token.isEmpty()) {
+	            this.jwtToken = token;
+	        }
+	        return token;
+	    }
+	    return "";
 	} catch (Exception e) {
 	    Log.w(TAG, "Login request failed: " + e.getMessage());
 	
@@ -390,20 +400,21 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
     /**
      * Registers a new user on {@code /api/auth/register} and returns the JWT token, or "" on any failure.
      */
-    private String register(String httpUrl, String username, String password, String publicKey) {
+    public String register(String httpUrl, String username, String password, String publicKey) {
 	try {
 	    JSONObject regJson = new JSONObject();
 	    regJson.put("username", username);
 	    regJson.put("password", password);
-	    regJson.put("publicKey", publicKey);
+	    regJson.put("publicKey", (publicKey != null && !publicKey.isEmpty()) ? publicKey : cryptoManager.getPublicKeyBase64());
 
 	    RequestBody regBody = RequestBody.create(
 		    regJson.toString(),
 		    MediaType.parse("application/json; charset=utf-8")
 		    );
 
+	    String baseUrl = (httpUrl != null && !httpUrl.isEmpty()) ? httpUrl : currentServerHTTPIp;
 	    Request regRequest = new Request.Builder()
-		.url(httpUrl + "/api/auth/register")
+		.url(baseUrl + "/api/auth/register")
 		.post(regBody)
 		.build();
 
@@ -413,6 +424,9 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 		    JSONObject resObj = new JSONObject(resStr);
 		    String token = resObj.optString("token", "");
 		    Log.d(TAG, "Registration response, obtained token: " + !token.isEmpty());
+		    if (!token.isEmpty()) {
+		        this.jwtToken = token;
+		    }
 		    return token;
 		}
 		Log.w(TAG, "Registration failed with HTTP " + regResponse.code());
