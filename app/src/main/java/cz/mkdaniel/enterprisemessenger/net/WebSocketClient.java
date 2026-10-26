@@ -140,6 +140,7 @@ public class WebSocketClient {
                 if (listener != null) {
                     listener.onError(e);
                 }
+
                 scheduleReconnect();
             }
         });
@@ -160,9 +161,11 @@ public class WebSocketClient {
             @Override
             public void onMessage(@NonNull WebSocket webSocket, @NonNull ByteString bytes) {
                 try {
+                    Log.d(TAG, bytes.toString());
+
 		    final var rawBytes = ByteBuffer.wrap(bytes.toByteArray());
 
-                    //Log.d(TAG, "Received packet " + Arrays.toString(bytes.toByteArray()));
+                    Log.d(TAG, "Received packet " + Arrays.toString(bytes.toByteArray()));
 
                     final var packet = new Packet(rawBytes.get(0), rawBytes.slice(1, rawBytes.array().length - 1).array());
 
