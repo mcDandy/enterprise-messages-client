@@ -1,9 +1,12 @@
 package cz.mkdaniel.enterprisemessenger.net;
 
 import android.content.Context;
+
 import android.os.Handler;
 import android.os.Looper;
+
 import android.util.Log;
+import android.util.Base64;
 
 import java.nio.ByteBuffer;
 
@@ -78,6 +81,7 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 		JSONArray channelsArray = makeGETRequestCollection("/api/servers/1/channels");
 		if (channelsArray == null) {
 		    mainHandler.post(() -> callback.onFailure("Failed to fetch channels from server"));
+
 		    return;
 		}
 		List<Room> rooms = new ArrayList<>();
@@ -202,21 +206,35 @@ return;
 
 	    webSocketClient.connectAsync(serverIp, jwtToken);
 
-	    Log.d(TAG, "retrieving servers");
+	    //Log.d(TAG, "retrieving servers");
 
-	    final var servers = makeGETRequestCollection("/api/servers");
+	    //final var servers = makeGETRequestCollection("/api/servers");
 
-	    if (servers != null) {
+	    /*if (servers != null) {
 		Log.d(TAG, servers.toString());
-	    }
+	    }*/
 
-	    final var channels = makeGETRequestCollection("/api/servers/1/channels");
+	    //final var channels = makeGETRequestCollection(/*"/api/servers/1/channels"*/String.format("/api/servers/%d/channels", servers));
 
-	    if (channels != null) {
+	    /*if (channels != null) {
 		Log.d(TAG, channels.toString());
+	    }*/
+
+	    final var peerKeys = makeGETRequestCollection(String.format("/api/channels/2/keys"));
+
+	    for (var i = 0; i < peerKeys.length(); ++i) {
+		final var peer = peerKeys.getJSONObject(i);
+		final var peerId = peer.getLong("id");
+		final var peerPublicKey = peer.getString("publicKey");
+	    
+		Log.d(TAG, String.format("Establishing public key %s with peer %d", peerPublicKey, peerId));
+
+		final var peerKey = cryptoManager.deriveSharedSecret(Base64.decode(peerPublicKey, Base64.NO_WRAP));
+
+		cryptoManager.putNewPeerKeyEntry(peerId, peerKey);
 	    }
 
-	    final var memberships = makeGETRequestCollection("/api/servers/1/channels/1/members");
+	    /*final var memberships = makeGETRequestCollection("/api/servers/1/channels/1/members");
 
 	    if (memberships != null) {
 		Log.d(TAG, memberships.toString());
@@ -226,7 +244,7 @@ return;
 
 		    // update key map/store
 		}
-	    }
+	    }*/
 	}
 	catch (final Exception exception) {
 	    Log.e(TAG, exception.toString());
@@ -536,8 +554,12 @@ return;
 	}*/
     }
 
+    /**
+     *  encrypt the new key rotation with shared ECDH key
+     */
     @Override
     public void onPacketReceived(final Packet packet) {
+	try {
 	final var type = packet.getType();
 	final var wrappedPayload = ByteBuffer.wrap(packet.getPayload());
 
@@ -590,32 +612,62 @@ return;
 
 		    Log.d(TAG, "New key rotation channelId is set to: " + channelId);
 
-		    // generate new key rotation
-		    // add UUID to new rotated key mapping
-
+		    final var newRotation = cryptoManager.generateSenderSymmetricSecretRotatedKey(rotationUUID);
+		    //cryptoManager.putNewUUIDRotationEntry(rotationUUID, newRotation);
 		    final var peers = makeGETRequestCollection(String.format("/api/channels/%d/keys", channelId));
-
+ 
 		    //for (final var peer : peers) {
 		    for (var i = 0; i < peers.length(); ++i) {
-			// encrypt the new key rotation with shared ECDH key
-			final var rotationUnicast = new Packet(Packet.TYPE_UNICAST_ROTATED_KEY, new byte[33]);
+			final var peerIdRaw = peers.getJSONObject(i).get("id");
+			
+			Log.d(TAG, String.format("%s is the raw peerId to unicast to", peerIdRaw));
+
+			var peerId = -1L;
+
+			if (peerIdRaw instanceof String/* checkedPeerId*/)
+			    peerId = Long.parseLong((String) peerIdRaw/*.toString()checkedPeerId*/);
+
+			final var peerSecretSymmetricKey = cryptoManager.retrieveSecretSymmetricKey(peerId); // do checked cast
+			final var encryptedSenderKey = cryptoManager.encryptPayload(newRotation.getBytes(), peerSecretSymmetricKey);
+			final var unicastBuffer = ByteBuffer.allocate(1024);
+	
+			//unicastBuffer.put((String)Integer.parseInt(peers.getJSON(i).get("id"))); // do checked cast
+			unicastBuffer.put(newRotation.getBytes());
+
+			final var rotationUnicast = new Packet(Packet.TYPE_UNICAST_ROTATED_KEY, /*newRotation.getEncoded()getBytes()*/unicastBuffer.array());
 
 			webSocketClient.sendPacketAsync(rotationUnicast);
 		    }
 		}
+
 		break;
 
 	    case Packet.TYPE_UNICAST_ROTATED_KEY:
 		{	
 		    Log.d(TAG, "Key rotation unicast received from the server");
 
-		    // add UUID to new rotated key mapping
+		    final var peerId = wrappedPayload.getLong();
+		    final var mostSignificant = wrappedPayload.getLong();
+		    final var leastSignigicant = wrappedPayload.getLong();
+		    final var rotationUUID = new UUID(mostSignificant, leastSignigicant);
+		    final var newRotation = wrappedPayload.array();
+		    // decrypt the new key rotation with shared ECDH key
+		    final var newRotationDecrypted = cryptoManager.decryptPayload(newRotation, cryptoManager.retrieveSecretSymmetricKey(peerId));
+		    
+		    cryptoManager.putNewUUIDRotationEntry(rotationUUID, newRotationDecrypted);
+		    Log.d(TAG, String.format("Rotated to %s", rotationUUID));
 		}
+
 		break;
 
 	    default:
 		Log.d(TAG, "Unhandled packet type: 0x" + Integer.toHexString(type));
+
 		break;
+	}
+	}
+	catch (final Exception exception) {
+	    Log.e(TAG, exception.toString());
 	}
     }
 

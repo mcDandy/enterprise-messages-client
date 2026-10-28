@@ -39,6 +39,8 @@ import javax.crypto.spec.SecretKeySpec;
  * <p>
  * Generates an EC (secp256r1) key pair on first app start using Android KeyStore.
  * Provides methods for ECDH key exchange, AES-GCM payload encryption, and decryption.
+ *
+ * https://www.baeldung.com/java-aes-encryption-decryption
  */
 public class CryptoManager { // TODO: this is a god class anti-pattern, and it must be split into several others
     private static final String TAG = "CryptoManager";
@@ -55,11 +57,13 @@ public class CryptoManager { // TODO: this is a god class anti-pattern, and it m
     /**
      * private byte[] senderKey;
      */
-    private final Map<UUID, SecretKey> messageKeyLookupRegistry = new ConcurrentHashMap<>();
+    private final Map<UUID, /*SecretKey*/byte[]> messageKeyLookupRegistry = new ConcurrentHashMap<>();
     /**
      * n keyPair for n members?
      */    
-    private final Map<Integer, byte[]> userKeyLookupRegistry = new ConcurrentHashMap<>();
+    private final Map<Long, byte[]> userKeyLookupRegistry = new ConcurrentHashMap<>();
+    //private SecretKey currentKeyRotation;
+    private UUID currentKeyRotationId;
 
     private CryptoManager(Context context) {
 	this.appContext = context.getApplicationContext();
@@ -143,6 +147,7 @@ public class CryptoManager { // TODO: this is a god class anti-pattern, and it m
 
     public String getPublicKeyBase64() {
 	PublicKey pk = getPublicKey();
+
 	if (pk == null) return null;
 
 	return Base64.encodeToString(pk.getEncoded(), Base64.NO_WRAP);
@@ -176,8 +181,9 @@ public class CryptoManager { // TODO: this is a god class anti-pattern, and it m
      * Encrypts plain data using AES-GCM and prepends a 12-byte IV.
      * Output format: [12 bytes IV] + [AES-GCM Ciphertext + Auth Tag]
      */
-    public byte[] encryptPayload(byte[] plainBytes, byte[] aesKeyBytes) throws Exception {
+    public byte[] encryptPayload(final byte[] plainBytes, final byte[] aesKeyBytes) throws Exception {
 	byte[] iv = new byte[12];
+
 	new SecureRandom().nextBytes(iv);
 
 	SecretKey secretKey = new SecretKeySpec(aesKeyBytes, "AES");
@@ -225,7 +231,10 @@ public class CryptoManager { // TODO: this is a god class anti-pattern, and it m
 
 	    final var rotatedKey = keyGenerator.generateKey();
 
-	    messageKeyLookupRegistry.put(rotationId, rotatedKey);
+	    //currentKeyRotation = rotatedKey;
+	    currentKeyRotationId = rotationId;
+
+	    messageKeyLookupRegistry.put(rotationId, rotatedKey.getEncoded());
 
 	    return Base64.encodeToString(rotatedKey.getEncoded(), Base64.NO_WRAP);
 	}
@@ -234,5 +243,56 @@ public class CryptoManager { // TODO: this is a god class anti-pattern, and it m
 
 	    return null;
 	}
+    }
+
+    public void putNewUUIDRotationEntry(final UUID keyId, final /*SecretKey*/byte[] key) {
+	messageKeyLookupRegistry.put(keyId, key);	
+    }
+
+    public byte[] retrieveSecretSymmetricKey(final Long peerId) {
+	return userKeyLookupRegistry.get(peerId);
+    }
+
+    public void putNewPeerKeyEntry(final Long peerId, final byte[] key) {
+	userKeyLookupRegistry.put(peerId, key);	
+    }
+
+    public String encryptWithSender(final String input) {
+	try {
+	    final var cipher = Cipher.getInstance("AES/GCM/NoPadding");
+
+	    cipher.init(Cipher.ENCRYPT_MODE, currentKeyRotation, AESUtil.generateIv());
+
+	    final var cipherText = cipher.doFinal(input.getBytes());
+
+	    return Base64.encodeToString(cipherText);
+	}
+	catch (final Exception exception) {
+	    Log.e(TAG, exception.toString());
+
+	    return new String();
+	}
+    }
+
+    public String decryptWithSender(final UUID senderKeyId, final String cipherText) {
+	try {
+	    final var cipher = Cipher.getInstance("AES/GCM/NoPadding");
+
+	    cipher.init(Cipher.DECRYPT_MODE, messageKeyLookupRegistry.get(senderKeyId), AESUtil.generateIv());
+
+	    final var plainText = cipher.doFinal(Base64.decode(cipherText));
+
+	    return new String(plainText);
+	}
+	catch (final Exception exception) {
+	    Log.e(TAG, exception.toString());
+
+	    return new String();
+	}
+    }
+
+    // find UUID of currentKeyRotation null
+    public String decryptWithSender(final String cipherText) {
+	return decryptWithSender(currentKeyRotationId, cipherText);
     }
 }

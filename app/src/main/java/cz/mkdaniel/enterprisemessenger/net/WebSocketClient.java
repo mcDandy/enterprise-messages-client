@@ -272,13 +272,13 @@ public class WebSocketClient {
 
         executor.execute(() -> {
             try {
-                byte[] rawPacketBytes = /*packet.serialize()*/new byte[32];
+                byte[] rawPacketBytes = packet.getPayload();
+
                 if (webSocket != null) {
                     boolean success = webSocket.send(ByteString.of(rawPacketBytes));
 
                     if (success) {
-                        Log.d(TAG, "Sent packet " + Packet.typeName(packet.getType())
-                                + " (" + rawPacketBytes.length + " bytes)");
+                        Log.d(TAG, "Sent packet " + Packet.typeName(packet.getType()) + " (" + rawPacketBytes.length + " bytes)");
                     } else {
                         Log.w(TAG, "Failed to enqueue packet " + Packet.typeName(packet.getType()));
                     }

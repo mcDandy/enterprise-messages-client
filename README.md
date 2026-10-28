@@ -1,4 +1,3 @@
-```md
 # Enterprise Messages Client
 
 A secure end-to-end encrypted messaging Android client for connecting to a messaging server, managing accounts, joining rooms, and sending/receiving encrypted messages.
@@ -28,7 +27,6 @@ The app is organized as a standard Android project with a single `app` module an
 
 ## Project Structure
 
-```text
 enterprise-messages-client/
 ├── app/
 │   ├── src/
@@ -73,7 +71,6 @@ enterprise-messages-client/
 ├── README.md
 ├── .gitignore
 └── te
-```
 
 ## Technology Stack
 
@@ -131,4 +128,3 @@ This project is designed around secure messaging and includes cryptographic key 
 ## License
 
 To be added. This repository is a University course credit task. Please do not redistribute, or modify it.
-```
