@@ -111,12 +111,13 @@ public class WebSocketClient {
      */
     public void connectAsync(final String url, final String token) {
         shouldConnect.set(true);
+        this.token = token;
         cancelScheduledReconnect();
 
         executor.execute(() -> {
             try {
                 disconnectInternal(false);
-                Log.d(TAG, "Connecting to WebSocket URL: " + currentUrl + " with token: " + token);
+                Log.d(TAG, "Connecting to WebSocket URL: " + currentUrl + " with token: " + redactToken(token));
 
                 final var request = new Request
 		    .Builder()
@@ -227,11 +228,19 @@ public class WebSocketClient {
                 Log.d(TAG, "Attempting automatic WebSocket reconnection...");
                 try {
                     disconnectInternal(false);
+                    String activeToken = token;
                     if (tokenProvider != null) {
-                        //currentUrl = formatWebSocketUrl(currentAddress, tokenProvider.fetchToken());
+                        String freshToken = tokenProvider.fetchToken();
+                        if (freshToken != null && !freshToken.isEmpty()) {
+                            activeToken = freshToken;
+                            this.token = freshToken;
+                        }
                     }
                     Request request = new Request.Builder()
                             .url(currentUrl)
+                            .addHeader("Authorization", String.format("Bearer %s", activeToken))
+                            .addHeader("Upgrade", "websocket")
+                            .addHeader("Connection", "Upgrade")
                             .build();
                     webSocket = okHttpClient.newWebSocket(request, createWebSocketListener());
                 } catch (Exception e) {
@@ -260,7 +269,7 @@ public class WebSocketClient {
 
         executor.execute(() -> {
             try {
-                byte[] rawPacketBytes = /*packet.serialize()*/new byte[32];
+                byte[] rawPacketBytes = packet.serialize(cryptoManager, channelEncryptionKey);
                 if (webSocket != null) {
                     boolean success = webSocket.send(ByteString.of(rawPacketBytes));
 

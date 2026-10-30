@@ -185,10 +185,21 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 	    jwtToken = accountStore.getJwtToken();
 	}
 
-	if (jwtToken.isEmpty() && accountStore.isLoggedIn()) {
+	if (accountStore.isLoggedIn()) {
 	    String username = accountStore.getUsername();
 	    String password = accountStore.getPassword();
-	    jwtToken = login(currentServerHTTPIp, username, password);
+	    if (!username.isEmpty() && !password.isEmpty()) {
+		if (jwtToken.isEmpty()) {
+		    jwtToken = login(currentServerHTTPIp, username, password);
+		} else {
+		    // Test if existing stored token is still valid
+		    JSONArray testServers = makeGETRequestCollection("/api/servers");
+		    if (testServers == null) {
+			Log.d(TAG, "Stored JWT token invalid or expired, re-authenticating with saved credentials...");
+			jwtToken = login(currentServerHTTPIp, username, password);
+		    }
+		}
+	    }
 	}
 
 	if (jwtToken.isEmpty()) {
@@ -218,10 +229,15 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 	if (memberships != null) {
 	    Log.d(TAG, memberships.toString());
 
-	for (var i = 0; i < memberships.length(); ++i) {
-	    Log.d(TAG, makeGETRequest("/api/users/" + memberships.getJSONObject(i).get("userId") +  "/key").toString());
-	
-	    // update key map/store
+	    for (var i = 0; i < memberships.length(); ++i) {
+		var member = memberships.getJSONObject(i);
+		if (member.has("userId")) {
+		    var keyObj = makeGETRequest("/api/users/" + member.get("userId") + "/key");
+		    if (keyObj != null) {
+			Log.d(TAG, keyObj.toString());
+		    }
+		}
+	    }
 	}
 	}
 	catch (final Exception exception) {
@@ -239,19 +255,30 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 	    loginJson.put("username", username);
 	    loginJson.put("password", password);
 
-	    final var resObj = makePOSTRequest("/api/auth/login", loginJson);
-	    if (resObj != null) {
-	        final var token = resObj.optString("token", "");
-	        Log.d(TAG, "Authentication successful, obtained JWT token");
-	        if (!token.isEmpty()) {
-	            this.jwtToken = token;
-	        }
-	        return token;
+	    final var requestBody = RequestBody.create(loginJson.toString(), MediaType.parse("application/json; charset=utf-8"));
+	    final var baseUrl = (httpUrl != null && !httpUrl.isEmpty()) ? httpUrl : currentServerHTTPIp;
+	    final var loginRequest = new Request.Builder()
+		    .url(baseUrl + "/api/auth/login")
+		    .post(requestBody)
+		    .build();
+
+	    try (final var response = httpClient.newCall(loginRequest).execute()) {
+		if (response.isSuccessful() && response.body() != null) {
+		    final var resStr = response.body().string();
+		    final var resObj = new JSONObject(resStr);
+		    final var token = resObj.optString("token", "");
+		    Log.d(TAG, "Authentication successful, obtained JWT token");
+		    if (!token.isEmpty()) {
+			this.jwtToken = token;
+			new AccountStore(context).saveJwtToken(token);
+		    }
+		    return token;
+		}
+		Log.w(TAG, "Login failed with HTTP " + response.code());
 	    }
 	    return "";
 	} catch (Exception e) {
 	    Log.w(TAG, "Login request failed: " + e.getMessage());
-	
 	    return "";
 	}
     }
@@ -311,6 +338,7 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 		return null;
 	    }
     }
+
     private JSONObject makePOSTRequest(final String endpoint, final JSONObject body) {
 	    final var requestBody = RequestBody.create(body.toString(), MediaType.parse("application/json; charset=utf-8"));
 	    final var loginRequest = new Request
@@ -345,7 +373,7 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 		.Builder()
 		.url(String.format("%s%s", currentServerHTTPIp, endpoint))
 		.addHeader("Authorization", String.format("Bearer %s", jwtToken))
-		.post(requestBody)
+		.put(requestBody)
 		.build();
 
 	    try (final var response = httpClient.newCall(loginRequest).execute()) {
@@ -356,11 +384,11 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 		    return resObj;
 		}
 		
-		Log.w(TAG, "Login failed with HTTP " + response.code());
+		Log.w(TAG, "PUT failed with HTTP " + response.code());
 		return null;
 	    }
 	    catch (final Exception exception) {
-		Log.e(TAG, "Login failed with HTTP ");
+		Log.e(TAG, "PUT failed with HTTP ");
 
 		return null;
 	    }
@@ -371,6 +399,7 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 		.Builder()
 		.url(String.format("%s%s", currentServerHTTPIp, endpoint))
 		.addHeader("Authorization", String.format("Bearer %s", jwtToken))
+		.delete()
 		.build();
 
 	    try (final var response = httpClient.newCall(loginRequest).execute()) {
@@ -381,12 +410,12 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 		    return resObj;
 		}
 
-		Log.w(TAG, "Login failed with HTTP " + response.code());
+		Log.w(TAG, "DELETE failed with HTTP " + response.code());
 
 		return null;
 	    }
 	    catch (final Exception exception) {
-		Log.e(TAG, "Login failed with HTTP ");
+		Log.e(TAG, "DELETE failed with HTTP ");
 
 		return null;
 	    }
@@ -421,6 +450,7 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 		    Log.d(TAG, "Registration response, obtained token: " + !token.isEmpty());
 		    if (!token.isEmpty()) {
 		        this.jwtToken = token;
+		        new AccountStore(context).saveJwtToken(token);
 		    }
 		    return token;
 		}
@@ -437,30 +467,6 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
      */
     public void joinChannel(final String iD) {
 	try {
-	    /*this.currentRoomId = roomId;
-
-	    if (!webSocketClient.isConnected()) {
-		Log.w(TAG, "Cannot join room " + roomId + ": Not connected to server");
-		return;
-	    }
-
-	    long channelLongId = 1L;
-
-	    if (roomId != null) {
-		String numericOnly = roomId.replaceAll("\\D+", "");
-		if (!numericOnly.isEmpty()) {
-		    channelLongId = Long.parseLong(numericOnly);
-		} else {
-		    channelLongId = Math.abs((long) roomId.hashCode());
-		}
-	    }
-
-	    ByteBuffer buffer = ByteBuffer.allocate(8);
-	    buffer.putLong(channelLongId);
-
-	    Packet joinPacket = new Packet();
-	    webSocketClient.sendPacketAsync(joinPacket);
-	    Log.d(TAG, "Sent ROOM_JOIN for channel: " + channelLongId + " (" + roomId + ")");*/
 	} catch (Exception e) {
 	    Log.e(TAG, "Error sending ROOM_JOIN packet", e);
 	}
@@ -478,7 +484,6 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 		return;
 	    }
 
-//	    webSocketClient.setChannelEncryptionKey(encryptionKey);
 	    byte[] textBytes = text.getBytes(StandardCharsets.UTF_8);
 
 	    Packet messagePacket = new Packet(Packet.TYPE_CHAT_MESSAGE, textBytes);
@@ -492,6 +497,7 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
     }
 
     public void disconnect() {
+	this.jwtToken = "";
 	webSocketClient.disconnect();
     }
 
@@ -499,31 +505,6 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
     public void onConnected(String url) {
 	Log.d(TAG, "WebSocket connected successfully: " + url);
 	notifyStateChanged(true, currentServerHTTPIp);
-
-	/*if (!jwtToken.isEmpty()) {
-	    try {
-		Packet handshakePacket = new Packet(Packet.TYPE_UNKNOWN, jwtToken.getBytes(StandardCharsets.UTF_8));
-		webSocketClient.sendPacketAsync(handshakePacket);
-		Log.d(TAG, "Sent HANDSHAKE packet with JWT token");
-	    } catch (Exception e) {
-		Log.e(TAG, "Error sending HANDSHAKE", e);
-	    }
-	}
-
-	try {
-	    if (cryptoManager.getPublicKey() != null) {
-		byte[] pubKeyBytes = cryptoManager.getPublicKey().getEncoded();
-		Packet keyExchangePacket = new Packet();
-		webSocketClient.sendPacketAsync(keyExchangePacket);
-		Log.d(TAG, "Sent KEY_EXCHANGE_REQ packet");
-	    }
-	} catch (Exception e) {
-	    Log.e(TAG, "Error sending KEY_EXCHANGE_REQ", e);
-	}
-
-	if (!currentRoomId.isEmpty()) {
-	    joinChannel(currentRoomId);
-	}*/
     }
 
     @Override
@@ -555,25 +536,6 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 		break;
 
 	    case Packet.TYPE_KEY_ROTATION:
-		{
-		    // get number of neighbours from payload
-		    // generate new private key
-		    // generate hash of new private key
-		    // add entry to key hash mapping
-		    // cryptoManager.addNewHashKeyMapping();
-		    // create rotate key message with current key hash
-		    // send rotate key message to server
-		    // create N public key unicast messages, where n is the number of client in this chat
-		    // send N unicast messages to server
-
-		    //final var newKey = generateNewKeyRotation();
-		    //final var newKeyHash = cryptoManager.hashKey(newKey);
-
-		    //for (peer : peers) {
-			// send n Packet.TYPE_UNICAST_ROTATED_KEY
-			//webSocketClient.sendPacketAsync(multicastRequest);
-		    //}
-		}
 		break;
 
 	    default:
