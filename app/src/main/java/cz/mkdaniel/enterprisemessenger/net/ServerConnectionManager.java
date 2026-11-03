@@ -16,6 +16,7 @@ import org.json.JSONArray;
 import java.nio.charset.StandardCharsets;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -224,12 +225,14 @@ return;
 
 	    for (var i = 0; i < peerKeys.length(); ++i) {
 		final var peer = peerKeys.getJSONObject(i);
-		final var peerId = peer.getLong("id");
+		final var peerId = peer.getLong("userId");
 		final var peerPublicKey = peer.getString("publicKey");
 	    
 		Log.d(TAG, String.format("Establishing public key %s with peer %d", peerPublicKey, peerId));
 
 		final var peerKey = cryptoManager.deriveSharedSecret(Base64.decode(peerPublicKey, Base64.NO_WRAP));
+	
+		Log.d(TAG, String.format("PeerKey: %s", Arrays.toString(peerKey)));
 
 		cryptoManager.putNewPeerKeyEntry(peerId, peerKey);
 	    }
@@ -579,6 +582,7 @@ return;
 		if (!isChannelVisible(visibleChannelId)) {
 		    NotificationHelper.showChannelMessageNotification(context, visibleChannelId, null);
 		}
+
 		break;
 
 	    case Packet.TYPE_UNKNOWN:
@@ -615,47 +619,77 @@ return;
 		    final var newRotation = cryptoManager.generateSenderSymmetricSecretRotatedKey(rotationUUID);
 		    //cryptoManager.putNewUUIDRotationEntry(rotationUUID, newRotation);
 		    final var peers = makeGETRequestCollection(String.format("/api/channels/%d/keys", channelId));
+
+		    Log.d(TAG, peers.toString());
  
 		    //for (final var peer : peers) {
 		    for (var i = 0; i < peers.length(); ++i) {
-			final var peerIdRaw = peers.getJSONObject(i).get("id");
+			//final var peerIdRaw = peers.getJSONObject(i).get("id");
 			
-			Log.d(TAG, String.format("%s is the raw peerId to unicast to", peerIdRaw));
+			//Log.d(TAG, String.format("%s is the raw peerId to unicast to", peerIdRaw));
 
-			var peerId = -1L;
+			final var peer = peers.getJSONObject(i);
+			final var peerId = /*-1L*/peers.getJSONObject(i).getLong("userId");
 
-			if (peerIdRaw instanceof String/* checkedPeerId*/)
-			    peerId = Long.parseLong((String) peerIdRaw/*.toString()checkedPeerId*/);
+			//if (peerIdRaw instanceof String/* checkedPeerId*/)
+			    //peerId = Long.parseLong((String) peerIdRaw/*.toString()checkedPeerId*/);
 
-			final var peerSecretSymmetricKey = cryptoManager.retrieveSecretSymmetricKey(peerId); // do checked cast
+			Log.d(TAG, String.format("Unicasting to %d", peerId));
+
+			var peerSecretSymmetricKey = cryptoManager.retrieveSecretSymmetricKey(peerId); // do checked cast
+
+
+			if (peerSecretSymmetricKey == null) {
+			    Log.d(TAG, String.format("Did not communicate with %d yet, will create the key on the spot", peerId));
+		
+			    final var peerPublicKey = peer.getString("publicKey");
+	    
+			    Log.d(TAG, String.format("Establishing public key %s with peer %d", peerPublicKey, peerId));
+
+			    peerSecretSymmetricKey = cryptoManager.deriveSharedSecret(Base64.decode(peerPublicKey, Base64.NO_WRAP));
+
+			    cryptoManager.putNewPeerKeyEntry(peerId, peerSecretSymmetricKey);
+			}
+
 			final var encryptedSenderKey = cryptoManager.encryptPayload(newRotation.getBytes(), peerSecretSymmetricKey);
-			final var unicastBuffer = ByteBuffer.allocate(1024);
+			final var unicastBuffer = ByteBuffer.allocate(/*512*/2*Long.BYTES+/*newRotation.getBytes().length*/encryptedSenderKey.length);
 	
 			//unicastBuffer.put((String)Integer.parseInt(peers.getJSON(i).get("id"))); // do checked cast
-			unicastBuffer.put(newRotation.getBytes());
+			unicastBuffer.putLong(peerId);
+			unicastBuffer.putLong(channelId);
+			//unicastBuffer.put(newRotation.getBytes());
+			unicastBuffer.put(encryptedSenderKey);
 
 			final var rotationUnicast = new Packet(Packet.TYPE_UNICAST_ROTATED_KEY, /*newRotation.getEncoded()getBytes()*/unicastBuffer.array());
 
 			webSocketClient.sendPacketAsync(rotationUnicast);
 		    }
 		}
-
+ 
 		break;
 
 	    case Packet.TYPE_UNICAST_ROTATED_KEY:
 		{	
 		    Log.d(TAG, "Key rotation unicast received from the server");
+		    wrappedPayload.get();
 
 		    final var peerId = wrappedPayload.getLong();
 		    final var mostSignificant = wrappedPayload.getLong();
 		    final var leastSignigicant = wrappedPayload.getLong();
 		    final var rotationUUID = new UUID(mostSignificant, leastSignigicant);
-		    final var newRotation = wrappedPayload.array();
+		    //final var newRotation = wrappedPayload./*array()*/slice(/*3*Long.BYTES*/0, wrappedPayload.capacity()/*-3*Long.BYTES*/);
+		    //final var newRotation = wrappedPayload./*get*/slice(0 3*Long.BYTES, wrappedPayload.remaining());
+		    final var newRotation = new byte[wrappedPayload.remaining()];
+		    
+		    wrappedPayload.get(newRotation);
 		    // decrypt the new key rotation with shared ECDH key
-		    final var newRotationDecrypted = cryptoManager.decryptPayload(newRotation, cryptoManager.retrieveSecretSymmetricKey(peerId));
+		    
+		    Log.d(TAG, String.format("Encrypted key is %s", Arrays.toString(newRotation/*.array()*/)));
+
+		    final var newRotationDecrypted = cryptoManager.decryptPayload(newRotation/*.array()*/, cryptoManager.retrieveSecretSymmetricKey(peerId));
 		    
 		    cryptoManager.putNewUUIDRotationEntry(rotationUUID, newRotationDecrypted);
-		    Log.d(TAG, String.format("Rotated to %s", rotationUUID));
+		    Log.d(TAG, String.format("Rotated to %s from %d", rotationUUID, peerId));
 		}
 
 		break;

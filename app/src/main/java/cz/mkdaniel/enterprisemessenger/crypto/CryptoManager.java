@@ -10,6 +10,7 @@ import android.util.Log;
 
 import java.util.Map;
 import java.util.UUID;
+import java.util.Arrays;
 
 import java.security.KeyFactory;
 import java.security.KeyPair;
@@ -62,7 +63,7 @@ public class CryptoManager { // TODO: this is a god class anti-pattern, and it m
      * n keyPair for n members?
      */    
     private final Map<Long, byte[]> userKeyLookupRegistry = new ConcurrentHashMap<>();
-    //private SecretKey currentKeyRotation;
+    private SecretKey currentKeyRotation;
     private UUID currentKeyRotationId;
 
     private CryptoManager(Context context) {
@@ -115,9 +116,15 @@ public class CryptoManager { // TODO: this is a god class anti-pattern, and it m
 		Log.d(TAG, "EC key pair generated successfully!");
 	    } else {
 		Log.d(TAG, "Loading existing EC key pair from KeyStore...");
+
 		KeyStore.PrivateKeyEntry privateKeyEntry = (KeyStore.PrivateKeyEntry) keyStore.getEntry(KEY_ALIAS, null);
 		PrivateKey privateKey = privateKeyEntry.getPrivateKey();
-		PublicKey publicKey = privateKeyEntry.getCertificate().getPublicKey();
+		PublicKey publicKey = privateKeyEntry
+		    .getCertificate()
+		    .getPublicKey();
+	
+		Log.d(TAG, String.format("Stored PublicKey: %s", Arrays.toString(publicKey.getEncoded())));
+
 		keyPair = new KeyPair(publicKey, privateKey);
 	    }
 	} catch (Exception e) {
@@ -131,7 +138,9 @@ public class CryptoManager { // TODO: this is a god class anti-pattern, and it m
     private void generateSoftwareKeyPair() {
 	try {
 	    KeyPairGenerator keyPairGenerator = KeyPairGenerator.getInstance("EC");
+
 	    keyPairGenerator.initialize(new ECGenParameterSpec("secp256r1"));
+
 	    keyPair = keyPairGenerator.generateKeyPair();
 
 	    Log.d(TAG, "Software EC key pair generated successfully!");
@@ -142,6 +151,7 @@ public class CryptoManager { // TODO: this is a god class anti-pattern, and it m
 
     public PublicKey getPublicKey() {
 	KeyPair kp = getOrCreateKeyPair();
+
 	return kp != null ? kp.getPublic() : null;
     }
 
@@ -163,15 +173,18 @@ public class CryptoManager { // TODO: this is a god class anti-pattern, and it m
 	}
 
 	byte[] iv = new byte[12];
+
 	System.arraycopy(encryptedBytes, 0, iv, 0, 12);
 
 	int cipherTextLen = encryptedBytes.length - 12;
 	byte[] cipherText = new byte[cipherTextLen];
+
 	System.arraycopy(encryptedBytes, 12, cipherText, 0, cipherTextLen);
 
 	SecretKey secretKey = new SecretKeySpec(aesKeyBytes, "AES");
 	Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
-	GCMParameterSpec spec = new GCMParameterSpec(128, iv);
+	GCMParameterSpec spec = new GCMParameterSpec(128/*256*/, iv);
+
 	cipher.init(Cipher.DECRYPT_MODE, secretKey, spec);
 
 	return cipher.doFinal(cipherText);
@@ -188,11 +201,11 @@ public class CryptoManager { // TODO: this is a god class anti-pattern, and it m
 
 	SecretKey secretKey = new SecretKeySpec(aesKeyBytes, "AES");
 	Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
-	GCMParameterSpec spec = new GCMParameterSpec(128, iv);
+	GCMParameterSpec spec = new GCMParameterSpec(128/*256*/, iv);
+
 	cipher.init(Cipher.ENCRYPT_MODE, secretKey, spec);
 
 	byte[] cipherText = cipher.doFinal(plainBytes);
-
 	byte[] result = new byte[12 + cipherText.length];
 
 	System.arraycopy(iv, 0, result, 0, 12);
@@ -206,18 +219,26 @@ public class CryptoManager { // TODO: this is a god class anti-pattern, and it m
      * to derive a shared 256-bit AES secret key.
      */
     public byte[] deriveSharedSecret(byte[] remotePublicKeyBytes) throws Exception {
+	Log.d(TAG, String.format("remotePublicKeyBytes PublicKey: %s", Arrays.toString(remotePublicKeyBytes)));
+
 	final var keyFactory = KeyFactory.getInstance("EC");
 	final var keySpec = new X509EncodedKeySpec(remotePublicKeyBytes);
 	final var remotePublicKey = keyFactory.generatePublic(keySpec);
 	final var keyAgreement = KeyAgreement.getInstance("ECDH");
 
 	keyAgreement.init(getOrCreateKeyPair().getPrivate());
-	keyAgreement.doPhase(remotePublicKey, true);
+	keyAgreement.doPhase(remotePublicKey, true/*false*/);
 
 	final var sharedSecret = keyAgreement.generateSecret();
-	final var sha256 = MessageDigest.getInstance("SHA-256");
+	final var sha256 = MessageDigest
+	    .getInstance("SHA-256")
+	    .digest(sharedSecret);
 
-	return sha256.digest(sharedSecret);
+	Log.d(TAG, String.format("DerivedSharedSecret bytes: %s", Arrays.toString(sharedSecret)));
+
+	return sha256;
+	//return sha256.digest(sharedSecret);
+	//return sharedSecret;
     }
 
     /**
@@ -249,23 +270,32 @@ public class CryptoManager { // TODO: this is a god class anti-pattern, and it m
 	messageKeyLookupRegistry.put(keyId, key);	
     }
 
-    public byte[] retrieveSecretSymmetricKey(final Long peerId) {
+    public byte[]/*SecretKey*/ retrieveSecretSymmetricKey(final Long peerId) {
+	Log.d(TAG, String.format("PeerKeyRegistry: %s", userKeyLookupRegistry));
+
 	return userKeyLookupRegistry.get(peerId);
+	    //.getEncoded();
     }
 
     public void putNewPeerKeyEntry(final Long peerId, final byte[] key) {
+	Log.d(TAG, String.format("PeerKeyRegistry: %s", userKeyLookupRegistry));
 	userKeyLookupRegistry.put(peerId, key);	
     }
 
     public String encryptWithSender(final String input) {
 	try {
 	    final var cipher = Cipher.getInstance("AES/GCM/NoPadding");
+	    final var iv = new byte[13];
 
-	    cipher.init(Cipher.ENCRYPT_MODE, currentKeyRotation, AESUtil.generateIv());
+	    new SecureRandom().nextBytes(iv);
+
+	    final var gCMParameterSpec = new GCMParameterSpec(256, iv);
+
+	    cipher.init(Cipher.ENCRYPT_MODE, currentKeyRotation/*messageKeyLookupRegistry.get(currentKeyRotationId)*/, gCMParameterSpec);
 
 	    final var cipherText = cipher.doFinal(input.getBytes());
 
-	    return Base64.encodeToString(cipherText);
+	    return Base64.encodeToString(cipherText, Base64.NO_WRAP);
 	}
 	catch (final Exception exception) {
 	    Log.e(TAG, exception.toString());
@@ -278,9 +308,15 @@ public class CryptoManager { // TODO: this is a god class anti-pattern, and it m
 	try {
 	    final var cipher = Cipher.getInstance("AES/GCM/NoPadding");
 
-	    cipher.init(Cipher.DECRYPT_MODE, messageKeyLookupRegistry.get(senderKeyId), AESUtil.generateIv());
+	    final var iv = new byte[13];
 
-	    final var plainText = cipher.doFinal(Base64.decode(cipherText));
+	    new SecureRandom().nextBytes(iv);
+
+	    final var gCMParameterSpec = new GCMParameterSpec(256, iv);
+
+	    cipher.init(Cipher.DECRYPT_MODE, currentKeyRotation/*messageKeyLookupRegistry.get(senderKeyId).getEncoded()*/, gCMParameterSpec);
+
+	    final var plainText = cipher.doFinal(Base64.decode(cipherText, Base64.NO_WRAP));
 
 	    return new String(plainText);
 	}

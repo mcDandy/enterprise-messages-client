@@ -272,7 +272,9 @@ public class WebSocketClient {
 
         executor.execute(() -> {
             try {
-                byte[] rawPacketBytes = packet.getPayload();
+                final var rawPacketBytes = ByteBuffer.allocate(packet.getPayload().length + 1).put(new byte[]{packet.getType()}).put(packet.getPayload()).array();
+
+		Log.d(TAG, Arrays.toString(rawPacketBytes));
 
                 if (webSocket != null) {
                     boolean success = webSocket.send(ByteString.of(rawPacketBytes));
