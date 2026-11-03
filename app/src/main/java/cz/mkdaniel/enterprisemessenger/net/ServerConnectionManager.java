@@ -186,8 +186,6 @@ return;
 
     private void fetchJwtTokenAndConnect(String serverIp) {
 	try {
-	    //final var username = "android_user1";
-	    //final var password = "GuestPassword123";
 	    var pubKey = cryptoManager.getPublicKeyBase64();
 	    AccountStore accountStore = new AccountStore(context);
 
@@ -207,20 +205,6 @@ return;
 
 	    webSocketClient.connectAsync(serverIp, jwtToken);
 
-	    //Log.d(TAG, "retrieving servers");
-
-	    //final var servers = makeGETRequestCollection("/api/servers");
-
-	    /*if (servers != null) {
-		Log.d(TAG, servers.toString());
-	    }*/
-
-	    //final var channels = makeGETRequestCollection(/*"/api/servers/1/channels"*/String.format("/api/servers/%d/channels", servers));
-
-	    /*if (channels != null) {
-		Log.d(TAG, channels.toString());
-	    }*/
-
 	    final var peerKeys = makeGETRequestCollection(String.format("/api/channels/2/keys"));
 
 	    for (var i = 0; i < peerKeys.length(); ++i) {
@@ -236,18 +220,6 @@ return;
 
 		cryptoManager.putNewPeerKeyEntry(peerId, peerKey);
 	    }
-
-	    /*final var memberships = makeGETRequestCollection("/api/servers/1/channels/1/members");
-
-	    if (memberships != null) {
-		Log.d(TAG, memberships.toString());
-
-		for (var i = 0; i < memberships.length(); ++i) {
-		    Log.d(TAG, makeGETRequest("/api/users/" + memberships.getJSONObject(i).get("userId") +  "/key").toString());
-
-		    // update key map/store
-		}
-	    }*/
 	}
 	catch (final Exception exception) {
 	    Log.e(TAG, exception.toString());
@@ -284,6 +256,10 @@ return;
 
 	    return "";
 	}
+    }
+
+    public void joinChannel(final String channelId) {
+
     }
 
     private JSONObject makeGETRequest(final String endpoint) {
@@ -464,40 +440,6 @@ return;
     }
 
     /**
-     * Send REST request to join channel with the supplied ID.
-     */
-    public void joinChannel(final String iD) {
-	try {
-	    /*this.currentRoomId = roomId;
-
-	      if (!webSocketClient.isConnected()) {
-	      Log.w(TAG, "Cannot join room " + roomId + ": Not connected to server");
-	      return;
-	      }
-
-	      long channelLongId = 1L;
-
-	      if (roomId != null) {
-	      String numericOnly = roomId.replaceAll("\\D+", "");
-	      if (!numericOnly.isEmpty()) {
-	      channelLongId = Long.parseLong(numericOnly);
-	      } else {
-	      channelLongId = Math.abs((long) roomId.hashCode());
-	      }
-	      }
-
-	      ByteBuffer buffer = ByteBuffer.allocate(8);
-	      buffer.putLong(channelLongId);
-
-	      Packet joinPacket = new Packet();
-	      webSocketClient.sendPacketAsync(joinPacket);
-	      Log.d(TAG, "Sent ROOM_JOIN for channel: " + channelLongId + " (" + roomId + ")");*/
-	} catch (Exception e) {
-	    Log.e(TAG, "Error sending ROOM_JOIN packet", e);
-	}
-    }
-
-    /**
      * Encrypts and transmits a chat message packet to the server.
      */
     public void sendChatMessage(String text, String senderUsername, byte[] encryptionKey) {
@@ -509,8 +451,7 @@ return;
 		return;
 	    }
 
-	    //	    webSocketClient.setChannelEncryptionKey(encryptionKey);
-	    byte[] textBytes = text.getBytes(StandardCharsets.UTF_8);
+	    final var textBytes = text.getBytes(StandardCharsets.UTF_8);
 
 	    Packet messagePacket = new Packet(Packet.TYPE_CHAT_MESSAGE, textBytes);
 	    webSocketClient.sendPacketAsync(messagePacket);
@@ -530,31 +471,6 @@ return;
     public void onConnected(String url) {
 	Log.d(TAG, "WebSocket connected successfully: " + url);
 	notifyStateChanged(true, currentServerHTTPIp);
-
-	/*if (!jwtToken.isEmpty()) {
-	  try {
-	  Packet handshakePacket = new Packet(Packet.TYPE_UNKNOWN, jwtToken.getBytes(StandardCharsets.UTF_8));
-	  webSocketClient.sendPacketAsync(handshakePacket);
-	  Log.d(TAG, "Sent HANDSHAKE packet with JWT token");
-	  } catch (Exception e) {
-	  Log.e(TAG, "Error sending HANDSHAKE", e);
-	  }
-	}
-
-	try {
-	if (cryptoManager.getPublicKey() != null) {
-	byte[] pubKeyBytes = cryptoManager.getPublicKey().getEncoded();
-	Packet keyExchangePacket = new Packet();
-	webSocketClient.sendPacketAsync(keyExchangePacket);
-	Log.d(TAG, "Sent KEY_EXCHANGE_REQ packet");
-	}
-	} catch (Exception e) {
-	Log.e(TAG, "Error sending KEY_EXCHANGE_REQ", e);
-	}
-
-	if (!currentRoomId.isEmpty()) {
-	joinChannel(currentRoomId);
-	}*/
     }
 
     /**
@@ -594,7 +510,6 @@ return;
 
 	    case Packet.TYPE_KEY_ROTATION:
 		{
-		    //final Byte uUIDSizeBytes = 16;
 		    Log.d(TAG, "Key rotation initiated by the server");
 
 		    var offset = 1;
@@ -617,22 +532,13 @@ return;
 		    Log.d(TAG, "New key rotation channelId is set to: " + channelId);
 
 		    final var newRotation = cryptoManager.generateSenderSymmetricSecretRotatedKey(rotationUUID);
-		    //cryptoManager.putNewUUIDRotationEntry(rotationUUID, newRotation);
 		    final var peers = makeGETRequestCollection(String.format("/api/channels/%d/keys", channelId));
 
 		    Log.d(TAG, peers.toString());
  
-		    //for (final var peer : peers) {
-		    for (var i = 0; i < peers.length(); ++i) {
-			//final var peerIdRaw = peers.getJSONObject(i).get("id");
-			
-			//Log.d(TAG, String.format("%s is the raw peerId to unicast to", peerIdRaw));
-
+		    for (var i = 0; i < peers.length(); ++i) { // make collection request return Collection<JSONObject>
 			final var peer = peers.getJSONObject(i);
-			final var peerId = /*-1L*/peers.getJSONObject(i).getLong("userId");
-
-			//if (peerIdRaw instanceof String/* checkedPeerId*/)
-			    //peerId = Long.parseLong((String) peerIdRaw/*.toString()checkedPeerId*/);
+			final var peerId = peers.getJSONObject(i).getLong("userId");
 
 			Log.d(TAG, String.format("Unicasting to %d", peerId));
 
@@ -652,15 +558,13 @@ return;
 			}
 
 			final var encryptedSenderKey = cryptoManager.encryptPayload(newRotation.getBytes(), peerSecretSymmetricKey);
-			final var unicastBuffer = ByteBuffer.allocate(/*512*/2*Long.BYTES+/*newRotation.getBytes().length*/encryptedSenderKey.length);
+			final var unicastBuffer = ByteBuffer.allocate(2*Long.BYTES+encryptedSenderKey.length);
 	
-			//unicastBuffer.put((String)Integer.parseInt(peers.getJSON(i).get("id"))); // do checked cast
 			unicastBuffer.putLong(peerId);
 			unicastBuffer.putLong(channelId);
-			//unicastBuffer.put(newRotation.getBytes());
 			unicastBuffer.put(encryptedSenderKey);
 
-			final var rotationUnicast = new Packet(Packet.TYPE_UNICAST_ROTATED_KEY, /*newRotation.getEncoded()getBytes()*/unicastBuffer.array());
+			final var rotationUnicast = new Packet(Packet.TYPE_UNICAST_ROTATED_KEY, unicastBuffer.array());
 
 			webSocketClient.sendPacketAsync(rotationUnicast);
 		    }
@@ -677,18 +581,15 @@ return;
 		    final var mostSignificant = wrappedPayload.getLong();
 		    final var leastSignigicant = wrappedPayload.getLong();
 		    final var rotationUUID = new UUID(mostSignificant, leastSignigicant);
-		    //final var newRotation = wrappedPayload./*array()*/slice(/*3*Long.BYTES*/0, wrappedPayload.capacity()/*-3*Long.BYTES*/);
-		    //final var newRotation = wrappedPayload./*get*/slice(0 3*Long.BYTES, wrappedPayload.remaining());
 		    final var newRotation = new byte[wrappedPayload.remaining()];
 		    
 		    wrappedPayload.get(newRotation);
-		    // decrypt the new key rotation with shared ECDH key
 		    
-		    Log.d(TAG, String.format("Encrypted key is %s", Arrays.toString(newRotation/*.array()*/)));
+		    Log.d(TAG, String.format("Encrypted key is %s", Arrays.toString(newRotation)));
 
-		    final var newRotationDecrypted = cryptoManager.decryptPayload(newRotation/*.array()*/, cryptoManager.retrieveSecretSymmetricKey(peerId));
+		    final var newRotationDecrypted = new String(cryptoManager.decryptPayload(newRotation, cryptoManager.retrieveSecretSymmetricKey(peerId)));
 		    
-		    cryptoManager.putNewUUIDRotationEntry(rotationUUID, newRotationDecrypted);
+		    cryptoManager.putNewUUIDRotationEntry(rotationUUID, Base64.decode(newRotationDecrypted, Base64.NO_WRAP));
 		    Log.d(TAG, String.format("Rotated to %s from %d", rotationUUID, peerId));
 		}
 
