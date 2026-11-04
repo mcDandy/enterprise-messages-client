@@ -9,6 +9,11 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
+
+import java.util.Arrays;
+
+import java.nio.ByteBuffer;
+
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import okhttp3.OkHttpClient;
@@ -16,6 +21,7 @@ import okhttp3.Request;
 import okhttp3.Response;
 import okhttp3.WebSocket;
 import okhttp3.WebSocketListener;
+
 import okio.ByteString;
 
 import cz.mkdaniel.enterprisemessenger.crypto.CryptoManager;
@@ -111,13 +117,12 @@ public class WebSocketClient {
      */
     public void connectAsync(final String url, final String token) {
         shouldConnect.set(true);
-        this.token = token;
         cancelScheduledReconnect();
 
         executor.execute(() -> {
             try {
                 disconnectInternal(false);
-                Log.d(TAG, "Connecting to WebSocket URL: " + currentUrl + " with token: " + redactToken(token));
+                Log.d(TAG, "Connecting to WebSocket URL: " + currentUrl + " with token: " + token);
 
                 final var request = new Request
 		    .Builder()
@@ -135,6 +140,7 @@ public class WebSocketClient {
                 if (listener != null) {
                     listener.onError(e);
                 }
+
                 scheduleReconnect();
             }
         });
@@ -155,10 +161,15 @@ public class WebSocketClient {
             @Override
             public void onMessage(@NonNull WebSocket webSocket, @NonNull ByteString bytes) {
                 try {
-                    byte[] rawBytes = bytes.toByteArray();
-                    Packet packet = Packet.readFromByteArray(rawBytes);
-                    Log.d(TAG, "Received packet " + Packet.typeName(packet.getType())
-                            + ", payload length: " + packet.getPayload().length);
+                    Log.d(TAG, bytes.toString());
+
+		    final var rawBytes = ByteBuffer.wrap(bytes.toByteArray());
+
+                    Log.d(TAG, "Received packet " + Arrays.toString(bytes.toByteArray()));
+
+                    final var packet = new Packet(rawBytes.get(0), rawBytes.slice(1, rawBytes.array().length - 1).array());
+
+                    Log.d(TAG, "Received packet " + Packet.typeName(packet.getType()) + ", payload length: " + packet.getPayload().length);
 
                     if (listener != null) {
                         listener.onPacketReceived(packet);
@@ -228,19 +239,11 @@ public class WebSocketClient {
                 Log.d(TAG, "Attempting automatic WebSocket reconnection...");
                 try {
                     disconnectInternal(false);
-                    String activeToken = token;
                     if (tokenProvider != null) {
-                        String freshToken = tokenProvider.fetchToken();
-                        if (freshToken != null && !freshToken.isEmpty()) {
-                            activeToken = freshToken;
-                            this.token = freshToken;
-                        }
+                        //currentUrl = formatWebSocketUrl(currentAddress, tokenProvider.fetchToken());
                     }
                     Request request = new Request.Builder()
                             .url(currentUrl)
-                            .addHeader("Authorization", String.format("Bearer %s", activeToken))
-                            .addHeader("Upgrade", "websocket")
-                            .addHeader("Connection", "Upgrade")
                             .build();
                     webSocket = okHttpClient.newWebSocket(request, createWebSocketListener());
                 } catch (Exception e) {
@@ -269,13 +272,15 @@ public class WebSocketClient {
 
         executor.execute(() -> {
             try {
-                byte[] rawPacketBytes = packet.serialize(cryptoManager, channelEncryptionKey);
+                final var rawPacketBytes = ByteBuffer.allocate(packet.getPayload().length + 1).put(new byte[]{packet.getType()}).put(packet.getPayload()).array();
+
+		Log.d(TAG, Arrays.toString(rawPacketBytes));
+
                 if (webSocket != null) {
                     boolean success = webSocket.send(ByteString.of(rawPacketBytes));
 
                     if (success) {
-                        Log.d(TAG, "Sent packet " + Packet.typeName(packet.getType())
-                                + " (" + rawPacketBytes.length + " bytes)");
+                        Log.d(TAG, "Sent packet " + Packet.typeName(packet.getType()) + " (" + rawPacketBytes.length + " bytes)");
                     } else {
                         Log.w(TAG, "Failed to enqueue packet " + Packet.typeName(packet.getType()));
                     }
