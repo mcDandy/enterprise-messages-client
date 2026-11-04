@@ -17,7 +17,6 @@ import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.ListAdapter;
 import androidx.recyclerview.widget.RecyclerView;
 
-import java.util.Arrays;
 import java.util.List;
 
 import cz.mkdaniel.enterprisemessenger.R;
@@ -37,7 +36,8 @@ public class RoomsFragment extends Fragment {
         // Get the selected server index, name, and IP address passed from TransformFragment
         int serverIndex = getArguments() != null ? getArguments().getInt("serverIndex", 0) : 0;
         String serverName = getArguments() != null ? getArguments().getString("serverName", "Server") : "Server";
-        String serverIp = getArguments() != null ? getArguments().getString("serverIp", "127.0.0.1") : "127.0.0.1";
+        String defaultIp = getString(R.string.server_ip);
+        String serverIp = getArguments() != null ? getArguments().getString("serverIp", defaultIp) : defaultIp;
 
         RecyclerView recyclerView = new RecyclerView(requireContext());
         recyclerView.setLayoutManager(new LinearLayoutManager(requireContext()));
@@ -62,17 +62,6 @@ public class RoomsFragment extends Fragment {
         );
         recyclerView.setAdapter(adapter);
 
-        // Placeholder rooms until (or if) the server's channel list arrives
-        List<Room> placeholderRooms = Arrays.asList(
-                new Room("r1", "general", ServerConnectionManager.defaultChannelSecret(1), true),
-                new Room("r2", "random", ServerConnectionManager.defaultChannelSecret(2), false),
-                new Room("r3", "announcements", ServerConnectionManager.defaultChannelSecret(3), false),
-                new Room("r4", "development", ServerConnectionManager.defaultChannelSecret(4), true),
-                new Room("r5", "design", ServerConnectionManager.defaultChannelSecret(5), false),
-                new Room("r6", "support", ServerConnectionManager.defaultChannelSecret(6), false)
-        );
-        adapter.submitList(placeholderRooms);
-
         ServerConnectionManager.getInstance(requireContext()).fetchChannels(serverIp,
                 new ServerConnectionManager.Callback<List<Room>>() {
                     @Override
@@ -83,7 +72,7 @@ public class RoomsFragment extends Fragment {
 
                     @Override
                     public void onFailure(String error) {
-                        Log.w(TAG, "Keeping placeholder rooms, channel list unavailable: " + error);
+                        Log.w(TAG, "Failed to load channel list: " + error);
                     }
                 });
 

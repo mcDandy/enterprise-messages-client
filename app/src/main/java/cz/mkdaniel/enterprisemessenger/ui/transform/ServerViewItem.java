@@ -25,10 +25,6 @@ public class ServerViewItem {
         this(id, text, ipAddress, drawableId, 0);
     }
 
-    public ServerViewItem(String text, int drawableId) {
-        this("srv_" + text.hashCode(), text, "192.168.1.1", drawableId, 0);
-    }
-
     public String getId() {
         return id;
     }

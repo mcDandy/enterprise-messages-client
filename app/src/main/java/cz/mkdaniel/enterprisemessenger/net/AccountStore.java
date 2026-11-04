@@ -38,6 +38,12 @@ public class AccountStore {
                 .apply();
     }
 
+    public synchronized void saveJwtToken(String token) {
+        prefs.edit()
+                .putString(KEY_JWT_TOKEN, token)
+                .apply();
+    }
+
     public synchronized void clearSession() {
         prefs.edit()
                 .remove(KEY_USERNAME)
@@ -52,21 +58,11 @@ public class AccountStore {
     }
 
     public synchronized String getUsername() {
-        String username = prefs.getString(KEY_USERNAME, null);
-        if (username == null) {
-            username = "android_" + randomHex(4);
-            prefs.edit().putString(KEY_USERNAME, username).apply();
-        }
-        return username;
+        return prefs.getString(KEY_USERNAME, "");
     }
 
     public synchronized String getPassword() {
-        String password = prefs.getString(KEY_PASSWORD, null);
-        if (password == null) {
-            password = randomHex(16);
-            prefs.edit().putString(KEY_PASSWORD, password).apply();
-        }
-        return password;
+        return prefs.getString(KEY_PASSWORD, "");
     }
 
     /**
