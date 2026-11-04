@@ -24,6 +24,7 @@ import okhttp3.Request;
 import okhttp3.RequestBody;
 import okhttp3.Response;
 
+import cz.mkdaniel.enterprisemessenger.R;
 import cz.mkdaniel.enterprisemessenger.crypto.CryptoManager;
 import cz.mkdaniel.enterprisemessenger.notification.NotificationHelper;
 import cz.mkdaniel.enterprisemessenger.ui.message.Message;
@@ -38,8 +39,6 @@ import cz.mkdaniel.enterprisemessenger.ui.transform.Room;
 public class ServerConnectionManager implements WebSocketClient.WebSocketClientListener {
     public static final String HTTPS_PROTOCOL = "https";
     public static final String WS_PROTOCOL = "wss";
-    public static final String WS_HOST = "172.18.0.1";
-    public static final Integer WS_PORT = 32779;
     public static final String WS_ENDPOINT_PATH = "wss";
 
     private static final String TAG = "ServerConnectionManager";
@@ -53,8 +52,8 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final Set<ConnectionListener> listeners = new CopyOnWriteArraySet<>();
-    private final String currentServerHTTPIp = String.format("%s://%s:%d", HTTPS_PROTOCOL, WS_HOST, WS_PORT);
-    private final String currentServerWSIp = String.format("%s://%s:%d/%s", WS_PROTOCOL, WS_HOST, WS_PORT, WS_ENDPOINT_PATH);
+    private final String currentServerHTTPIp;
+    private final String currentServerWSIp;
 
     private String jwtToken = "";
     private long visibleChannelId;
@@ -130,6 +129,12 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
     private ServerConnectionManager(Context context) {
 	this.context = context.getApplicationContext();
 	this.cryptoManager = CryptoManager.getInstance(context);
+
+	String wsHost = this.context.getString(R.string.server_ip);
+	int wsPort = this.context.getResources().getInteger(R.integer.server_port);
+	this.currentServerHTTPIp = String.format("%s://%s:%d", HTTPS_PROTOCOL, wsHost, wsPort);
+	this.currentServerWSIp = String.format("%s://%s:%d/%s", WS_PROTOCOL, wsHost, wsPort, WS_ENDPOINT_PATH);
+
 	this.webSocketClient = new WebSocketClient(cryptoManager, currentServerWSIp);
 	this.webSocketClient.setListener(this);
 	this.httpClient = new OkHttpClient();

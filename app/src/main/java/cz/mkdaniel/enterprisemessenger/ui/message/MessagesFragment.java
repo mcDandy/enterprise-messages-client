@@ -107,10 +107,6 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
         binding.recyclerviewMessages.setLayoutManager(layoutManager);
         binding.recyclerviewMessages.setAdapter(adapter);
 
-        // Initial messages
-        List<Message> initialMessages = generatePlaceholderMessages();
-        adapter.submitList(initialMessages);
-
         // --- Server Connection setup ---
         connectionManager = ServerConnectionManager.getInstance(requireContext());
         connectionManager.addListener(this);
@@ -262,21 +258,6 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
             connectionManager.removeListener(this);
         }
         binding = null;
-    }
-
-    private List<Message> generatePlaceholderMessages() {
-        long now = System.currentTimeMillis();
-        List<Message> messages = new ArrayList<>();
-        for (int i = 1; i <= 5; i++) {
-            String sender = (i % 2 == 0) ? "Alice" : "Bob";
-            messages.add(new Message(
-                    UUID.randomUUID().toString(),
-                    "Welcome to #" + (roomName != null ? roomName : "channel") + "! Message " + i,
-                    sender,
-                    now - (5L - i) * 60_000L
-            ));
-        }
-        return messages;
     }
 
     // ---------- adapter & view holder ----------

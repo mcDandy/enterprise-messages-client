@@ -66,7 +66,7 @@ public class ServerRepository {
         String json = prefs.getString(KEY_SERVER_LIST, null);
 
         if (json == null || json.isEmpty()) {
-            List<ServerViewItem> defaultServers = createDefaultServers();
+            List<ServerViewItem> defaultServers = createDefaultServers(context);
             saveServers(context, defaultServers);
             return defaultServers;
         }
@@ -87,7 +87,7 @@ public class ServerRepository {
             }
         } catch (JSONException e) {
             Log.e(TAG, "Error parsing stored servers JSON", e);
-            List<ServerViewItem> defaultServers = createDefaultServers();
+            List<ServerViewItem> defaultServers = createDefaultServers(context);
             saveServers(context, defaultServers);
             return defaultServers;
         }
@@ -171,18 +171,12 @@ public class ServerRepository {
         getPrefs(context).edit().putString(KEY_SERVER_LIST, jsonArray.toString()).apply();
     }
 
-    private List<ServerViewItem> createDefaultServers() {
+    private List<ServerViewItem> createDefaultServers(Context context) {
         List<ServerViewItem> items = new ArrayList<>();
-        // First server default to local server IP (10.0.2.2:8080 for Android Emulator, 127.0.0.1:8080)
-        items.add(new ServerViewItem("srv_local", "Local Development Server", "10.0.2.2:8080", AVATAR_DRAWABLES[0], 0));
-
-        for (int i = 1; i < AVATAR_DRAWABLES.length; i++) {
-            String serverId = "srv_" + (i + 1);
-            String serverName = "Server #" + (i + 1);
-            String ipAddress = "10.0.0." + (i + 1) + ":8080";
-            int unreadCount = (i == 1) ? 3 : ((i == 3) ? 1 : 0);
-            items.add(new ServerViewItem(serverId, serverName, ipAddress, AVATAR_DRAWABLES[i], unreadCount));
-        }
+        String serverIp = context.getString(R.string.server_ip);
+        int serverPort = context.getResources().getInteger(R.integer.server_port);
+        String formattedIp = serverIp + ":" + serverPort;
+        items.add(new ServerViewItem("srv_default", context.getString(R.string.default_server_name), formattedIp, AVATAR_DRAWABLES[0], 0));
         return items;
     }
 }
