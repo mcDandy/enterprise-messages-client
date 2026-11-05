@@ -453,7 +453,7 @@ return;
 
 	    final var textBytes = text.getBytes(StandardCharsets.UTF_8);
 
-	    Packet messagePacket = new Packet(Packet.TYPE_CHAT_MESSAGE, textBytes);
+	    final var messagePacket = new Packet(Packet.TYPE_CHAT_MESSAGE, cryptoManager.encryptWithSender(new String(textBytes)).getBytes());
 	    webSocketClient.sendPacketAsync(messagePacket);
 
 	    Log.d(TAG, "Sent CHAT_MESSAGE (" + textBytes.length + " bytes)");
@@ -486,13 +486,17 @@ return;
 
 	switch (type) {
 	    case Packet.TYPE_CHAT_MESSAGE:
-		String messageText = new String(packet.getPayload(), StandardCharsets.UTF_8);
-		Message msg = new Message(
-			String.valueOf(System.currentTimeMillis()),
-			messageText,
-			"Server User",
-			System.currentTimeMillis()
-			);
+		wrappedPayload.get();
+
+		var decryptedMessageText = new byte[wrappedPayload.remaining()];
+
+		wrappedPayload.get(decryptedMessageText);
+
+		decryptedMessageText = cryptoManager.decryptWithSender(new String(decryptedMessageText)).getBytes();
+
+		final var messageText = new String(decryptedMessageText, StandardCharsets.UTF_8);
+		final var msg = new Message(String.valueOf(System.currentTimeMillis()), messageText, "Server User", System.currentTimeMillis());
+		
 		notifyMessageReceived(msg);
 
 		if (!isChannelVisible(visibleChannelId)) {
