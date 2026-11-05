@@ -27,6 +27,7 @@ The app is organized as a standard Android project with a single `app` module an
 
 ## Project Structure
 
+```txt
 enterprise-messages-client/
 ├── app/
 │   ├── src/
@@ -71,6 +72,7 @@ enterprise-messages-client/
 ├── README.md
 ├── .gitignore
 └── te
+```
 
 ## Technology Stack
 
