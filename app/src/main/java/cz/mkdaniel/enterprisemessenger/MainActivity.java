@@ -80,6 +80,25 @@ public class MainActivity extends AppCompatActivity {
             NavigationUI.setupWithNavController(bottomNavigationView, navController);
         }
 
+        navController.addOnDestinationChangedListener((controller, destination, arguments) -> {
+            int id = destination.getId();
+            if (id == R.id.nav_login || id == R.id.nav_register) {
+                if (bottomNavigationView != null) {
+                    bottomNavigationView.setVisibility(View.GONE);
+                }
+                if (getSupportActionBar() != null) {
+                    getSupportActionBar().hide();
+                }
+            } else {
+                if (bottomNavigationView != null) {
+                    bottomNavigationView.setVisibility(View.VISIBLE);
+                }
+                if (getSupportActionBar() != null) {
+                    getSupportActionBar().show();
+                }
+            }
+        });
+
         AccountStore accountStore = new AccountStore(this);
         if (!accountStore.isLoggedIn()) {
             navController.navigate(R.id.nav_login);

@@ -37,7 +37,7 @@ public class LoginFragment extends Fragment {
 
         binding.buttonLogin.setOnClickListener(v -> performLogin(navController));
 
-        binding.buttonGoToRegister.setOnClickListener(v -> navController.navigate(R.id.nav_register));
+        binding.buttonGoToRegister.setOnClickListener(v -> navController.navigate(R.id.action_login_to_register));
     }
 
     private void performLogin(NavController navController) {

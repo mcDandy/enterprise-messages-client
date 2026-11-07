@@ -100,7 +100,7 @@ public class TransformFragment extends Fragment {
                         args.putInt("serverIndex", serverIndex);
                         args.putString("serverName", serverName);
                         args.putString("serverIp", serverIp);
-                        navController.navigate(R.id.nav_rooms, args);
+                        navController.navigate(R.id.action_transform_to_rooms, args);
                     }
 
                     @Override

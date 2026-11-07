@@ -59,7 +59,7 @@ public class RoomsFragment extends Fragment {
                     args.putString("roomName", room.getName());
                     args.putString("encryptionKey", room.getEncryptionKey());
                     NavController navController = NavHostFragment.findNavController(this);
-                    navController.navigate(R.id.nav_messages, args);
+                    navController.navigate(R.id.action_rooms_to_messages, args);
                 }
         );
         recyclerView.setAdapter(adapter);
