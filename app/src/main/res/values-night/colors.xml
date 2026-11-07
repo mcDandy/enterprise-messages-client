@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Theme dynamic colors (Dark) -->
+    <color name="bg_app">#0F172A</color>
+    <color name="surface_card">#1E293B</color>
+    <color name="surface_variant">#334155</color>
+    <color name="outline_border">#334155</color>
+
+    <color name="text_primary">#F8FAFC</color>
+    <color name="text_secondary">#94A3B8</color>
+
+    <color name="msg_bubble_sent">#4F46E5</color>
+    <color name="msg_text_sent">#FFFFFF</color>
+
+    <color name="msg_bubble_received">#334155</color>
+    <color name="msg_text_received">#F8FAFC</color>
+    <color name="msg_sender_received">#818CF8</color>
+</resources>

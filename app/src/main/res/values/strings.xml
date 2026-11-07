@@ -50,6 +50,8 @@
     <string name="error_server_unreachable">Server cannot be reached</string>
 
     <string name="image_view_item_transform_content_description">Represents an image view in the item</string>
+    <string name="subtitle_server_item">Workspace</string>
+    <string name="channel_hash">#</string>
 
     <!-- Server Connection Configuration -->
     <string name="default_server_name">Default Server</string>

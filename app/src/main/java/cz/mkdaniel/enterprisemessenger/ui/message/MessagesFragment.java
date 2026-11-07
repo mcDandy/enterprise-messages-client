@@ -25,12 +25,17 @@ import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.ListAdapter;
 import androidx.recyclerview.widget.RecyclerView;
 
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.List;
+import java.util.Locale;
 import java.util.UUID;
 
 import cz.mkdaniel.enterprisemessenger.R;
 import cz.mkdaniel.enterprisemessenger.databinding.FragmentMessagesBinding;
+import cz.mkdaniel.enterprisemessenger.databinding.ItemMessageReceivedBinding;
+import cz.mkdaniel.enterprisemessenger.databinding.ItemMessageSentBinding;
 import cz.mkdaniel.enterprisemessenger.net.ServerConnectionManager;
 import cz.mkdaniel.enterprisemessenger.notification.NotificationHelper;
 
@@ -49,9 +54,6 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
     private FragmentMessagesBinding binding;
     private MessageAdapter adapter;
     private ServerConnectionManager connectionManager;
-
-    private ColorStateList defaultInputTint;
-    private ColorStateList redInputTint;
 
     private String serverIp;
     private String roomId;
@@ -95,10 +97,6 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
         Log.d(TAG, "Opening MessagesFragment for serverIp=" + serverIp
                 + ", room=" + roomName + " (" + roomId + ")"
                 + ", encryptionKey=" + encryptionKey);
-
-        // --- Underline tint setup ---
-        defaultInputTint = binding.edittextMessageInput.getBackgroundTintList();
-        redInputTint = ColorStateList.valueOf(Color.RED);
 
         // --- RecyclerView setup ---
         LinearLayoutManager layoutManager = new LinearLayoutManager(requireContext());
@@ -182,9 +180,9 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
     private void updateInputUnderline(boolean isConnected) {
         if (binding == null) return;
         if (isConnected) {
-            binding.edittextMessageInput.setBackgroundTintList(defaultInputTint);
+            binding.cardInputContainer.setStrokeColor(requireContext().getColor(R.color.outline_border));
         } else {
-            binding.edittextMessageInput.setBackgroundTintList(redInputTint);
+            binding.cardInputContainer.setStrokeColor(Color.RED);
         }
     }
 
@@ -262,7 +260,11 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
 
     // ---------- adapter & view holder ----------
 
-    private static class MessageAdapter extends ListAdapter<Message, MessageViewHolder> {
+    private static class MessageAdapter extends ListAdapter<Message, RecyclerView.ViewHolder> {
+
+        private static final int VIEW_TYPE_SENT = 1;
+        private static final int VIEW_TYPE_RECEIVED = 2;
+        private final SimpleDateFormat dateFormat = new SimpleDateFormat("HH:mm", Locale.getDefault());
 
         protected MessageAdapter() {
             super(new DiffUtil.ItemCallback<Message>() {
@@ -280,31 +282,61 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
             });
         }
 
+        @Override
+        public int getItemViewType(int position) {
+            Message message = getItem(position);
+            if (message.getSender() != null && message.getSender().equalsIgnoreCase("You")) {
+                return VIEW_TYPE_SENT;
+            }
+            return VIEW_TYPE_RECEIVED;
+        }
+
         @NonNull
         @Override
-        public MessageViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
-            View itemView = LayoutInflater.from(parent.getContext())
-                    .inflate(android.R.layout.simple_list_item_2, parent, false);
-            return new MessageViewHolder(itemView);
+        public RecyclerView.ViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
+            LayoutInflater inflater = LayoutInflater.from(parent.getContext());
+            if (viewType == VIEW_TYPE_SENT) {
+                ItemMessageSentBinding sentBinding = ItemMessageSentBinding.inflate(inflater, parent, false);
+                return new SentMessageViewHolder(sentBinding);
+            } else {
+                ItemMessageReceivedBinding receivedBinding = ItemMessageReceivedBinding.inflate(inflater, parent, false);
+                return new ReceivedMessageViewHolder(receivedBinding);
+            }
         }
 
         @Override
-        public void onBindViewHolder(@NonNull MessageViewHolder holder, int position) {
+        public void onBindViewHolder(@NonNull RecyclerView.ViewHolder holder, int position) {
             Message message = getItem(position);
-            holder.text1.setText(message.getSender());
-            holder.text2.setText(message.getText());
+            String timeStr = dateFormat.format(new Date(message.getTimestamp()));
+
+            if (holder instanceof SentMessageViewHolder) {
+                SentMessageViewHolder sentHolder = (SentMessageViewHolder) holder;
+                sentHolder.binding.textMessageBody.setText(message.getText());
+                sentHolder.binding.textMessageTime.setText(timeStr);
+            } else if (holder instanceof ReceivedMessageViewHolder) {
+                ReceivedMessageViewHolder receivedHolder = (ReceivedMessageViewHolder) holder;
+                receivedHolder.binding.textMessageSender.setText(message.getSender());
+                receivedHolder.binding.textMessageBody.setText(message.getText());
+                receivedHolder.binding.textMessageTime.setText(timeStr);
+            }
         }
     }
 
-    private static class MessageViewHolder extends RecyclerView.ViewHolder {
+    private static class SentMessageViewHolder extends RecyclerView.ViewHolder {
+        private final ItemMessageSentBinding binding;
 
-        private final TextView text1;
-        private final TextView text2;
+        public SentMessageViewHolder(ItemMessageSentBinding binding) {
+            super(binding.getRoot());
+            this.binding = binding;
+        }
+    }
 
-        public MessageViewHolder(@NonNull View itemView) {
-            super(itemView);
-            text1 = itemView.findViewById(android.R.id.text1);
-            text2 = itemView.findViewById(android.R.id.text2);
+    private static class ReceivedMessageViewHolder extends RecyclerView.ViewHolder {
+        private final ItemMessageReceivedBinding binding;
+
+        public ReceivedMessageViewHolder(ItemMessageReceivedBinding binding) {
+            super(binding.getRoot());
+            this.binding = binding;
         }
     }
 }

@@ -41,6 +41,8 @@ public class RoomsFragment extends Fragment {
 
         RecyclerView recyclerView = new RecyclerView(requireContext());
         recyclerView.setLayoutManager(new LinearLayoutManager(requireContext()));
+        recyclerView.setClipToPadding(false);
+        recyclerView.setPadding(0, 12, 0, 12);
         recyclerView.setId(View.generateViewId());
 
         ListAdapter<Room, RoomViewHolder> adapter = new RoomsAdapter(

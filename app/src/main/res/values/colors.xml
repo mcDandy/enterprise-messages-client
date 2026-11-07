@@ -1,10 +1,41 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="purple_200">#FFBB86FC</color>
-    <color name="purple_500">#FF6200EE</color>
-    <color name="purple_700">#FF3700B3</color>
-    <color name="teal_200">#FF03DAC5</color>
-    <color name="teal_700">#FF018786</color>
+    <!-- Brand colors -->
+    <color name="indigo_50">#EEF2FF</color>
+    <color name="indigo_100">#E0E7FF</color>
+    <color name="indigo_500">#6366F1</color>
+    <color name="indigo_600">#4F46E5</color>
+    <color name="indigo_700">#4338CA</color>
+
+    <color name="emerald_500">#10B981</color>
+    <color name="emerald_600">#059669</color>
+
+    <!-- Legacy mappings for compatibility -->
+    <color name="purple_200">#818CF8</color>
+    <color name="purple_500">#4F46E5</color>
+    <color name="purple_700">#4338CA</color>
+    <color name="teal_200">#34D399</color>
+    <color name="teal_700">#059669</color>
+
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
+
+    <!-- Theme dynamic colors (Light) -->
+    <color name="bg_app">#F8FAFC</color>
+    <color name="surface_card">#FFFFFF</color>
+    <color name="surface_variant">#F1F5F9</color>
+    <color name="outline_border">#E2E8F0</color>
+
+    <color name="text_primary">#0F172A</color>
+    <color name="text_secondary">#64748B</color>
+
+    <color name="msg_bubble_sent">#4F46E5</color>
+    <color name="msg_text_sent">#FFFFFF</color>
+
+    <color name="msg_bubble_received">#F1F5F9</color>
+    <color name="msg_text_received">#0F172A</color>
+    <color name="msg_sender_received">#4F46E5</color>
+
+    <color name="badge_unread">#EF4444</color>
+    <color name="badge_unread_text">#FFFFFF</color>
 </resources>
