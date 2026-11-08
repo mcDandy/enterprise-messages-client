@@ -69,6 +69,7 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 	void onConnectionStateChanged(boolean connected, String serverIp);
 	void onMessageReceived(Message message);
 	void onError(String errorMessage);
+	default void onAuthRequired() {}
     }
 
     public interface Callback<T> {
@@ -139,6 +140,18 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 	this.cryptoManager = CryptoManager.getInstance(context);
 	this.webSocketClient = new WebSocketClient(cryptoManager, currentServerWSIp);
 	this.webSocketClient.setListener(this);
+	this.webSocketClient.setTokenProvider(() -> {
+	    if (jwtToken != null && !jwtToken.isEmpty()) {
+		return jwtToken;
+	    }
+	    AccountStore accountStore = new AccountStore(context);
+	    String savedToken = accountStore.getJwtToken();
+	    if (savedToken != null && !savedToken.isEmpty()) {
+		jwtToken = savedToken;
+		return savedToken;
+	    }
+	    return "";
+	});
 	this.httpClient = new OkHttpClient();
     }
 
@@ -170,6 +183,15 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 	return currentServerHTTPIp;
     }
 
+    public void handleAuthError(int statusCode, String message) {
+	Log.w(TAG, "Authentication error (" + statusCode + "): " + message + ". Clearing session and disconnecting.");
+	this.jwtToken = "";
+	AccountStore accountStore = new AccountStore(context);
+	accountStore.clearSession();
+	webSocketClient.disconnect();
+	notifyAuthRequired();
+    }
+
     /**
      * Authenticates via REST API (if needed) and connects to remote WebSocket server.
      */
@@ -177,7 +199,7 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 	if (webSocketClient.isConnected() && serverIp.equalsIgnoreCase(currentServerHTTPIp)) {
 	    Log.d(TAG, "Already connected to " + serverIp);
 	    notifyStateChanged(true, serverIp);
-return;
+	    return;
 	}
 
 	Log.d(TAG, "Initiating authentication & connection to: " + currentServerHTTPIp);
@@ -199,13 +221,18 @@ return;
 		jwtToken = login(currentServerHTTPIp, username, password);
 	    }
 
-	    if (jwtToken.isEmpty()) {
-		Log.w(TAG, "No JWT token obtained from " + currentServerHTTPIp + ", server will reject unauthenticated packets");
+	    if (jwtToken == null || jwtToken.isEmpty()) {
+		Log.w(TAG, "No valid JWT token obtained from " + currentServerHTTPIp + ", aborting WebSocket connection");
+		handleAuthError(401, "No valid JWT token available");
+		return;
 	    }
 
 	    webSocketClient.connectAsync(serverIp, jwtToken);
 
 	    final var peerKeys = makeGETRequestCollection(String.format("/api/channels/2/keys"));
+	    if (peerKeys == null) {
+		return;
+	    }
 
 	    for (var i = 0; i < peerKeys.length(); ++i) {
 		final var peer = peerKeys.getJSONObject(i);
@@ -236,21 +263,31 @@ return;
 	    loginJson.put("username", username);
 	    loginJson.put("password", password);
 
-	    final var resObj = makePOSTRequest("/api/auth/login", loginJson);
+	    final var requestBody = RequestBody.create(loginJson.toString(), MediaType.parse("application/json; charset=utf-8"));
+	    final var baseUrl = (httpUrl != null && !httpUrl.isEmpty()) ? httpUrl : currentServerHTTPIp;
+	    final var loginRequest = new Request.Builder()
+		.url(baseUrl + "/api/auth/login")
+		.post(requestBody)
+		.build();
 
-	    if (resObj != null) {
-		final var token = resObj.optString("token", "");
+	    try (final var response = httpClient.newCall(loginRequest).execute()) {
+		if (response.isSuccessful() && response.body() != null) {
+		    final var resStr = response.body().string();
+		    final var resObj = new JSONObject(resStr);
+		    final var token = resObj.optString("token", "");
 
-		Log.d(TAG, "Authentication successful, obtained JWT token");
+		    Log.d(TAG, "Authentication successful, obtained JWT token");
 
-		if (!token.isEmpty()) {
-		    this.jwtToken = token;
+		    if (!token.isEmpty()) {
+			this.jwtToken = token;
+		    }
+
+		    return token;
 		}
 
-		return token;
+		Log.w(TAG, "Login failed with HTTP " + response.code());
+		return "";
 	    }
-
-	    return "";
 	} catch (Exception e) {
 	    Log.w(TAG, "Login request failed: " + e.getMessage());
 
@@ -278,6 +315,10 @@ return;
 	    }
 
 	    Log.w(TAG, String.format("GET failed with HTTP status code: %s, and response: %s", response.code(), response));
+
+	    if (response.code() == 401 || response.code() == 403) {
+		handleAuthError(response.code(), response.message());
+	    }
 
 	    return null;
 	}
@@ -308,6 +349,10 @@ return;
 
 	    Log.w(TAG, String.format("GET failed with HTTP status code: %s, and response: %s", response.code(), response));
 
+	    if (response.code() == 401 || response.code() == 403) {
+		handleAuthError(response.code(), response.message());
+	    }
+
 	    return null;
 	}
 	catch (final Exception exception) {
@@ -337,6 +382,10 @@ return;
 
 	    Log.w(TAG, "POST failed with HTTP " + response.code());
 
+	    if (response.code() == 401 || response.code() == 403) {
+		handleAuthError(response.code(), response.message());
+	    }
+
 	    return null;
 	}
 	catch (final Exception exception) {
@@ -352,7 +401,7 @@ return;
 	    .Builder()
 	    .url(String.format("%s%s", currentServerHTTPIp, endpoint))
 	    .addHeader("Authorization", String.format("Bearer %s", jwtToken))
-	    .post(requestBody)
+	    .put(requestBody)
 	    .build();
 
 	try (final var response = httpClient.newCall(loginRequest).execute()) {
@@ -363,11 +412,16 @@ return;
 		return resObj;
 	    }
 
-	    Log.w(TAG, "Login failed with HTTP " + response.code());
+	    Log.w(TAG, "PUT failed with HTTP " + response.code());
+
+	    if (response.code() == 401 || response.code() == 403) {
+		handleAuthError(response.code(), response.message());
+	    }
+
 	    return null;
 	}
 	catch (final Exception exception) {
-	    Log.e(TAG, "Login failed with HTTP ");
+	    Log.e(TAG, "PUT failed with HTTP ");
 
 	    return null;
 	}
@@ -378,6 +432,7 @@ return;
 	    .Builder()
 	    .url(String.format("%s%s", currentServerHTTPIp, endpoint))
 	    .addHeader("Authorization", String.format("Bearer %s", jwtToken))
+	    .delete()
 	    .build();
 
 	try (final var response = httpClient.newCall(loginRequest).execute()) {
@@ -388,12 +443,16 @@ return;
 		return resObj;
 	    }
 
-	    Log.w(TAG, "Login failed with HTTP " + response.code());
+	    Log.w(TAG, "DELETE failed with HTTP " + response.code());
+
+	    if (response.code() == 401 || response.code() == 403) {
+		handleAuthError(response.code(), response.message());
+	    }
 
 	    return null;
 	}
 	catch (final Exception exception) {
-	    Log.e(TAG, "Login failed with HTTP ");
+	    Log.e(TAG, "DELETE failed with HTTP ");
 
 	    return null;
 	}
@@ -622,6 +681,12 @@ return;
 	notifyError(t != null ? t.getMessage() : "Unknown connection error");
     }
 
+    @Override
+    public void onAuthError(int statusCode, String message) {
+	Log.e(TAG, "WebSocket auth error (" + statusCode + "): " + message);
+	handleAuthError(statusCode, message);
+    }
+
     private void notifyStateChanged(boolean connected, String serverIp) {
 	mainHandler.post(() -> {
 	    for (ConnectionListener l : listeners) {
@@ -642,6 +707,14 @@ return;
 	mainHandler.post(() -> {
 	    for (ConnectionListener l : listeners) {
 		l.onError(error);
+	    }
+	});
+    }
+
+    private void notifyAuthRequired() {
+	mainHandler.post(() -> {
+	    for (ConnectionListener l : listeners) {
+		l.onAuthRequired();
 	    }
 	});
     }

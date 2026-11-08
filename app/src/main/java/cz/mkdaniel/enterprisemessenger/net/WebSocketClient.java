@@ -71,6 +71,7 @@ public class WebSocketClient {
         void onPacketReceived(Packet packet);
         void onDisconnected();
         void onError(Throwable t);
+        default void onAuthError(int statusCode, String message) {}
     }
 
     /**
@@ -110,24 +111,49 @@ public class WebSocketClient {
         return currentUrl;
     }
 
+    public boolean isTokenValid(String tokenToCheck) {
+        String t = (tokenToCheck != null && !tokenToCheck.isEmpty()) ? tokenToCheck : this.token;
+        if (t == null || t.isEmpty() || t.equalsIgnoreCase("Invalid")) {
+            if (tokenProvider != null) {
+                String fresh = tokenProvider.fetchToken();
+                if (fresh != null && !fresh.isEmpty() && !fresh.equalsIgnoreCase("Invalid")) {
+                    this.token = fresh;
+                    return true;
+                }
+            }
+            return false;
+        }
+        return true;
+    }
+
     /**
      * Asynchronously connects to the remote WebSocket URL.
      *
      * Close existing connection, if any.
      */
     public void connectAsync(final String url, final String token) {
+        if (!isTokenValid(token)) {
+            Log.w(TAG, "Cannot connect to WebSocket: token is missing or invalid");
+            shouldConnect.set(false);
+            if (listener != null) {
+                listener.onAuthError(401, "Token is missing or invalid");
+            }
+            return;
+        }
+
+        this.token = token;
         shouldConnect.set(true);
         cancelScheduledReconnect();
 
         executor.execute(() -> {
             try {
                 disconnectInternal(false);
-                Log.d(TAG, "Connecting to WebSocket URL: " + currentUrl + " with token: " + token);
+                Log.d(TAG, "Connecting to WebSocket URL: " + currentUrl + " with token: " + redactToken(this.token));
 
                 final var request = new Request
 		    .Builder()
 		    .url(currentUrl)
-		    .addHeader("Authorization", String.format("Bearer %s", token))
+		    .addHeader("Authorization", String.format("Bearer %s", this.token))
 		    .addHeader("Upgrade", "websocket")
 		    .addHeader("Connection", "Upgrade")
 		    .build();
@@ -141,7 +167,9 @@ public class WebSocketClient {
                     listener.onError(e);
                 }
 
-                scheduleReconnect();
+                if (shouldConnect.get() && isTokenValid(this.token)) {
+                    scheduleReconnect();
+                }
             }
         });
     }
@@ -202,22 +230,40 @@ public class WebSocketClient {
                 if (wasConnected && listener != null) {
                     listener.onDisconnected();
                 }
-                if (shouldConnect.get()) {
+                if (shouldConnect.get() && isTokenValid(token)) {
                     scheduleReconnect();
                 }
             }
 
             @Override
             public void onFailure(@NonNull WebSocket webSocket, @NonNull Throwable t, @Nullable Response response) {
-                Log.w(TAG, "WebSocket failure: " + t.getMessage());
+                Log.w(TAG, "WebSocket failure: " + t.getMessage() + (response != null ? " HTTP " + response.code() : ""));
                 boolean wasConnected = isConnected.getAndSet(false);
+
+                boolean isAuthError = false;
+                int statusCode = 0;
+                String errorMsg = t.getMessage();
+
+                if (response != null && (response.code() == 401 || response.code() == 403)) {
+                    isAuthError = true;
+                    statusCode = response.code();
+                    errorMsg = response.message() != null && !response.message().isEmpty() ? response.message() : "Unauthorized";
+                    Log.w(TAG, "WebSocket connection rejected with HTTP " + statusCode);
+                    shouldConnect.set(false);
+                }
+
                 if (listener != null) {
-                    listener.onError(t);
+                    if (isAuthError) {
+                        listener.onAuthError(statusCode, errorMsg);
+                    } else {
+                        listener.onError(t);
+                    }
                     if (wasConnected) {
                         listener.onDisconnected();
                     }
                 }
-                if (shouldConnect.get()) {
+
+                if (shouldConnect.get() && !isAuthError && isTokenValid(token)) {
                     scheduleReconnect();
                 }
             }
@@ -226,29 +272,52 @@ public class WebSocketClient {
 
     private synchronized void scheduleReconnect() {
         if (!shouldConnect.get()) {
+            Log.d(TAG, "Skipping WebSocket reconnect: shouldConnect is false");
             return;
         }
+
+        String currentToken = token;
+        if (tokenProvider != null) {
+            String freshToken = tokenProvider.fetchToken();
+            if (freshToken != null && !freshToken.isEmpty()) {
+                currentToken = freshToken;
+                this.token = freshToken;
+            }
+        }
+
+        if (!isTokenValid(currentToken)) {
+            Log.w(TAG, "Skipping WebSocket reconnect: Token is empty or invalid");
+            shouldConnect.set(false);
+            if (listener != null) {
+                listener.onAuthError(401, "Invalid token for reconnection");
+            }
+            return;
+        }
+
         cancelScheduledReconnect();
 
         long delay = reconnectDelayMs;
         Log.d(TAG, "Scheduling WebSocket reconnect in " + delay + " ms");
         reconnectDelayMs = Math.min(reconnectDelayMs * 2, MAX_RECONNECT_DELAY_MS);
 
+        final String tokenToUse = currentToken;
         reconnectTask = executor.schedule(() -> {
-            if (shouldConnect.get() && currentUrl != null) {
+            if (shouldConnect.get() && currentUrl != null && isTokenValid(tokenToUse)) {
                 Log.d(TAG, "Attempting automatic WebSocket reconnection...");
                 try {
                     disconnectInternal(false);
-                    if (tokenProvider != null) {
-                        //currentUrl = formatWebSocketUrl(currentAddress, tokenProvider.fetchToken());
-                    }
                     Request request = new Request.Builder()
                             .url(currentUrl)
+                            .addHeader("Authorization", String.format("Bearer %s", tokenToUse))
+                            .addHeader("Upgrade", "websocket")
+                            .addHeader("Connection", "Upgrade")
                             .build();
                     webSocket = okHttpClient.newWebSocket(request, createWebSocketListener());
                 } catch (Exception e) {
                     Log.e(TAG, "Error during WebSocket reconnect attempt", e);
-                    scheduleReconnect();
+                    if (shouldConnect.get() && isTokenValid(tokenToUse)) {
+                        scheduleReconnect();
+                    }
                 }
             }
         }, delay, TimeUnit.MILLISECONDS);

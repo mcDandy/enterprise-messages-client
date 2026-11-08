@@ -100,10 +100,47 @@ public class MainActivity extends AppCompatActivity {
         });
 
         AccountStore accountStore = new AccountStore(this);
+        ServerConnectionManager conn = ServerConnectionManager.getInstance(this);
+        conn.addListener(new ServerConnectionManager.ConnectionListener() {
+            @Override
+            public void onConnectionStateChanged(boolean connected, String serverIp) {}
+
+            @Override
+            public void onMessageReceived(cz.mkdaniel.enterprisemessenger.ui.message.Message message) {}
+
+            @Override
+            public void onError(String errorMessage) {}
+
+            @Override
+            public void onAuthRequired() {
+                runOnUiThread(() -> {
+                    if (navigationView != null) {
+                        View headerView = navigationView.getHeaderView(0);
+                        if (headerView != null) {
+                            TextView subtitleText = headerView.findViewById(R.id.textView);
+                            if (subtitleText != null) {
+                                subtitleText.setText(R.string.nav_header_subtitle);
+                            }
+                        }
+                    }
+                    NavHostFragment navHost = (NavHostFragment) getSupportFragmentManager().findFragmentById(R.id.nav_host_fragment_content_main);
+                    if (navHost != null) {
+                        NavController controller = navHost.getNavController();
+                        int currentId = controller.getCurrentDestination() != null ? controller.getCurrentDestination().getId() : 0;
+                        if (currentId != R.id.nav_login && currentId != R.id.nav_register) {
+                            androidx.navigation.NavOptions navOptions = new androidx.navigation.NavOptions.Builder()
+                                    .setPopUpTo(R.id.nav_transform, true)
+                                    .build();
+                            controller.navigate(R.id.nav_login, null, navOptions);
+                        }
+                    }
+                });
+            }
+        });
+
         if (!accountStore.isLoggedIn()) {
             navController.navigate(R.id.nav_login);
         } else {
-            ServerConnectionManager conn = ServerConnectionManager.getInstance(this);
             conn.connectToServer(conn.getCurrentServerIp());
         }
     }
