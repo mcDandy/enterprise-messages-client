@@ -204,17 +204,6 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
     }
 
     private static OkHttpClient createOkHttpClient() {
-        try {
-            final javax.net.ssl.TrustManager[] trustAllCerts = new javax.net.ssl.TrustManager[]{
-                new javax.net.ssl.X509TrustManager() {
-                    @Override
-                    public void checkClientTrusted(java.security.cert.X509Certificate[] chain, String authType) {}
-                    @Override
-                    public void checkServerTrusted(java.security.cert.X509Certificate[] chain, String authType) {}
-                    @Override
-                    public java.security.cert.X509Certificate[] getAcceptedIssuers() {
-                        return new java.security.cert.X509Certificate[]{};
-                    }
         return new OkHttpClient();
     }
 
