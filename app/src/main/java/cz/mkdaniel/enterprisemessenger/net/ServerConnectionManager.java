@@ -130,7 +130,7 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
             return ip.endsWith("/") ? ip.substring(0, ip.length() - 1) : ip;
         }
         if (ip.contains(":")) {
-            return "https://" + ip;
+            return HTTPS_PROTOCOL + "://" + ip;
         } else {
             return HTTPS_PROTOCOL + "://" + ip + ":" + WS_PORT;
         }
@@ -145,9 +145,10 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
         return wsUrl;
     }
 
-    public void fetchChannels(String serverIp, Callback<List<Room>> callback) {
+    public void fetchChannels(final String serverIp, Callback<List<Room>> callback) {
 	executor.execute(() -> {
 	    try {
+		JSONArray channelsArray = makeGETRequestCollection(normalizeHttpUrl(serverIp), "/api/servers/1/channels");
 		if (channelsArray == null) {
 		    mainHandler.post(() -> callback.onFailure("Failed to fetch channels from server"));
 
