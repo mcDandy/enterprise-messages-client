@@ -41,7 +41,7 @@ public class WebSocketClient {
     private static final int CONNECT_TIMEOUT_SECONDS = 10;
     private static final int INITIAL_RECONNECT_DELAY_MS = 1000;
     private static final int MAX_RECONNECT_DELAY_MS = 1000;
-    private static final int PING_INTERVAL_SECONDS = 1000;
+    private static final int PING_INTERVAL_SECONDS = 15;
 
     /**
      * Path of the binary WebSocket endpoint on the server (see server's {@code WebSocketConfig}).
@@ -52,7 +52,7 @@ public class WebSocketClient {
     private final AtomicBoolean shouldConnect = new AtomicBoolean(false);
 
     private final OkHttpClient okHttpClient;
-    private final String currentUrl;
+    private String currentUrl;
     private final CryptoManager cryptoManager;
 
     private WebSocket webSocket;
@@ -61,9 +61,8 @@ public class WebSocketClient {
     private String token = "Invalid";
     private TokenProvider tokenProvider;
     private String currentAddress;
-    //private String currentUrl;
 
-    private long reconnectDelayMs = /*INITIAL_RECONNECT_DELAY_MS*/20;
+    private long reconnectDelayMs = 1000;
     private ScheduledFuture<?> reconnectTask;
 
     public interface WebSocketClientListener {
@@ -85,14 +84,44 @@ public class WebSocketClient {
     public WebSocketClient(final CryptoManager cryptoManager, final String currentServerIp) {
 	currentUrl = currentServerIp;
         this.cryptoManager = cryptoManager;
-        this.okHttpClient = new OkHttpClient.Builder()
-                .connectTimeout(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-                .writeTimeout(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-                // Long-lived WebSocket connection: readTimeout MUST be 0 (no timeout)
-                .readTimeout(0, TimeUnit.MILLISECONDS)
-                // Send PING frames every 15s to keep the TCP socket alive against NAT/router timeouts
-                .pingInterval(PING_INTERVAL_SECONDS, TimeUnit.SECONDS)
-                .build();
+        this.okHttpClient = createOkHttpClient();
+    }
+
+    private static OkHttpClient createOkHttpClient() {
+        try {
+            final javax.net.ssl.TrustManager[] trustAllCerts = new javax.net.ssl.TrustManager[]{
+                new javax.net.ssl.X509TrustManager() {
+                    @Override
+                    public void checkClientTrusted(java.security.cert.X509Certificate[] chain, String authType) {}
+                    @Override
+                    public void checkServerTrusted(java.security.cert.X509Certificate[] chain, String authType) {}
+                    @Override
+                    public java.security.cert.X509Certificate[] getAcceptedIssuers() {
+                        return new java.security.cert.X509Certificate[]{};
+                    }
+                }
+            };
+
+            final javax.net.ssl.SSLContext sslContext = javax.net.ssl.SSLContext.getInstance("SSL");
+            sslContext.init(null, trustAllCerts, new java.security.SecureRandom());
+            final javax.net.ssl.SSLSocketFactory sslSocketFactory = sslContext.getSocketFactory();
+
+            return new OkHttpClient.Builder()
+                    .connectTimeout(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                    .writeTimeout(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                    .readTimeout(0, TimeUnit.MILLISECONDS)
+                    .pingInterval(PING_INTERVAL_SECONDS, TimeUnit.SECONDS)
+                    .sslSocketFactory(sslSocketFactory, (javax.net.ssl.X509TrustManager) trustAllCerts[0])
+                    .hostnameVerifier((hostname, session) -> true)
+                    .build();
+        } catch (Exception e) {
+            return new OkHttpClient.Builder()
+                    .connectTimeout(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                    .writeTimeout(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                    .readTimeout(0, TimeUnit.MILLISECONDS)
+                    .pingInterval(PING_INTERVAL_SECONDS, TimeUnit.SECONDS)
+                    .build();
+        }
     }
 
     public void setListener(WebSocketClientListener listener) {
@@ -141,6 +170,9 @@ public class WebSocketClient {
             return;
         }
 
+        if (url != null && !url.isEmpty()) {
+            this.currentUrl = url;
+        }
         this.token = token;
         shouldConnect.set(true);
         cancelScheduledReconnect();
@@ -160,7 +192,7 @@ public class WebSocketClient {
 
                 webSocket = okHttpClient.newWebSocket(request, createWebSocketListener());
             } catch (Exception e) {
-                Log.e(TAG, "Failed to initiate WebSocket connection to " + url, e);
+                Log.e(TAG, "Failed to initiate WebSocket connection to " + currentUrl, e);
                 isConnected.set(false);
 
                 if (listener != null) {
@@ -189,13 +221,11 @@ public class WebSocketClient {
             @Override
             public void onMessage(@NonNull WebSocket webSocket, @NonNull ByteString bytes) {
                 try {
-                    Log.d(TAG, bytes.toString());
+                    // Server's PacketCodec frame: 1 type byte + payload, the WS frame is the framing.
+                    byte[] raw = bytes.toByteArray();
+                    if (raw.length == 0) return;
 
-		    final var rawBytes = ByteBuffer.wrap(bytes.toByteArray());
-
-                    Log.d(TAG, "Received packet " + Arrays.toString(bytes.toByteArray()));
-
-                    final var packet = new Packet(rawBytes.get(0), rawBytes.slice(1, rawBytes.array().length - 1).array());
+                    final var packet = new Packet(raw[0], Arrays.copyOfRange(raw, 1, raw.length));
 
                     Log.d(TAG, "Received packet " + Packet.typeName(packet.getType()) + ", payload length: " + packet.getPayload().length);
 
@@ -341,9 +371,9 @@ public class WebSocketClient {
 
         executor.execute(() -> {
             try {
-                final var rawPacketBytes = ByteBuffer.allocate(packet.getPayload().length + 1).put(new byte[]{packet.getType()}).put(packet.getPayload()).array();
+                byte[] rawPacketBytes = packet.serialize();
 
-		Log.d(TAG, Arrays.toString(rawPacketBytes));
+		Log.d(TAG, "Sending packet " + Packet.typeName(packet.getType()) + ": " + Arrays.toString(rawPacketBytes));
 
                 if (webSocket != null) {
                     boolean success = webSocket.send(ByteString.of(rawPacketBytes));

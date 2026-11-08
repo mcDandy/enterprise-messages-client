@@ -15,16 +15,19 @@ import cz.mkdaniel.enterprisemessenger.crypto.CryptoManager;
  * <p>
  * Must stay in sync with the server's {@code PacketCodec} / {@code PacketType}.
  * <p>
- * Binary Wire Format (one WebSocket binary frame = one packet):
+ * Binary Wire Format (one WebSocket binary frame = one packet), matching the server's
+ * {@code PacketCodec} which uses the WebSocket frame boundary as framing and therefore has
+ * no length prefix:
  * <pre>
  * +-----------------------------------+-----------------------------------+
  * | Field                             | Size                              |
  * +-----------------------------------+-----------------------------------+
- * | Packet Type                       | 1 bytes (int16, Big-Endian)       |
- * | Payload Length                    | 4 bytes (int32, Big-Endian)       |
- * | Payload Data                      | [Payload Length] bytes            |
+ * | Packet Type                       | 1 byte                            |
+ * | Payload Data                      | rest of the frame                 |
  * +-----------------------------------+-----------------------------------+
  * </pre>
+ * Multi-byte fields inside a payload (user ids, channel ids, UUID most/least significant
+ * bits) are big-endian {@code int64}.
  * <p>
  * Authentication is no longer a packet: the JWT is passed as the {@code token} query
  * parameter of the WebSocket handshake. End-to-end encryption of chat payloads is done
@@ -33,6 +36,7 @@ import cz.mkdaniel.enterprisemessenger.crypto.CryptoManager;
 public class Packet {
     public static final byte TYPE_UNKNOWN = 0x0000; // rename to ERROR
     public static final byte TYPE_CHAT_MESSAGE = 0x1;
+    public static final byte TYPE_CHANNEL_JOIN = 0x4;
     public static final byte TYPE_KEY_ROTATION = 0xa;
     public static final byte TYPE_UNICAST_ROTATED_KEY = 0xd;
 
@@ -59,49 +63,47 @@ public class Packet {
     }
 
     /**
-     * Serializes this packet into raw binary bytes for TCP transport.
+     * Serializes this packet into the raw bytes of one WebSocket binary frame.
+     * Format: 1 type byte followed by the payload; the frame boundary is the framing, so no
+     * length prefix is written (see the server's {@code PacketCodec#encode}).
      * If an encryption key is provided, the payload is encrypted using AES-GCM before output.
-     * The 4-byte length field in the output remains unencrypted.
      */
     public byte[] serialize(final CryptoManager cryptoManager, final byte[] encryptionKey) throws Exception {
-	if (encryptionKey != null && encryptionKey.length > 0 && cryptoManager != null) {
-	    throw new RuntimeException("Cannot encrypt message due to missing dependencies");
+	byte[] outgoing = payload != null ? payload : new byte[0];
+	if (cryptoManager != null && encryptionKey != null && encryptionKey.length > 0) {
+	    outgoing = cryptoManager.encryptPayload(outgoing, encryptionKey);
 	}
 
-	final var encryptedPayload = cryptoManager.encryptPayload(payload, encryptionKey);
-	final var buffer = ByteBuffer.wrap(new byte[Byte.SIZE + Integer.SIZE + encryptedPayload.length]);
-
+	final var buffer = ByteBuffer.allocate(1 + outgoing.length);
 	buffer.order(ByteOrder.BIG_ENDIAN);
-	buffer.putInt(type);
-	buffer.putInt(payloadLength);
-	buffer.put(encryptedPayload);
+	buffer.put(type);
+	buffer.put(outgoing);
 
 	return buffer.array();
     }
 
+    public byte[] serialize() throws Exception {
+	return serialize(null, null);
+    }
+
     /**
-     * Reads an incoming packet from the TCP InputStream.
-     * First reads the unencrypted 4-byte payload length, then reads the remaining
-     * header fields and payload bytes. If encrypted, decrypts the payload using the provided key.
+     * Reads an incoming packet from a stream holding exactly one frame: the 1-byte type
+     * followed by the payload. If encrypted, decrypts the payload using the provided key.
      */
     public static Packet readFromStream(InputStream inputStream, CryptoManager cryptoManager, byte[] encryptionKey) throws Exception {
-	final var dis = (inputStream instanceof DataInputStream)? (DataInputStream) inputStream : new DataInputStream(inputStream);
+	final var dis = (inputStream instanceof DataInputStream) ? (DataInputStream) inputStream : new DataInputStream(inputStream);
 	byte type = dis.readByte();
-	int payloadLength = dis.readInt();
 
-	if (payloadLength < 0 || payloadLength > 10 * 1024 * 1024) { // 10MB safety cap
-	    throw new IOException("Invalid packet payload length: " + payloadLength);
+	final var rawPayload = dis.readAllBytes();
+
+	if (rawPayload.length > 10 * 1024 * 1024) { // 10MB safety cap
+	    throw new IOException("Invalid packet payload length: " + rawPayload.length);
 	}
 
+	byte[] finalPayload = rawPayload;
 	if (cryptoManager != null && encryptionKey != null && encryptionKey.length > 0) {
-	    throw new IllegalStateException("Received encrypted packet but no decryption key was supplied");
+	    finalPayload = cryptoManager.decryptPayload(rawPayload, encryptionKey);
 	}
-
-	byte[] rawPayload = new byte[payloadLength];
-
-	dis.readFully(rawPayload);
-
-	byte[] finalPayload = cryptoManager.decryptPayload(rawPayload, encryptionKey);
 
 	return new Packet(type, finalPayload);
     }
@@ -123,6 +125,7 @@ public class Packet {
 	switch (type) {
 	    case TYPE_UNKNOWN: return "UNKNOWN";
 	    case TYPE_CHAT_MESSAGE: return "CHAT_MESSAGE";
+	    case TYPE_CHANNEL_JOIN: return "CHANNEL_JOIN";
 	    case TYPE_KEY_ROTATION: return "KEY_ROTATION";
 	    case TYPE_UNICAST_ROTATED_KEY: return "UNICAST_ROTATED_KEY";
 	    default: return String.format("0x%02x", type);

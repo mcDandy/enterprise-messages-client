@@ -240,7 +240,7 @@ public class CryptoManager { // TODO: this is a god class anti-pattern, and it m
     }
 
     /**
-     * Generate new AES 512 key rotation secret symmetric sender key.
+     * Generate new AES key rotation secret symmetric sender key.
      */
     public String generateSenderSymmetricSecretRotatedKey(final UUID rotationId) {
 	try {
@@ -251,13 +251,14 @@ public class CryptoManager { // TODO: this is a god class anti-pattern, and it m
 	    final var rotatedKey = keyGenerator.generateKey();
 
 	    currentKeyRotationId = rotationId;
+	    currentKeyRotation = rotatedKey;
 
 	    messageKeyLookupRegistry.put(rotationId, rotatedKey.getEncoded());
 
 	    return Base64.encodeToString(rotatedKey.getEncoded(), Base64.NO_WRAP);
 	}
 	catch (final Exception exception) {
-	    Log.e(TAG, exception.toString());
+	    Log.e(TAG, "generateSenderSymmetricSecretRotatedKey failed: " + exception.getMessage(), exception);
 
 	    return null;
 	}
@@ -280,46 +281,43 @@ public class CryptoManager { // TODO: this is a god class anti-pattern, and it m
 
     public String encryptWithSender(final String input) {
 	try {
-	    final var cipher = Cipher.getInstance("AES/GCM/NoPadding");
-	    final var iv = new byte[13];
-
-	    new SecureRandom().nextBytes(iv);
-
-	    final var gCMParameterSpec = new GCMParameterSpec(256, iv);
-
-	    cipher.init(Cipher.ENCRYPT_MODE, currentKeyRotation, gCMParameterSpec);
-
-	    final var cipherText = cipher.doFinal(input.getBytes());
-
-	    return Base64.encodeToString(cipherText, Base64.NO_WRAP);
+	    if (input == null) return "";
+	    if (currentKeyRotation == null) {
+		generateSenderSymmetricSecretRotatedKey(UUID.randomUUID());
+	    }
+	    if (currentKeyRotation == null) {
+		return input;
+	    }
+	    byte[] encrypted = encryptPayload(input.getBytes(java.nio.charset.StandardCharsets.UTF_8), currentKeyRotation.getEncoded());
+	    return Base64.encodeToString(encrypted, Base64.NO_WRAP);
 	}
 	catch (final Exception exception) {
-	    Log.e(TAG, exception.toString());
+	    Log.e(TAG, "encryptWithSender failed: " + exception.getMessage(), exception);
 
-	    return new String();
+	    return input;
 	}
     }
 
     public String decryptWithSender(final UUID senderKeyId, final String cipherText) {
 	try {
-	    final var cipher = Cipher.getInstance("AES/GCM/NoPadding");
-
-	    final var iv = new byte[13];
-
-	    new SecureRandom().nextBytes(iv);
-
-	    final var gCMParameterSpec = new GCMParameterSpec(256, iv);
-
-	    cipher.init(Cipher.DECRYPT_MODE, currentKeyRotation, gCMParameterSpec);
-
-	    final var plainText = cipher.doFinal(Base64.decode(cipherText, Base64.NO_WRAP));
-
-	    return new String(plainText);
+	    if (cipherText == null || cipherText.isEmpty()) {
+		return "";
+	    }
+	    byte[] keyBytes = null;
+	    if (senderKeyId != null && messageKeyLookupRegistry.containsKey(senderKeyId)) {
+		keyBytes = messageKeyLookupRegistry.get(senderKeyId);
+	    } else if (currentKeyRotation != null) {
+		keyBytes = currentKeyRotation.getEncoded();
+	    }
+	    if (keyBytes == null) {
+		return cipherText;
+	    }
+	    byte[] encryptedBytes = Base64.decode(cipherText, Base64.NO_WRAP);
+	    byte[] plainBytes = decryptPayload(encryptedBytes, keyBytes);
+	    return new String(plainBytes, java.nio.charset.StandardCharsets.UTF_8);
 	}
 	catch (final Exception exception) {
-	    Log.e(TAG, exception.toString());
-
-	    return new String();
+	    return cipherText;
 	}
     }
 

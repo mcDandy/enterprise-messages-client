@@ -55,6 +55,6 @@
 
     <!-- Server Connection Configuration -->
     <string name="default_server_name">Default Server</string>
-    <string name="server_ip">172.18.0.1</string>
-    <integer name="server_port">32779</integer>
+    <string name="server_ip">192.168.1.115</string>
+    <integer name="server_port">8443</integer>
 </resources>

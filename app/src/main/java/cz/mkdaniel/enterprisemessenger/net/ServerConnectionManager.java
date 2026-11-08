@@ -38,14 +38,23 @@ import cz.mkdaniel.enterprisemessenger.ui.transform.Room;
 /**
  * Singleton manager handling WebSocket protocol exchanges and HTTP Auth with Enterprise Messenger servers.
  * <p>
- * Flow: REST login/register -> FCM token upload -> WebSocket {@code /ws?token=JWT} -> CHANNEL_JOIN ->
- * end-to-end encrypted CHAT_MESSAGE_ENC packets.
+ * Flow: REST login/register -> WebSocket {@code /wss} with {@code Authorization: Bearer <jwt>} ->
+ * end-to-end encrypted {@code CHAT_MESSAGE_ENC} packets.
+ * <p>
+ * The deployment address is a single point of truth in {@code @string/server_ip} /
+ * {@code @integer/server_port}; only the scheme and the {@code /wss} path are code constants.
  */
 public class ServerConnectionManager implements WebSocketClient.WebSocketClientListener {
     public static final String HTTPS_PROTOCOL = "https";
     public static final String WS_PROTOCOL = "wss";
-    public static final String WS_HOST = "172.18.0.1";
-    public static final Integer WS_PORT = 8443;
+
+    /** Default host from {@code @string/server_ip}; refreshed when the singleton is created. */
+    public static String WS_HOST = "192.168.1.115";
+
+    /** Default port from {@code @integer/server_port}; refreshed when the singleton is created. */
+    public static Integer WS_PORT = 8443;
+
+    /** Binary WebSocket endpoint of the server, see its {@code WebSocketConfig}. */
     public static final String WS_ENDPOINT_PATH = "wss";
 
     private static final String TAG = "ServerConnectionManager";
@@ -59,11 +68,19 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final Set<ConnectionListener> listeners = new CopyOnWriteArraySet<>();
-    private final String currentServerHTTPIp = String.format("%s://%s:%d", HTTPS_PROTOCOL, WS_HOST, WS_PORT);
-    private final String currentServerWSIp = String.format("%s://%s:%d/%s", WS_PROTOCOL, WS_HOST, WS_PORT, WS_ENDPOINT_PATH);
+    private String currentServerHTTPIp;
+    private String currentServerWSIp;
 
     private String jwtToken = "";
     private long visibleChannelId;
+
+    /**
+     * Symmetric key of the channel the user is currently chatting in, derived from
+     * {@link #defaultChannelSecret(long)}. Chat payloads are AES-GCM ciphertext of a small JSON
+     * envelope, so the server can store and echo them without being able to read them.
+     */
+    private volatile byte[] activeChannelKey;
+    private volatile long activeChannelId = -1L;
 
     public interface ConnectionListener {
 	void onConnectionStateChanged(boolean connected, String serverIp);
@@ -75,6 +92,30 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
     public interface Callback<T> {
 	void onResult(T result);
 	void onFailure(String error);
+    }
+
+    public static String normalizeHttpUrl(String rawIp) {
+        if (rawIp == null || rawIp.trim().isEmpty()) {
+            return String.format("%s://%s:%d", HTTPS_PROTOCOL, WS_HOST, WS_PORT);
+        }
+        String ip = rawIp.trim();
+        if (ip.startsWith("http://") || ip.startsWith("https://")) {
+            return ip.endsWith("/") ? ip.substring(0, ip.length() - 1) : ip;
+        }
+        if (ip.contains(":")) {
+            return "https://" + ip;
+        } else {
+            return "https://" + ip + ":" + WS_PORT;
+        }
+    }
+
+    public static String normalizeWsUrl(String rawIp) {
+        String httpUrl = normalizeHttpUrl(rawIp);
+        String wsUrl = httpUrl.replaceFirst("^https://", "wss://").replaceFirst("^http://", "ws://");
+        if (!wsUrl.endsWith("/" + WS_ENDPOINT_PATH)) {
+            wsUrl = wsUrl + "/" + WS_ENDPOINT_PATH;
+        }
+        return wsUrl;
     }
 
     public void fetchChannels(String serverIp, Callback<List<Room>> callback) {
@@ -135,9 +176,45 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 	}
     }
 
+    private static OkHttpClient createOkHttpClient() {
+        try {
+            final javax.net.ssl.TrustManager[] trustAllCerts = new javax.net.ssl.TrustManager[]{
+                new javax.net.ssl.X509TrustManager() {
+                    @Override
+                    public void checkClientTrusted(java.security.cert.X509Certificate[] chain, String authType) {}
+                    @Override
+                    public void checkServerTrusted(java.security.cert.X509Certificate[] chain, String authType) {}
+                    @Override
+                    public java.security.cert.X509Certificate[] getAcceptedIssuers() {
+                        return new java.security.cert.X509Certificate[]{};
+                    }
+                }
+            };
+
+            final javax.net.ssl.SSLContext sslContext = javax.net.ssl.SSLContext.getInstance("SSL");
+            sslContext.init(null, trustAllCerts, new java.security.SecureRandom());
+            final javax.net.ssl.SSLSocketFactory sslSocketFactory = sslContext.getSocketFactory();
+
+            return new OkHttpClient.Builder()
+                    .sslSocketFactory(sslSocketFactory, (javax.net.ssl.X509TrustManager) trustAllCerts[0])
+                    .hostnameVerifier((hostname, session) -> true)
+                    .build();
+        } catch (Exception e) {
+            return new OkHttpClient();
+        }
+    }
+
     private ServerConnectionManager(Context context) {
 	this.context = context.getApplicationContext();
 	this.cryptoManager = CryptoManager.getInstance(context);
+
+	// The configured deployment is the default target; a server entry selected in the UI can
+	// still override it through connectToServer().
+	WS_HOST = context.getString(cz.mkdaniel.enterprisemessenger.R.string.server_ip);
+	WS_PORT = context.getResources().getInteger(cz.mkdaniel.enterprisemessenger.R.integer.server_port);
+
+	this.currentServerHTTPIp = normalizeHttpUrl(WS_HOST + ":" + WS_PORT);
+	this.currentServerWSIp = normalizeWsUrl(WS_HOST + ":" + WS_PORT);
 	this.webSocketClient = new WebSocketClient(cryptoManager, currentServerWSIp);
 	this.webSocketClient.setListener(this);
 	this.webSocketClient.setTokenProvider(() -> {
@@ -152,7 +229,7 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 	    }
 	    return "";
 	});
-	this.httpClient = new OkHttpClient();
+	this.httpClient = createOkHttpClient();
     }
 
     public static ServerConnectionManager getInstance(Context context) {
@@ -196,17 +273,23 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
      * Authenticates via REST API (if needed) and connects to remote WebSocket server.
      */
     public void connectToServer(String serverIp) {
-	if (webSocketClient.isConnected() && serverIp.equalsIgnoreCase(currentServerHTTPIp)) {
-	    Log.d(TAG, "Already connected to " + serverIp);
-	    notifyStateChanged(true, serverIp);
+	String httpUrl = normalizeHttpUrl(serverIp);
+	String wsUrl = normalizeWsUrl(serverIp);
+
+	this.currentServerHTTPIp = httpUrl;
+	this.currentServerWSIp = wsUrl;
+
+	if (webSocketClient.isConnected() && wsUrl.equalsIgnoreCase(webSocketClient.getCurrentUrl())) {
+	    Log.d(TAG, "Already connected to " + httpUrl);
+	    notifyStateChanged(true, httpUrl);
 	    return;
 	}
 
-	Log.d(TAG, "Initiating authentication & connection to: " + currentServerHTTPIp);
-	executor.execute(() -> fetchJwtTokenAndConnect(currentServerHTTPIp));
+	Log.d(TAG, "Initiating authentication & connection to: " + httpUrl);
+	executor.execute(() -> fetchJwtTokenAndConnect(httpUrl, wsUrl));
     }
 
-    private void fetchJwtTokenAndConnect(String serverIp) {
+    private void fetchJwtTokenAndConnect(String httpUrl, String wsUrl) {
 	try {
 	    var pubKey = cryptoManager.getPublicKeyBase64();
 	    AccountStore accountStore = new AccountStore(context);
@@ -218,16 +301,16 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 	    if (jwtToken.isEmpty() && accountStore.isLoggedIn()) {
 		String username = accountStore.getUsername();
 		String password = accountStore.getPassword();
-		jwtToken = login(currentServerHTTPIp, username, password);
+		jwtToken = login(httpUrl, username, password);
 	    }
 
 	    if (jwtToken == null || jwtToken.isEmpty()) {
-		Log.w(TAG, "No valid JWT token obtained from " + currentServerHTTPIp + ", aborting WebSocket connection");
+		Log.w(TAG, "No valid JWT token obtained from " + httpUrl + ", aborting WebSocket connection");
 		handleAuthError(401, "No valid JWT token available");
 		return;
 	    }
 
-	    webSocketClient.connectAsync(serverIp, jwtToken);
+	    webSocketClient.connectAsync(wsUrl, jwtToken);
 
 	    final var peerKeys = makeGETRequestCollection(String.format("/api/channels/2/keys"));
 	    if (peerKeys == null) {
@@ -295,8 +378,65 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 	}
     }
 
+    /**
+     * Selects the channel whose messages are sent and received on the shared WebSocket session.
+     * <p>
+     * The server derives the target channel from its own session state, so there is nothing to
+     * transmit here yet; the client only needs the channel id (for notifications) and the channel
+     * key (for end-to-end encryption).
+     */
     public void joinChannel(final String channelId) {
+	final long id = parseChannelId(channelId);
+	if (id < 0) {
+	    Log.w(TAG, "joinChannel: cannot parse channel id from '" + channelId + "'");
+	    return;
+	}
 
+	this.activeChannelId = id;
+	this.activeChannelKey = channelKey(id);
+
+	// While the socket is still dialling, onConnected() sends the join for us.
+	sendChannelJoin();
+    }
+
+    /**
+     * Tells the server which channel our packets belong to. The server keeps the active channel
+     * per WebSocket session, so this has to be repeated after every (re)connection.
+     */
+    private void sendChannelJoin() {
+	final long channelId = activeChannelId;
+	if (channelId < 0) {
+	    return;
+	}
+
+	if (!webSocketClient.isConnected()) {
+	    Log.d(TAG, "WebSocket not connected yet, channel " + channelId + " join deferred until open");
+	    return;
+	}
+
+	final var joinPayload = ByteBuffer.allocate(Long.BYTES).putLong(channelId).array();
+	webSocketClient.sendPacketAsync(new Packet(Packet.TYPE_CHANNEL_JOIN, joinPayload));
+
+	Log.d(TAG, "Sent CHANNEL_JOIN for channel " + channelId);
+    }
+
+    /**
+     * AES key a channel's messages are encrypted with. Every member derives the same key, which
+     * is why it must never be sent over the wire.
+     */
+    public static byte[] channelKey(long channelId) {
+	try {
+	    return java.security.MessageDigest
+		.getInstance("SHA-256")
+		.digest(defaultChannelSecret(channelId).getBytes(StandardCharsets.UTF_8));
+	} catch (final Exception exception) {
+	    Log.e(TAG, "Failed to derive channel key", exception);
+	    return null;
+	}
+    }
+
+    public long getActiveChannelId() {
+	return activeChannelId;
     }
 
     private JSONObject makeGETRequest(final String endpoint) {
@@ -500,8 +640,15 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 
     /**
      * Encrypts and transmits a chat message packet to the server.
+     * <p>
+     * The payload is the AES-GCM ciphertext ({@code [12-byte IV][ciphertext+tag]}) of a JSON
+     * envelope carrying the message id, sender and text. The server treats it as opaque bytes and
+     * broadcasts it verbatim to every session in the channel (including ours), which is how the
+     * sender's own bubble is reconciled by {@code messageId} on the way back.
+     *
+     * @param messageId stable id used to deduplicate our own echo
      */
-    public void sendChatMessage(String text, String senderUsername, byte[] encryptionKey) {
+    public void sendChatMessage(String messageId, String text, String senderUsername) {
 	try {
 	    if (!webSocketClient.isConnected()) {
 		Log.w(TAG, "Cannot send message: Not connected to WebSocket server");
@@ -510,12 +657,23 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 		return;
 	    }
 
-	    final var textBytes = text.getBytes(StandardCharsets.UTF_8);
+	    final var envelope = new JSONObject();
+	    envelope.put("id", messageId);
+	    envelope.put("sender", senderUsername == null || senderUsername.isEmpty() ? "You" : senderUsername);
+	    envelope.put("text", text);
+	    envelope.put("timestamp", System.currentTimeMillis());
 
-	    final var messagePacket = new Packet(Packet.TYPE_CHAT_MESSAGE, cryptoManager.encryptWithSender(new String(textBytes)).getBytes());
+	    final byte[] key = activeChannelKey != null ? activeChannelKey : channelKey(activeChannelId);
+	    if (key == null) {
+		notifyError("No channel key available - open a channel before sending");
+		return;
+	    }
+
+	    final var payloadBytes = cryptoManager.encryptPayload(envelope.toString().getBytes(StandardCharsets.UTF_8), key);
+	    final var messagePacket = new Packet(Packet.TYPE_CHAT_MESSAGE, payloadBytes);
 	    webSocketClient.sendPacketAsync(messagePacket);
 
-	    Log.d(TAG, "Sent CHAT_MESSAGE (" + textBytes.length + " bytes)");
+	    Log.d(TAG, "Sent CHAT_MESSAGE to channel " + activeChannelId + " (" + payloadBytes.length + " bytes)");
 	} catch (final Exception e) {
 	    Log.e(TAG, "Failed to send chat message packet", e);
 	    notifyError("Failed to send message: " + e.getMessage());
@@ -526,9 +684,38 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 	webSocketClient.disconnect();
     }
 
+    /**
+     * Decrypts a broadcast chat payload. A message can arrive before the user opened that
+     * channel (or while browsing another one), so the active channel key is tried first and the
+     * currently visible channel key second; a wrong key only fails the GCM tag check.
+     *
+     * @return the plaintext envelope, or {@code null} when no known key opens the payload
+     */
+    private byte[] decryptChatPayload(final byte[] ciphertext) {
+	final byte[][] candidates = {activeChannelKey, channelKey(visibleChannelId)};
+
+	for (final byte[] key : candidates) {
+	    if (key == null) {
+		continue;
+	    }
+
+	    try {
+		return cryptoManager.decryptPayload(ciphertext, key);
+	    } catch (final Exception ignored) {
+		// Wrong channel key - try the next one.
+	    }
+	}
+
+	return null;
+    }
+
     @Override
     public void onConnected(String url) {
 	Log.d(TAG, "WebSocket connected successfully: " + url);
+
+	// Re-announce the channel: the server's active-channel state lives on the dead session.
+	sendChannelJoin();
+
 	notifyStateChanged(true, currentServerHTTPIp);
     }
 
@@ -545,18 +732,37 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 
 	switch (type) {
 	    case Packet.TYPE_CHAT_MESSAGE:
-		wrappedPayload.get();
+		// Payload is exactly what the sender put on the wire: AES-GCM ciphertext of the envelope.
+		byte[] payload = packet.getPayload();
+		if (payload == null || payload.length == 0) {
+		    Log.w(TAG, "Received empty CHAT_MESSAGE payload");
+		    break;
+		}
 
-		var decryptedMessageText = new byte[wrappedPayload.remaining()];
+		String messageText;
+		String senderName = "Server User";
+		String messageId = String.valueOf(System.currentTimeMillis());
+		long sentAt = System.currentTimeMillis();
 
-		wrappedPayload.get(decryptedMessageText);
+		byte[] plaintext = decryptChatPayload(payload);
+		if (plaintext == null) {
+		    Log.w(TAG, "CHAT_MESSAGE could not be decrypted with the active channel key");
+		    break;
+		}
 
-		decryptedMessageText = cryptoManager.decryptWithSender(new String(decryptedMessageText)).getBytes();
+		messageText = new String(plaintext, StandardCharsets.UTF_8);
 
-		final var messageText = new String(decryptedMessageText, StandardCharsets.UTF_8);
-		final var msg = new Message(String.valueOf(System.currentTimeMillis()), messageText, "Server User", System.currentTimeMillis());
-		
-		notifyMessageReceived(msg);
+		if (messageText.startsWith("{")) {
+		    try {
+			JSONObject jsonMsg = new JSONObject(messageText);
+			messageText = jsonMsg.optString("text", messageText);
+			senderName = jsonMsg.optString("sender", senderName);
+			messageId = jsonMsg.optString("id", messageId);
+			sentAt = jsonMsg.optLong("timestamp", sentAt);
+		    } catch (Exception ignored) {}
+		}
+
+		notifyMessageReceived(new Message(messageId, messageText, senderName, sentAt));
 
 		if (!isChannelVisible(visibleChannelId)) {
 		    NotificationHelper.showChannelMessageNotification(context, visibleChannelId, null);
@@ -575,7 +781,13 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 		{
 		    Log.d(TAG, "Key rotation initiated by the server");
 
-		    var offset = 1;
+		    // Payload is [version MSB][version LSB][channelId]; the type byte is not part of it.
+		    var offset = 0;
+
+		    if (wrappedPayload.remaining() < 3 * Long.BYTES) {
+			Log.e(TAG, "ROTATE_KEY payload too short: " + wrappedPayload.remaining() + " bytes");
+			break;
+		    }
 
 		    final var mostSignificant = wrappedPayload.getLong(offset);
 		    
@@ -595,7 +807,16 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 		    Log.d(TAG, "New key rotation channelId is set to: " + channelId);
 
 		    final var newRotation = cryptoManager.generateSenderSymmetricSecretRotatedKey(rotationUUID);
+		    if (newRotation == null) {
+			Log.e(TAG, "Failed to generate rotated sender key for " + rotationUUID);
+			break;
+		    }
+
 		    final var peers = makeGETRequestCollection(String.format("/api/channels/%d/keys", channelId));
+		    if (peers == null) {
+			Log.w(TAG, "No peer keys available for channel " + channelId + ", cannot unicast the rotated key");
+			break;
+		    }
 
 		    Log.d(TAG, peers.toString());
  
@@ -638,7 +859,14 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 	    case Packet.TYPE_UNICAST_ROTATED_KEY:
 		{	
 		    Log.d(TAG, "Key rotation unicast received from the server");
-		    wrappedPayload.get();
+
+		    // Header is [senderUserId][version MSB][version LSB] followed by the ciphertext.
+		    // The server's offline queue replays queued unicasts without that header, so the
+		    // payload must be long enough before any of it is read as a long.
+		    if (wrappedPayload.remaining() < 3 * Long.BYTES) {
+			Log.w(TAG, "UNICAST_ROTATED_KEY payload has no rotation header (" + wrappedPayload.remaining() + " bytes), ignoring");
+			break;
+		    }
 
 		    final var peerId = wrappedPayload.getLong();
 		    final var mostSignificant = wrappedPayload.getLong();
@@ -650,7 +878,13 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 		    
 		    Log.d(TAG, String.format("Encrypted key is %s", Arrays.toString(newRotation)));
 
-		    final var newRotationDecrypted = new String(cryptoManager.decryptPayload(newRotation, cryptoManager.retrieveSecretSymmetricKey(peerId)));
+		    final var sharedKey = cryptoManager.retrieveSecretSymmetricKey(peerId);
+		    if (sharedKey == null) {
+			Log.w(TAG, "No shared ECDH secret with peer " + peerId + " yet, dropping rotated key");
+			break;
+		    }
+
+		    final var newRotationDecrypted = new String(cryptoManager.decryptPayload(newRotation, sharedKey));
 		    
 		    cryptoManager.putNewUUIDRotationEntry(rotationUUID, Base64.decode(newRotationDecrypted, Base64.NO_WRAP));
 		    Log.d(TAG, String.format("Rotated to %s from %d", rotationUUID, peerId));
