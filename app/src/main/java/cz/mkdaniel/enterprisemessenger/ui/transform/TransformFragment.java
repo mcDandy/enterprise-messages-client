@@ -28,12 +28,17 @@ import cz.mkdaniel.enterprisemessenger.R;
 import cz.mkdaniel.enterprisemessenger.databinding.FragmentTransformBinding;
 import cz.mkdaniel.enterprisemessenger.databinding.ItemTransformBinding;
 import cz.mkdaniel.enterprisemessenger.notification.NotificationHelper;
-import cz.mkdaniel.enterprisemessenger.ui.server.EditServerDialogFragment;
+import cz.mkdaniel.enterprisemessenger.ui.server.ServerNameDialogFragment;
 
 /**
- * Shows the list of servers. The number of columns auto-fits to the available width:
- * each cell is at least {@code @dimen/server_item_min_width} wide.
- * Supports long press on server items to edit or delete them.
+ * Shows the <b>virtual</b> servers the signed-in user belongs to. They come from the one physical
+ * server (address from {@code @string/server_ip}) over REST, so nothing here knows an address and
+ * nothing is cached on the device. The number of columns auto-fits to the available width: each
+ * cell is at least {@code @dimen/server_item_min_width} wide.
+ * <p>
+ * The FAB creates a virtual server. Long press offers switching, plus rename and delete, but the
+ * latter two only when {@link ServerViewItem#isAdmin()} says the user administers that server; the
+ * server enforces the same rule and answers 403, which is surfaced as a toast either way.
  */
 public class TransformFragment extends Fragment {
 
@@ -48,8 +53,6 @@ public class TransformFragment extends Fragment {
 
         binding = FragmentTransformBinding.inflate(inflater, container, false);
         View root = binding.getRoot();
-
-        NavController navController = NavHostFragment.findNavController(this);
 
         RecyclerView recyclerView = binding.recyclerviewTransform;
 
@@ -91,16 +94,10 @@ public class TransformFragment extends Fragment {
         ListAdapter<ServerViewItem, TransformViewHolder> adapter =
                 new TransformAdapter(new OnServerClickListener() {
                     @Override
-                    public void onServerClicked(int serverIndex, String serverName, String serverIp) {
+                    public void onServerClicked(ServerViewItem server) {
                         // Cancel notification for this server when user opens it
-                        NotificationHelper.cancelNotificationForServer(requireContext(), serverName);
-
-                        // Navigate to the rooms screen for this server
-                        Bundle args = new Bundle();
-                        args.putInt("serverIndex", serverIndex);
-                        args.putString("serverName", serverName);
-                        args.putString("serverIp", serverIp);
-                        navController.navigate(R.id.action_transform_to_rooms, args);
+                        NotificationHelper.cancelNotificationForServer(requireContext(), server.getText());
+                        openServer(server);
                     }
 
                     @Override
@@ -109,6 +106,10 @@ public class TransformFragment extends Fragment {
                     }
                 });
         recyclerView.setAdapter(adapter);
+
+        binding.fabAddServer.setOnClickListener(v -> showServerNameDialog(
+                R.string.dialog_create_server_title, R.string.hint_server_name,
+                R.string.action_add, null));
 
         transformViewModel.getItems().observe(getViewLifecycleOwner(), items -> {
             adapter.submitList(items);
@@ -123,42 +124,86 @@ public class TransformFragment extends Fragment {
             }
         });
 
+        // A rejected request - typically 403 from a mutation the server's role check refused.
+        transformViewModel.getErrorMessage().observe(getViewLifecycleOwner(), message -> {
+            if (message == null || message.isEmpty()) {
+                return;
+            }
+            if (isAdded()) {
+                Toast.makeText(requireContext(), message, Toast.LENGTH_LONG).show();
+            }
+            transformViewModel.clearErrorMessage();
+        });
+
         return root;
     }
 
+    /**
+     * Long-press menu. Rename and delete are only offered to the virtual server's administrator -
+     * see {@link ServerViewItem#isAdmin()}, which mirrors the server-side membership check.
+     */
     private void showServerOptionsDialog(ServerViewItem item) {
-        String[] options = new String[]{
-                getString(R.string.action_edit),
-                getString(R.string.action_delete)
-        };
+        final String switchLabel = getString(R.string.action_switch_server);
+        final String renameLabel = getString(R.string.action_rename);
+        final String deleteLabel = getString(R.string.action_delete);
+
+        final String[] options = item.isAdmin()
+                ? new String[]{switchLabel, renameLabel, deleteLabel}
+                : new String[]{switchLabel};
 
         new MaterialAlertDialogBuilder(requireContext())
                 .setTitle(item.getText())
                 .setItems(options, (dialog, which) -> {
-                    if (which == 0) { // Edit
-                        EditServerDialogFragment editDialog = EditServerDialogFragment.newInstance(
-                                item.getId(),
-                                item.getText(),
-                                item.getIpAddress()
-                        );
-                        editDialog.show(getParentFragmentManager(), "edit_server_dialog");
-                    } else if (which == 1) { // Delete
+                    String chosen = options[which];
+
+                    if (chosen.equals(switchLabel)) {
+                        openServer(item);
+                    } else if (chosen.equals(renameLabel)) {
+                        showServerNameDialog(R.string.dialog_edit_server_title, R.string.hint_server_name,
+                                R.string.action_save, item);
+                    } else if (chosen.equals(deleteLabel)) {
                         showDeleteConfirmationDialog(item);
                     }
                 })
                 .show();
     }
 
+    /** Same navigation as a tap on the tile - "switch" to this virtual server. */
+    private void openServer(ServerViewItem item) {
+        item.setUnreadCount(0);
+
+        NavController navController = NavHostFragment.findNavController(this);
+        Bundle args = new Bundle();
+        args.putLong("serverId", item.getServerId());
+        args.putString("serverName", item.getText());
+        args.putBoolean("isAdminServer", item.isAdmin());
+        navController.navigate(R.id.action_transform_to_rooms, args);
+    }
+
+    /**
+     * Name dialog for both flows: {@code existing == null} creates a virtual server, otherwise the
+     * name replaces that of {@code existing}.
+     */
+    private void showServerNameDialog(int titleRes, int hintRes, int positiveButtonRes,
+                                      @androidx.annotation.Nullable ServerViewItem existing) {
+        ServerNameDialogFragment dialog = ServerNameDialogFragment.newInstance(
+                titleRes, hintRes, positiveButtonRes, existing == null ? "" : existing.getText());
+        dialog.setOnNameConfirmed(name -> {
+            if (existing == null) {
+                transformViewModel.addServer(name);
+            } else {
+                transformViewModel.renameServer(existing.getServerId(), name);
+            }
+        });
+        dialog.show(getParentFragmentManager(), "server_name_dialog");
+    }
+
     private void showDeleteConfirmationDialog(ServerViewItem item) {
         new MaterialAlertDialogBuilder(requireContext())
                 .setTitle(R.string.dialog_delete_server_title)
                 .setMessage(getString(R.string.dialog_delete_server_message, item.getText()))
-                .setPositiveButton(R.string.action_delete, (dialog, which) -> {
-                    boolean deleted = transformViewModel.deleteServer(item.getId());
-                    if (deleted) {
-                        Toast.makeText(requireContext(), "Server deleted", Toast.LENGTH_SHORT).show();
-                    }
-                })
+                .setPositiveButton(R.string.action_delete, (dialog, which) ->
+                        transformViewModel.deleteServer(item.getServerId()))
                 .setNegativeButton(R.string.action_cancel, (dialog, which) -> dialog.dismiss())
                 .show();
     }
@@ -192,7 +237,8 @@ public class TransformFragment extends Fragment {
                 @Override
                 public boolean areContentsTheSame(@NonNull ServerViewItem oldItem, @NonNull ServerViewItem newItem) {
                     return oldItem.getText().equals(newItem.getText())
-                            && oldItem.getIpAddress().equals(newItem.getIpAddress())
+                            && oldItem.getType().equals(newItem.getType())
+                            && oldItem.isAdmin() == newItem.isAdmin()
                             && oldItem.getDrawableId() == newItem.getDrawableId()
                             && oldItem.getUnreadCount() == newItem.getUnreadCount();
                 }
@@ -212,6 +258,11 @@ public class TransformFragment extends Fragment {
             ServerViewItem item = getItem(position);
             holder.textView.setText(item.getText());
 
+            // The server type is what tells an organization apart from a direct message server.
+            holder.subtitleView.setText(item.getType().isEmpty()
+                    ? holder.subtitleView.getContext().getString(R.string.subtitle_server_item)
+                    : item.getType());
+
             // Set bold text if server has unread messages
             if (item.hasUnread()) {
                 holder.textView.setTypeface(null, Typeface.BOLD);
@@ -227,10 +278,10 @@ public class TransformFragment extends Fragment {
             // Click listener
             holder.itemView.setOnClickListener(v -> {
                 item.setUnreadCount(0); // clear unread status on click
-                clickListener.onServerClicked(position, item.getText(), item.getIpAddress());
+                clickListener.onServerClicked(item);
             });
 
-            // Long click listener for edit/delete options
+            // Long click listener for switch/rename/delete options
             holder.itemView.setOnLongClickListener(v -> {
                 clickListener.onServerLongClicked(item);
                 return true;
@@ -242,16 +293,18 @@ public class TransformFragment extends Fragment {
 
         private final ImageView imageView;
         private final TextView textView;
+        private final TextView subtitleView;
 
         public TransformViewHolder(ItemTransformBinding binding) {
             super(binding.getRoot());
             imageView = binding.imageViewItemTransform;
             textView = binding.textViewItemTransform;
+            subtitleView = binding.textServerSubtitle;
         }
     }
 
     private interface OnServerClickListener {
-        void onServerClicked(int serverIndex, String serverName, String serverIp);
+        void onServerClicked(ServerViewItem server);
         void onServerLongClicked(ServerViewItem item);
     }
 }

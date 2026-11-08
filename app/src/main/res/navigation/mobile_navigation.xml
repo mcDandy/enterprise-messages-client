@@ -59,15 +59,17 @@
         android:label="{serverName}"
         tools:layout="@layout/fragment_rooms">
         <argument
-            android:name="serverIndex"
-            app:argType="integer" />
+            android:name="serverId"
+            app:argType="long" />
         <argument
             android:name="serverName"
             app:argType="string" />
+        <!-- Whether the signed-in user administers this virtual server; it decides whether the
+             channel create/rename/delete affordances are offered at all. -->
         <argument
-            android:name="serverIp"
-            app:argType="string"
-            android:defaultValue="" />
+            android:name="isAdminServer"
+            app:argType="boolean"
+            android:defaultValue="false" />
         <action
             android:id="@+id/action_rooms_to_messages"
             app:destination="@id/nav_messages"
@@ -83,18 +85,15 @@
         android:label="{roomName}"
         tools:layout="@layout/fragment_messages">
         <argument
-            android:name="serverIndex"
-            app:argType="integer" />
+            android:name="serverId"
+            app:argType="long"
+            android:defaultValue="0" />
         <argument
             android:name="roomId"
             app:argType="string" />
         <argument
             android:name="roomName"
             app:argType="string" />
-        <argument
-            android:name="serverIp"
-            app:argType="string"
-            android:defaultValue="" />
         <argument
             android:name="encryptionKey"
             app:argType="string"

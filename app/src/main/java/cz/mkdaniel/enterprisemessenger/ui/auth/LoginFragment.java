@@ -2,6 +2,7 @@ package cz.mkdaniel.enterprisemessenger.ui.auth;
 
 import android.os.Bundle;
 import android.text.TextUtils;
+import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -52,19 +53,36 @@ public class LoginFragment extends Fragment {
         hideError();
         setLoading(true);
 
+        // There is no address to pick: login() and connect() always talk to the deployment address
+        // from @string/server_ip, and the session records that address as the token's issuer so a
+        // later launch never offers the token to a server the user did not sign in to.
         ServerConnectionManager connectionManager = ServerConnectionManager.getInstance(requireContext());
-        // Log in to the deployment address from @string/server_ip and remember it as the issuer of
-        // the token, so a later launch never offers that token to a server the user did not use.
-        final String serverUrl = connectionManager.getCurrentServerIp();
         new Thread(() -> {
-            String token = connectionManager.login(serverUrl, username, password);
+            String token = connectionManager.login(username, password);
             if (isAdded() && getActivity() != null) {
                 getActivity().runOnUiThread(() -> {
                     if (!isAdded()) return;
                     setLoading(false);
                     if (!token.isEmpty()) {
-                        new AccountStore(requireContext()).saveSession(username, password, token, serverUrl);
-                        connectionManager.connectToServer(serverUrl);
+                        new AccountStore(requireContext())
+                                .saveSession(username, password, token, connectionManager.deployBaseUrl());
+
+                        // The numeric user id is what lets the app recognise itself in a virtual
+                        // server's member list, so the server list can tell an administrator from a
+                        // plain member. Best-effort: the screens re-fetch it when it is still absent.
+                        connectionManager.fetchUserId(new ServerConnectionManager.Callback<>() {
+                            @Override
+                            public void onResult(Long userId) {
+                                Log.d("LoginFragment", "Cached user id " + userId);
+                            }
+
+                            @Override
+                            public void onFailure(String error) {
+                                Log.w("LoginFragment", "Could not read the user id: " + error);
+                            }
+                        });
+
+                        connectionManager.connect();
                         NavOptions navOptions = new NavOptions.Builder()
                                 .setPopUpTo(R.id.nav_login, true)
                                 .build();

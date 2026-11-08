@@ -103,7 +103,7 @@ public class MainActivity extends AppCompatActivity {
         ServerConnectionManager conn = ServerConnectionManager.getInstance(this);
         conn.addListener(new ServerConnectionManager.ConnectionListener() {
             @Override
-            public void onConnectionStateChanged(boolean connected, String serverIp) {}
+            public void onConnectionStateChanged(boolean connected, String serverBaseUrl) {}
 
             @Override
             public void onMessageReceived(cz.mkdaniel.enterprisemessenger.ui.message.Message message) {}
@@ -141,7 +141,9 @@ public class MainActivity extends AppCompatActivity {
         if (!accountStore.isLoggedIn()) {
             navController.navigate(R.id.nav_login);
         } else {
-            conn.connectToServer(conn.getCurrentServerIp());
+            // No address is passed: the app only ever dials the physical server configured through
+            // @string/server_ip, and what the user picks in the UI are virtual servers behind it.
+            conn.connect();
         }
     }
 

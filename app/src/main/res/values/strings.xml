@@ -32,18 +32,27 @@
     <string name="error_login_failed">Login failed. Please check your credentials.</string>
     <string name="error_register_failed">Registration failed. Username may be taken.</string>
 
-    <string name="dialog_add_server_title">Add New Server</string>
-    <string name="hint_server_name">Server Name (optional)</string>
-    <string name="hint_server_ip">IP address / hostname with port, e.g. host:8443</string>
+    <!-- Virtual servers and channels are named only; the address of the physical server is
+         compile-time configuration (@string/server_ip), never a name the user can type. -->
+    <string name="dialog_create_server_title">Add virtual server</string>
+    <string name="dialog_edit_server_title">Rename virtual server</string>
+    <string name="dialog_add_channel_title">Add channel</string>
+    <string name="dialog_edit_channel_title">Rename channel</string>
+    <string name="hint_server_name">Server name</string>
+    <string name="hint_channel_name">Channel name</string>
     <string name="action_add">Add</string>
     <string name="action_save">Save</string>
-    <string name="action_edit">Edit</string>
+    <string name="action_rename">Rename</string>
+    <string name="action_switch_server">Switch</string>
     <string name="action_delete">Delete</string>
     <string name="action_cancel">Cancel</string>
+    <string name="content_description_add_server">Add a virtual server</string>
+    <string name="content_description_add_channel">Add a channel</string>
 
-    <string name="dialog_edit_server_title">Edit Server</string>
-    <string name="dialog_delete_server_title">Delete Server</string>
+    <string name="dialog_delete_server_title">Delete virtual server</string>
     <string name="dialog_delete_server_message">Are you sure you want to delete \"%1$s\"?</string>
+    <string name="dialog_delete_channel_title">Delete channel</string>
+    <string name="dialog_delete_channel_message">Are you sure you want to delete \"%1$s\"?</string>
 
     <string name="hint_type_message">Type a message&#8230;</string>
     <string name="desc_send_message">Send message</string>
@@ -53,8 +62,8 @@
     <string name="subtitle_server_item">Workspace</string>
     <string name="channel_hash">#</string>
 
-    <!-- Server Connection Configuration -->
-    <string name="default_server_name">Default Server</string>
+    <!-- Server Connection Configuration: the single point of truth for the address of the one
+         physical server. Nothing else may carry a host name. -->
     <string name="server_ip">192.168.1.115</string>
     <integer name="server_port">8443</integer>
 </resources>

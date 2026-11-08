@@ -81,8 +81,8 @@ public class WebSocketClient {
         String fetchToken();
     }
 
-    public WebSocketClient(final CryptoManager cryptoManager, final String currentServerIp) {
-	currentUrl = currentServerIp;
+    public WebSocketClient(final CryptoManager cryptoManager, final String initialWsUrl) {
+	currentUrl = initialWsUrl;
         this.cryptoManager = cryptoManager;
         this.okHttpClient = createOkHttpClient();
     }

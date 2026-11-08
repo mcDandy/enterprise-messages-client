@@ -4,18 +4,17 @@ import android.content.Context;
 import android.content.SharedPreferences;
 
 import java.security.SecureRandom;
-import java.util.HashSet;
-import java.util.Set;
 
 /**
- * Persists this installation's account credentials and the servers it is logged in to.
+ * Persists this installation's account credentials, the JWT of the single physical server it is
+ * logged in to (its address is compile-time configuration only, so nothing here stores it), and the
+ * user id that server assigned to the account.
  */
 public class AccountStore {
 
     private static final String PREF_NAME = "EnterpriseMessenger_Account";
     private static final String KEY_USERNAME = "username";
     private static final String KEY_PASSWORD = "password";
-    private static final String KEY_SERVERS = "authenticated_servers";
     private static final String KEY_JWT_TOKEN = "jwt_token";
     private static final String KEY_LOGGED_IN = "is_logged_in";
 
@@ -25,6 +24,13 @@ public class AccountStore {
      * session is cleared (a log-out the user did not ask for).
      */
     private static final String KEY_TOKEN_ISSUER = "jwt_token_issuer";
+
+    /**
+     * Numeric id the physical server assigned to this account ({@code GET /api/users/me}). It is
+     * cached so the app can recognise itself in a virtual server's member list and tell whether the
+     * signed-in user is its ADMINISTRATOR, which is what gates the create/rename/delete controls.
+     */
+    private static final String KEY_USER_ID = "user_id";
 
     private final SharedPreferences prefs;
 
@@ -67,8 +73,22 @@ public class AccountStore {
                 .remove(KEY_PASSWORD)
                 .remove(KEY_JWT_TOKEN)
                 .remove(KEY_TOKEN_ISSUER)
+                .remove(KEY_USER_ID)
                 .putBoolean(KEY_LOGGED_IN, false)
                 .apply();
+    }
+
+    /**
+     * Caches the numeric id the physical server handed to {@code GET /api/users/me}, so member
+     * lists can be scanned for it without asking for it again on every screen.
+     */
+    public synchronized void saveUserId(long userId) {
+        prefs.edit().putLong(KEY_USER_ID, userId).apply();
+    }
+
+    /** Cached user id, or {@code -1L} when this installation has never fetched it. */
+    public synchronized long getUserId() {
+        return prefs.getLong(KEY_USER_ID, -1L);
     }
 
     public synchronized String getJwtToken() {
@@ -86,21 +106,6 @@ public class AccountStore {
 
     public synchronized String getPassword() {
         return prefs.getString(KEY_PASSWORD, "");
-    }
-
-    /**
-     * Servers this installation has successfully authenticated against; used to re-upload
-     * the FCM token when Firebase rotates it.
-     */
-    public synchronized Set<String> getAuthenticatedServers() {
-        return new HashSet<>(prefs.getStringSet(KEY_SERVERS, new HashSet<>()));
-    }
-
-    public synchronized void addAuthenticatedServer(String serverIp) {
-        Set<String> servers = getAuthenticatedServers();
-        if (servers.add(serverIp)) {
-            prefs.edit().putStringSet(KEY_SERVERS, servers).apply();
-        }
     }
 
     private static String randomHex(int bytes) {

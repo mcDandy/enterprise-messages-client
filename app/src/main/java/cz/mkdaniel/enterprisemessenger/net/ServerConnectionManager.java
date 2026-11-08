@@ -18,6 +18,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArraySet;
@@ -34,15 +35,28 @@ import cz.mkdaniel.enterprisemessenger.crypto.CryptoManager;
 import cz.mkdaniel.enterprisemessenger.notification.NotificationHelper;
 import cz.mkdaniel.enterprisemessenger.ui.message.Message;
 import cz.mkdaniel.enterprisemessenger.ui.transform.Room;
+import cz.mkdaniel.enterprisemessenger.ui.transform.ServerViewItem;
 
 /**
- * Singleton manager handling WebSocket protocol exchanges and HTTP Auth with Enterprise Messenger servers.
+ * Singleton manager handling the REST and WebSocket traffic of the app.
  * <p>
+ * <b>Physical vs. virtual servers.</b> There is exactly one <i>physical</i> server and its address
+ * is compile-time configuration only: {@code @string/server_ip} plus {@code @integer/server_port}.
+ * The address is never a parameter of a method here and never stored, so no code path can dial a
+ * host the operator did not build into the APK. Everything living behind that address is a
+ * <i>virtual</i> server (the server's {@code MessageServer} entity) fetched over REST:
+ * <pre>
+ *   physical server (@string/server_ip)
+ *     - virtual server (MessageServer)  GET /api/servers
+ *       - channel (Room)                GET /api/servers/{id}/channels/my
+ *         - messages                    WebSocket /wss packets
+ * </pre>
  * Flow: REST login/register -> WebSocket {@code /wss} with {@code Authorization: Bearer <jwt>} ->
- * end-to-end encrypted {@code CHAT_MESSAGE_ENC} packets.
+ * announce the channel with {@code CHANNEL_JOIN} -> end-to-end encrypted {@code CHAT_MESSAGE}
+ * packets.
  * <p>
- * The deployment address is a single point of truth in {@code @string/server_ip} /
- * {@code @integer/server_port}; only the scheme and the {@code /wss} path are code constants.
+ * Only the scheme and the {@code /wss} path are code constants; {@link #deployBaseUrl()} is the one
+ * place the configured address becomes a URL.
  */
 public class ServerConnectionManager implements WebSocketClient.WebSocketClientListener {
     public static final String HTTPS_PROTOCOL = "https";
@@ -73,8 +87,10 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final Set<ConnectionListener> listeners = new CopyOnWriteArraySet<>();
-    private String currentServerHTTPIp;
-    private String currentServerWSIp;
+    /** Normalized {@code https://host:port} of the physical server, from {@code @string/server_ip}. */
+    private final String currentServerHTTPIp;
+    /** Normalized {@code wss://host:port/wss} of the same server, see {@link #WS_ENDPOINT_PATH}. */
+    private final String currentServerWSIp;
 
     private String jwtToken = "";
 
@@ -102,7 +118,11 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
     private volatile long activeChannelId = -1L;
 
     public interface ConnectionListener {
-	void onConnectionStateChanged(boolean connected, String serverIp);
+	/**
+	 * @param serverBaseUrl {@link #deployBaseUrl()} of the physical server, i.e. which host the
+	 *                      state change happened on. It is never an address the user picked.
+	 */
+	void onConnectionStateChanged(boolean connected, String serverBaseUrl);
 	void onMessageReceived(Message message);
 	void onError(String errorMessage);
 	default void onAuthRequired() {}
@@ -145,29 +165,446 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
         return wsUrl;
     }
 
-    public void fetchChannels(final String serverIp, Callback<List<Room>> callback) {
+    /**
+     * {@code type} a virtual server is created with. The server accepts {@code ORGANIZATION} and
+     * {@code DIRECT} only; the app has no use for the one-to-one {@code DIRECT} servers yet, so
+     * every virtual server it creates is an organization.
+     */
+    public static final String SERVER_TYPE_ORGANIZATION = "ORGANIZATION";
+
+    /** Reported when the server answers 403 to a CRUD call: the session is fine, the role is not. */
+    private static final String ERROR_PERMISSION_DENIED = "You do not have permission to do that on this server";
+
+    /*
+     * Virtual-server and channel CRUD against the one physical server. Every method below runs its
+     * request on the single background {@link #executor} and delivers the answer on the main
+     * thread, so a fragment can call it straight from a click listener.
+     */
+
+    /**
+     * Reads the numeric id the server assigned to the signed-in account and caches it in
+     * {@link AccountStore}. Everything that has to recognise "me" inside a member list uses it.
+     */
+    public void fetchUserId(final Callback<Long> callback) {
+	executor.execute(() -> {
+	    if (ensureJwt().isEmpty()) {
+		postFailure(callback, "Not signed in");
+
+		return;
+	    }
+
+	    final long userId = resolveUserId();
+	    if (userId < 0) {
+		postFailure(callback, "Failed to read your account from the server");
+
+		return;
+	    }
+
+	    mainHandler.post(() -> callback.onResult(userId));
+	});
+    }
+
+    /**
+     * Lists the virtual servers the user is a member of ({@code GET /api/servers}) together with
+     * whether he administers each of them, which is what the UI gates its mutations on.
+     * <p>
+     * The admin-ness comes from each server's member list, mirroring the server-side check; the
+     * fan-out is deliberately sequential because it already runs inside the one background task and
+     * the list holds a handful of entries.
+     */
+    public void fetchServers(final Callback<List<ServerViewItem>> callback) {
 	executor.execute(() -> {
 	    try {
-		JSONArray channelsArray = makeGETRequestCollection(normalizeHttpUrl(serverIp), "/api/servers/1/channels");
-		if (channelsArray == null) {
-		    mainHandler.post(() -> callback.onFailure("Failed to fetch channels from server"));
+		if (ensureJwt().isEmpty()) {
+		    postFailure(callback, "Not signed in");
 
 		    return;
 		}
+
+		final long myUserId = resolveUserId();
+		if (myUserId < 0) {
+		    postFailure(callback, "Failed to read your account from the server");
+
+		    return;
+		}
+
+		final JSONArray serversArray = executeGet("/api/servers").asJsonArray();
+		if (serversArray == null) {
+		    postFailure(callback, "Failed to fetch virtual servers from the server");
+
+		    return;
+		}
+
+		final List<ServerViewItem> servers = new ArrayList<>();
+
+		for (int i = 0; i < serversArray.length(); i++) {
+		    final JSONObject obj = serversArray.optJSONObject(i);
+		    if (obj == null) {
+			continue;
+		    }
+
+		    final long serverId = obj.optLong("id", -1L);
+		    if (serverId < 0) {
+			continue;
+		    }
+
+		    final String name = obj.optString("name", String.format(Locale.US, "Server %d", serverId));
+		    final String type = obj.optString("type", "");
+		    final boolean isAdmin = isUserAdminOfServer(serverId, myUserId);
+
+		    servers.add(new ServerViewItem(serverId, name, type, isAdmin,
+			    ServerViewItem.avatarDrawableForIndex(i)));
+		}
+
+		mainHandler.post(() -> callback.onResult(servers));
+	    } catch (final Exception e) {
+		postFailure(callback, e.getMessage());
+	    }
+	});
+    }
+
+    /**
+     * Creates a virtual server ({@code POST /api/servers}). Any authenticated user may do it and
+     * becomes its {@code ADMINISTRATOR}, which is why the returned item says {@code isAdmin = true}.
+     */
+    public void createServer(final String name, final Callback<ServerViewItem> callback) {
+	final String trimmedName = name == null ? "" : name.trim();
+	if (trimmedName.isEmpty()) {
+	    mainHandler.post(() -> callback.onFailure("Enter a server name"));
+
+	    return;
+	}
+
+	executor.execute(() -> {
+	    try {
+		if (ensureJwt().isEmpty()) {
+		    postFailure(callback, "Not signed in");
+
+		    return;
+		}
+
+		final JSONObject body = new JSONObject();
+		body.put("name", trimmedName);
+		body.put("type", SERVER_TYPE_ORGANIZATION);
+
+		final RestResponse response = executePost("/api/servers", body);
+		final JSONObject created = response.asJson();
+
+		if (!response.isSuccessful() || created == null) {
+		    failRest(response, callback, "Creating the server");
+
+		    return;
+		}
+
+		final long serverId = created.optLong("id", -1L);
+		if (serverId < 0) {
+		    postFailure(callback, "The server did not return the new server id");
+
+		    return;
+		}
+
+		final String serverName = created.optString("name", trimmedName);
+		final String serverType = created.optString("type", SERVER_TYPE_ORGANIZATION);
+
+		mainHandler.post(() -> callback.onResult(new ServerViewItem(serverId, serverName, serverType,
+			true, ServerViewItem.avatarDrawableForIndex((int) serverId))));
+	    } catch (final Exception e) {
+		postFailure(callback, e.getMessage());
+	    }
+	});
+    }
+
+    /**
+     * Renames a virtual server ({@code PUT /api/servers/{id}}). Server-administrator only, so a
+     * member reaches the {@code onFailure} branch with a permission message instead of being logged out.
+     */
+    public void renameServer(final long serverId, final String name, final Callback<Void> callback) {
+	final String trimmedName = name == null ? "" : name.trim();
+	if (trimmedName.isEmpty()) {
+	    mainHandler.post(() -> callback.onFailure("Enter a server name"));
+
+	    return;
+	}
+
+	executor.execute(() -> {
+	    try {
+		if (ensureJwt().isEmpty()) {
+		    postFailure(callback, "Not signed in");
+
+		    return;
+		}
+
+		final JSONObject body = new JSONObject();
+		body.put("name", trimmedName);
+
+		final RestResponse response = executePut(String.format(Locale.US, "/api/servers/%d", serverId), body);
+		if (!response.isSuccessful()) {
+		    failRest(response, callback, "Renaming the server");
+
+		    return;
+		}
+
+		mainHandler.post(() -> callback.onResult(null));
+	    } catch (final Exception e) {
+		postFailure(callback, e.getMessage());
+	    }
+	});
+    }
+
+    /**
+     * Deletes a virtual server ({@code DELETE /api/servers/{id}}), which the server answers 204 with
+     * no body - hence the success check looks at the status alone.
+     */
+    public void deleteServer(final long serverId, final Callback<Void> callback) {
+	executor.execute(() -> {
+	    if (ensureJwt().isEmpty()) {
+		postFailure(callback, "Not signed in");
+
+		return;
+	    }
+
+	    final RestResponse response = executeDelete(String.format(Locale.US, "/api/servers/%d", serverId));
+	    if (!response.isSuccessful()) {
+		failRest(response, callback, "Deleting the server");
+
+		return;
+	    }
+
+	    mainHandler.post(() -> callback.onResult(null));
+	});
+    }
+
+    /**
+     * Lists the channels of a virtual server the user is a member of
+     * ({@code GET /api/servers/{id}/channels/my}); every room carries the channel key the members
+     * agree on, see {@link #defaultChannelSecret(long)}.
+     */
+    public void fetchChannels(final long serverId, Callback<List<Room>> callback) {
+	executor.execute(() -> {
+	    try {
+		if (ensureJwt().isEmpty()) {
+		    postFailure(callback, "Not signed in");
+
+		    return;
+		}
+
+		final JSONArray channelsArray = executeGet(String.format(Locale.US, "/api/servers/%d/channels/my", serverId)).asJsonArray();
+		if (channelsArray == null) {
+		    postFailure(callback, "Failed to fetch channels from server");
+
+		    return;
+		}
+
 		List<Room> rooms = new ArrayList<>();
 		for (int i = 0; i < channelsArray.length(); i++) {
-		    JSONObject obj = channelsArray.getJSONObject(i);
-		    String id = String.valueOf(obj.optLong("id", i + 1));
-		    String name = obj.optString("name", "channel-" + id);
-		    long channelId = parseChannelId(id);
-		    String encKey = defaultChannelSecret(channelId);
-		    rooms.add(new Room(id, name, encKey, false));
+		    final JSONObject obj = channelsArray.optJSONObject(i);
+		    if (obj == null) {
+			continue;
+		    }
+
+		    final long channelId = obj.optLong("id", -1L);
+		    if (channelId < 0) {
+			continue;
+		    }
+
+		    final String id = String.format(Locale.US, "%d", channelId);
+		    final String name = obj.optString("name", "channel-" + id);
+
+		    rooms.add(new Room(id, name, defaultChannelSecret(channelId), false));
 		}
 		mainHandler.post(() -> callback.onResult(rooms));
 	    } catch (Exception e) {
-		mainHandler.post(() -> callback.onFailure(e.getMessage()));
+		postFailure(callback, e.getMessage());
 	    }
 	});
+    }
+
+    /**
+     * Creates a channel in a virtual server ({@code POST /api/servers/{id}/channels}). The server
+     * restricts it to the virtual server's administrators and rejects a duplicate name.
+     */
+    public void createChannel(final long serverId, final String name, final Callback<Room> callback) {
+	final String trimmedName = name == null ? "" : name.trim();
+	if (trimmedName.isEmpty()) {
+	    mainHandler.post(() -> callback.onFailure("Enter a channel name"));
+
+	    return;
+	}
+
+	executor.execute(() -> {
+	    try {
+		if (ensureJwt().isEmpty()) {
+		    postFailure(callback, "Not signed in");
+
+		    return;
+		}
+
+		final JSONObject body = new JSONObject();
+		body.put("name", trimmedName);
+
+		final RestResponse response = executePost(String.format(Locale.US, "/api/servers/%d/channels", serverId), body);
+		final JSONObject created = response.asJson();
+
+		if (!response.isSuccessful() || created == null) {
+		    failRest(response, callback, "Creating the channel");
+
+		    return;
+		}
+
+		final long channelId = created.optLong("id", -1L);
+		if (channelId < 0) {
+		    postFailure(callback, "The server did not return the new channel id");
+
+		    return;
+		}
+
+		final String channelIdText = String.format(Locale.US, "%d", channelId);
+		final String channelName = created.optString("name", trimmedName);
+
+		mainHandler.post(() -> callback.onResult(new Room(channelIdText, channelName,
+			defaultChannelSecret(channelId), false)));
+	    } catch (final Exception e) {
+		postFailure(callback, e.getMessage());
+	    }
+	});
+    }
+
+    /**
+     * Renames a channel ({@code PUT /api/channels/{id}}); the server accepts it from the virtual
+     * server's administrator only.
+     */
+    public void renameChannel(final long channelId, final String name, final Callback<Void> callback) {
+	final String trimmedName = name == null ? "" : name.trim();
+	if (trimmedName.isEmpty()) {
+	    mainHandler.post(() -> callback.onFailure("Enter a channel name"));
+
+	    return;
+	}
+
+	executor.execute(() -> {
+	    try {
+		if (ensureJwt().isEmpty()) {
+		    postFailure(callback, "Not signed in");
+
+		    return;
+		}
+
+		final JSONObject body = new JSONObject();
+		body.put("name", trimmedName);
+
+		final RestResponse response = executePut(String.format(Locale.US, "/api/channels/%d", channelId), body);
+		if (!response.isSuccessful()) {
+		    failRest(response, callback, "Renaming the channel");
+
+		    return;
+		}
+
+		mainHandler.post(() -> callback.onResult(null));
+	    } catch (final Exception e) {
+		postFailure(callback, e.getMessage());
+	    }
+	});
+    }
+
+    /**
+     * Deletes a channel ({@code DELETE /api/channels/{id}}), answered with 204 and no body.
+     */
+    public void deleteChannel(final long channelId, final Callback<Void> callback) {
+	executor.execute(() -> {
+	    if (ensureJwt().isEmpty()) {
+		postFailure(callback, "Not signed in");
+
+		return;
+	    }
+
+	    final RestResponse response = executeDelete(String.format(Locale.US, "/api/channels/%d", channelId));
+	    if (!response.isSuccessful()) {
+		failRest(response, callback, "Deleting the channel");
+
+		return;
+	    }
+
+	    mainHandler.post(() -> callback.onResult(null));
+	});
+    }
+
+    /**
+     * Makes sure {@link #jwtToken} holds a token for the deployment address, restoring it from the
+     * account store and otherwise signing in with the stored credentials. Call it at the top of
+     * every background task: a screen can be opened before the startup {@link #connect()} has
+     * finished, and a REST call without a token comes back as 401, which clears the session.
+     *
+     * @return the token to send, or "" when the user is signed out or the server rejected him
+     */
+    private String ensureJwt() {
+	final String baseUrl = deployBaseUrl();
+
+	if (jwtToken == null || jwtToken.isEmpty()) {
+	    final AccountStore accountStore = new AccountStore(context);
+	    final String storedToken = accountStore.getJwtToken();
+
+	    // A token only authenticates on the server that signed it, and after a deployment address
+	    // change the stored one belongs to a host this build no longer dials.
+	    if (storedToken != null && !storedToken.isEmpty()
+		    && baseUrl.equalsIgnoreCase(accountStore.getTokenIssuer())) {
+		jwtToken = storedToken;
+		jwtTokenIssuer = baseUrl;
+	    } else if (accountStore.isLoggedIn()) {
+		jwtToken = login(accountStore.getUsername(), accountStore.getPassword());
+	    }
+	}
+
+	return jwtToken == null ? "" : jwtToken;
+    }
+
+    /**
+     * Id of the signed-in user, cached in {@link AccountStore} after the first read. Must be called
+     * on the background executor.
+     *
+     * @return the user id, or -1 when it could not be read
+     */
+    private long resolveUserId() {
+	final AccountStore accountStore = new AccountStore(context);
+	final long cachedUserId = accountStore.getUserId();
+
+	if (cachedUserId > 0) {
+	    return cachedUserId;
+	}
+
+	final JSONObject me = makeGETRequest("/api/users/me");
+	if (me == null) {
+	    return -1L;
+	}
+
+	final long userId = me.optLong("id", -1L);
+	if (userId > 0) {
+	    accountStore.saveUserId(userId);
+	}
+
+	return userId;
+    }
+
+    /**
+     * Mirrors the server's {@code isUserAdmin}: the user administers a virtual server when that
+     * server's member list contains his id with the {@code ADMINISTRATOR} role. Reading the list is
+     * allowed for any authenticated user, so a plain member can learn that he is one.
+     */
+    private boolean isUserAdminOfServer(final long serverId, final long myUserId) {
+	final JSONArray members = executeGet(String.format(Locale.US, "/api/servers/%d/members", serverId)).asJsonArray();
+	if (members == null) {
+	    return false;
+	}
+
+	for (int i = 0; i < members.length(); i++) {
+	    final JSONObject member = members.optJSONObject(i);
+	    if (member == null || member.optLong("userId", -1L) != myUserId) {
+		continue;
+	    }
+
+	    return "ADMINISTRATOR".equalsIgnoreCase(member.optString("role", ""));
+	}
+
+	return false;
     }
 
     public void setVisibleChannel(long channelId) {
@@ -221,8 +658,8 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 	this.context = context.getApplicationContext();
 	this.cryptoManager = CryptoManager.getInstance(context);
 
-	// The address in @string/server_ip is the default target; a server entry selected in the UI
-	// can still override it through connectToServer().
+	// @string/server_ip is the only source of the address; nothing picked in the UI can override it,
+	// because what the UI lists are virtual servers living behind this one address.
 	applyDeploymentDefault(this.context);
 
 	this.currentServerHTTPIp = normalizeHttpUrl(WS_HOST + ":" + WS_PORT);
@@ -272,7 +709,12 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 	return webSocketClient.isConnected();
     }
 
-    public String getCurrentServerIp() {
+    /**
+     * Normalized {@code https://host:port} base URL of the one physical server, built from
+     * {@code @string/server_ip} and {@code @integer/server_port}. Every REST call goes here; the
+     * address is not a parameter of anything and cannot be pointed elsewhere at runtime.
+     */
+    public String deployBaseUrl() {
 	return currentServerHTTPIp;
     }
 
@@ -287,44 +729,28 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
     }
 
     /**
-     * Authenticates via REST API (if needed) and connects to remote WebSocket server.
+     * Authenticates via the REST API (if needed) and opens the WebSocket to
+     * {@link #deployBaseUrl()}. There is no address parameter on purpose: the app talks to the one
+     * physical server from {@code @string/server_ip}, and screens only ever select a virtual server
+     * or a channel, both of which are data behind that address.
      */
-    public void connectToServer(String serverIp) {
-	// Never fall back to another address here: dialling the deployment default when the caller
-	// knows no address is exactly what makes the app reconnect to a host the user never entered.
-	if (serverIp == null || serverIp.trim().isEmpty()) {
-	    Log.w(TAG, "connectToServer: no address given, keeping " + currentServerHTTPIp);
-	    return;
-	}
+    public void connect() {
+	final String httpUrl = deployBaseUrl();
+	final String wsUrl = currentServerWSIp;
 
-	final String httpUrl = normalizeHttpUrl(serverIp);
-	final String wsUrl = normalizeWsUrl(serverIp);
-
-	final boolean targetChanged = !wsUrl.equalsIgnoreCase(webSocketClient.getCurrentUrl());
-
-	this.currentServerHTTPIp = httpUrl;
-	this.currentServerWSIp = wsUrl;
-
-	// A token signed by another server cannot authenticate here. Dropping it makes the code below
-	// log in again with the stored credentials instead of being rejected and clearing the session.
+	// A token signed by another server cannot authenticate here (the address can only change by
+	// rebuilding the APK, which leaves the stored token of the previous deployment behind). Dropping
+	// it makes the code below log in again instead of being rejected and clearing the session.
 	if (!jwtToken.isEmpty() && !httpUrl.equalsIgnoreCase(jwtTokenIssuer)) {
 	    Log.d(TAG, "Cached JWT was issued by " + jwtTokenIssuer + ", re-authenticating against " + httpUrl);
 	    jwtToken = "";
 	    jwtTokenIssuer = "";
 	}
 
-	if (webSocketClient.isConnected() && !targetChanged) {
+	if (webSocketClient.isConnected()) {
 	    Log.d(TAG, "Already connected to " + httpUrl);
 	    notifyStateChanged(true, httpUrl);
 	    return;
-	}
-
-	// The socket keeps the URL of its last handshake and reconnects to that URL verbatim. Without
-	// this redial an already running (or retrying) connection to another address would keep its
-	// old URL while every REST call went to the newly selected server.
-	if (targetChanged) {
-	    Log.d(TAG, "Target address changed, reconnecting the WebSocket to " + httpUrl);
-	    webSocketClient.disconnect();
 	}
 
 	Log.d(TAG, "Initiating authentication & connection to: " + httpUrl);
@@ -355,7 +781,7 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 	    if (jwtToken.isEmpty() && accountStore.isLoggedIn()) {
 		String username = accountStore.getUsername();
 		String password = accountStore.getPassword();
-		jwtToken = login(httpUrl, username, password);
+		jwtToken = login(username, password);
 	    }
 
 	    if (jwtToken == null || jwtToken.isEmpty()) {
@@ -374,24 +800,9 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 
 	    webSocketClient.connectAsync(wsUrl, jwtToken);
 
-	    final var peerKeys = makeGETRequestCollection(String.format("/api/channels/2/keys"));
-	    if (peerKeys == null) {
-		return;
-	    }
-
-	    for (var i = 0; i < peerKeys.length(); ++i) {
-		final var peer = peerKeys.getJSONObject(i);
-		final var peerId = peer.getLong("userId");
-		final var peerPublicKey = peer.getString("publicKey");
-	    
-		Log.d(TAG, String.format("Establishing public key %s with peer %d", peerPublicKey, peerId));
-
-		final var peerKey = cryptoManager.deriveSharedSecret(Base64.decode(peerPublicKey, Base64.NO_WRAP));
-	
-		Log.d(TAG, String.format("PeerKey: %s", Arrays.toString(peerKey)));
-
-		cryptoManager.putNewPeerKeyEntry(peerId, peerKey);
-	    }
+	    // Peer public keys are deliberately not fetched here: they belong to a channel, and the
+	    // channel the user chats in is only known once joinChannel() picks one. The key-rotation
+	    // handler reads /api/channels/{channelId}/keys when it actually needs the members' keys.
 	}
 	catch (final Exception exception) {
 	    Log.e(TAG, exception.toString());
@@ -399,9 +810,13 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
     }
 
     /**
-     * Posts credentials to {@code /api/auth/login} and returns the JWT token, or "" on any failure.
+     * Posts credentials to {@code /api/auth/login} of {@link #deployBaseUrl()} and returns the JWT
+     * token, or "" on any failure. There is no address parameter: the only server that can hand out
+     * a token this app accepts is the one built in through {@code @string/server_ip}.
+     *
+     * <p>Must be called off the main thread.
      */
-    public String login(String httpUrl, String username, String password) {
+    public String login(String username, String password) {
 	lastLoginRejected = false;
 
 	try {
@@ -411,7 +826,7 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 	    loginJson.put("password", password);
 
 	    final var requestBody = RequestBody.create(loginJson.toString(), MediaType.parse("application/json; charset=utf-8"));
-	    final var baseUrl = (httpUrl != null && !httpUrl.isEmpty()) ? httpUrl : currentServerHTTPIp;
+	    final var baseUrl = deployBaseUrl();
 	    final var loginRequest = new Request.Builder()
 		.url(baseUrl + "/api/auth/login")
 		.post(requestBody)
@@ -464,6 +879,56 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 
 	// While the socket is still dialling, onConnected() sends the join for us.
 	sendChannelJoin();
+
+	// The channel's members are known only now, so their public keys - and with them the ECDH
+	// secrets that key-rotation packets are opened with - are established here rather than at
+	// login, when no channel had been chosen yet.
+	executor.execute(() -> establishChannelPeerKeys(id));
+    }
+
+    /**
+     * Derives and caches an ECDH secret with every member of {@code channelId}.
+     * <p>
+     * Without those secrets {@code TYPE_KEY_ROTATION} packets cannot be opened - the handler drops
+     * them with "No shared ECDH secret with peer N yet" - so this has to run before the first
+     * rotated message of a channel arrives. Peers whose secret is already known are skipped.
+     */
+    private void establishChannelPeerKeys(final long channelId) {
+	try {
+	    final var peers = executeGet(String.format(Locale.US, "/api/channels/%d/keys", channelId));
+	    if (!peers.isSuccessful()) {
+		Log.w(TAG, "No peer keys available for channel " + channelId);
+		return;
+	    }
+
+	    final var peerKeys = peers.asJsonArray();
+	    if (peerKeys == null) {
+		Log.w(TAG, "Peer key list for channel " + channelId + " is not a JSON array");
+		return;
+	    }
+
+	    for (var i = 0; i < peerKeys.length(); ++i) {
+		final var peer = peerKeys.optJSONObject(i);
+		if (peer == null) {
+		    continue;
+		}
+
+		final var peerId = peer.optLong("userId", -1L);
+		final var peerPublicKey = peer.optString("publicKey", "");
+		if (peerId < 0 || peerPublicKey.isEmpty()
+			|| cryptoManager.retrieveSecretSymmetricKey(peerId) != null) {
+		    // Unknown shape, or a secret already derived while visiting another channel.
+		    continue;
+		}
+
+		cryptoManager.putNewPeerKeyEntry(peerId,
+			cryptoManager.deriveSharedSecret(Base64.decode(peerPublicKey, Base64.NO_WRAP)));
+
+		Log.d(TAG, "Established ECDH secret with peer " + peerId + " for channel " + channelId);
+	    }
+	} catch (final Exception exception) {
+	    Log.w(TAG, "Failed to establish peer keys for channel " + channelId, exception);
+	}
     }
 
     /**
@@ -506,173 +971,187 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 	return activeChannelId;
     }
 
-    private JSONObject makeGETRequest(final String endpoint) {
-	final var loginRequest = new Request
-	    .Builder()
-	    .url(String.format("%s%s", currentServerHTTPIp, endpoint))
-	    .addHeader("Authorization", String.format("Bearer %s", jwtToken))
-	    .get()
-	    .build();
+    /**
+     * Outcome of one REST call: the status code plus the body as text. Keeping the status code is
+     * the point - a bare {@code null} used to blur 401 (the session is dead, log out) and 403 (the
+     * session is fine, the role is not) into the same "it failed".
+     */
+    private static final class RestResponse {
+	private final int statusCode;
+	private final String body;
 
-	try (final var response = httpClient.newCall(loginRequest).execute()) {
-	    Log.w(TAG, String.format("GET %s%s", currentServerHTTPIp, endpoint));
-
-	    if (response.isSuccessful() && response.body() != null) {
-		return new JSONObject(response.body().string());
-	    }
-
-	    Log.w(TAG, String.format("GET failed with HTTP status code: %s, and response: %s", response.code(), response));
-
-	    if (response.code() == 401 || response.code() == 403) {
-		handleAuthError(response.code(), response.message());
-	    }
-
-	    return null;
+	RestResponse(final int statusCode, final String body) {
+	    this.statusCode = statusCode;
+	    this.body = body;
 	}
-	catch (final Exception exception) {
-	    Log.e(TAG, exception.toString());
-	    exception.printStackTrace();
 
-	    return null;
+	boolean isSuccessful() {
+	    return statusCode >= 200 && statusCode < 300;
 	}
-    }
 
-    private JSONArray makeGETRequestCollection(final String endpoint) {
-	return makeGETRequestCollection(currentServerHTTPIp, endpoint);
-    }
+	int statusCode() {
+	    return statusCode;
+	}
 
-    private JSONArray makeGETRequestCollection(final String baseUrl, final String endpoint) {
-	final var loginRequest = new Request
-	    .Builder()
-	    .url(String.format("%s%s", baseUrl, endpoint))
-	    .addHeader("Authorization", String.format("Bearer %s", jwtToken))
-	    .get()
-	    .build();
-
-	try (final var response = httpClient.newCall(loginRequest).execute()) {
-	    Log.w(TAG, String.format("GET %s%s", baseUrl, endpoint));
-
-	    if (response.isSuccessful() && response.body() != null) {
-		final var resStr = response.body().string();
-
-		return new JSONArray(resStr);
+	JSONObject asJson() {
+	    if (body == null || body.isEmpty()) {
+		return null;
 	    }
 
-	    Log.w(TAG, String.format("GET failed with HTTP status code: %s, and response: %s", response.code(), response));
+	    try {
+		return new JSONObject(body);
+	    } catch (final Exception exception) {
+		Log.w(TAG, "Response body is not a JSON object: " + body);
 
-	    if (response.code() == 401 || response.code() == 403) {
-		handleAuthError(response.code(), response.message());
+		return null;
+	    }
+	}
+
+	JSONArray asJsonArray() {
+	    if (body == null || body.isEmpty()) {
+		return null;
 	    }
 
-	    return null;
-	}
-	catch (final Exception exception) {
-	    Log.e(TAG, exception.toString());
-	    exception.printStackTrace();
+	    try {
+		return new JSONArray(body);
+	    } catch (final Exception exception) {
+		Log.w(TAG, "Response body is not a JSON array: " + body);
 
-	    return null;
-	}
-    }
-
-    private JSONObject makePOSTRequest(final String endpoint, final JSONObject body) {
-	final var requestBody = RequestBody.create(body.toString(), MediaType.parse("application/json; charset=utf-8"));
-	final var loginRequest = new Request
-	    .Builder()
-	    .url(String.format("%s%s", currentServerHTTPIp, endpoint))
-	    .addHeader("Authorization", String.format("Bearer %s", jwtToken))
-	    .post(requestBody)
-	    .build();
-
-	try (final var response = httpClient.newCall(loginRequest).execute()) {
-	    if (response.isSuccessful() && response.body() != null) {
-		final var resStr = response.body().string();
-		final var resObj = new JSONObject(resStr);
-
-		return resObj;
+		return null;
 	    }
-
-	    Log.w(TAG, "POST failed with HTTP " + response.code());
-
-	    if (response.code() == 401 || response.code() == 403) {
-		handleAuthError(response.code(), response.message());
-	    }
-
-	    return null;
-	}
-	catch (final Exception exception) {
-	    Log.e(TAG, exception.toString());
-
-	    return null;
-	}
-    }
-
-    private JSONObject makePUTRequest(final String endpoint, final JSONObject body) {
-	final var requestBody = RequestBody.create(body.toString(), MediaType.parse("application/json; charset=utf-8"));
-	final var loginRequest = new Request
-	    .Builder()
-	    .url(String.format("%s%s", currentServerHTTPIp, endpoint))
-	    .addHeader("Authorization", String.format("Bearer %s", jwtToken))
-	    .put(requestBody)
-	    .build();
-
-	try (final var response = httpClient.newCall(loginRequest).execute()) {
-	    if (response.isSuccessful() && response.body() != null) {
-		final var resStr = response.body().string();
-		final var resObj = new JSONObject(resStr);
-
-		return resObj;
-	    }
-
-	    Log.w(TAG, "PUT failed with HTTP " + response.code());
-
-	    if (response.code() == 401 || response.code() == 403) {
-		handleAuthError(response.code(), response.message());
-	    }
-
-	    return null;
-	}
-	catch (final Exception exception) {
-	    Log.e(TAG, "PUT failed with HTTP ");
-
-	    return null;
-	}
-    }
-
-    private JSONObject makeDELETERequest(final String endpoint) {
-	final var loginRequest = new Request
-	    .Builder()
-	    .url(String.format("%s%s", currentServerHTTPIp, endpoint))
-	    .addHeader("Authorization", String.format("Bearer %s", jwtToken))
-	    .delete()
-	    .build();
-
-	try (final var response = httpClient.newCall(loginRequest).execute()) {
-	    if (response.isSuccessful() && response.body() != null) {
-		final var resStr = response.body().string();
-		final var resObj = new JSONObject(resStr);
-
-		return resObj;
-	    }
-
-	    Log.w(TAG, "DELETE failed with HTTP " + response.code());
-
-	    if (response.code() == 401 || response.code() == 403) {
-		handleAuthError(response.code(), response.message());
-	    }
-
-	    return null;
-	}
-	catch (final Exception exception) {
-	    Log.e(TAG, "DELETE failed with HTTP ");
-
-	    return null;
 	}
     }
 
     /**
-     * Registers a new user on {@code /api/auth/register} and returns the JWT token, or "" on any failure.
+     * Runs one authenticated REST call against {@link #deployBaseUrl()} on the calling (background)
+     * thread. An unreachable server comes back as status {@code 0}, which is deliberately not
+     * treated as an auth problem so a network hiccup cannot clear the session.
      */
-    public String register(String httpUrl, String username, String password, String publicKey) {
+    private RestResponse executeRequest(final String method, final String endpoint, final JSONObject body) {
+	final RequestBody requestBody = body == null ? null
+	    : RequestBody.create(body.toString(), MediaType.parse("application/json; charset=utf-8"));
+
+	final Request request = new Request
+	    .Builder()
+	    .url(String.format(Locale.US, "%s%s", deployBaseUrl(), endpoint))
+	    .addHeader("Authorization", String.format(Locale.US, "Bearer %s", jwtToken))
+	    .method(method, requestBody)
+	    .build();
+
+	try (final var response = httpClient.newCall(request).execute()) {
+	    final String resStr = response.body() != null ? response.body().string() : "";
+
+	    if (!response.isSuccessful()) {
+		Log.w(TAG, String.format(Locale.US, "%s %s failed with HTTP %d: %s", method, endpoint,
+			response.code(), resStr));
+	    }
+
+	    return new RestResponse(response.code(), resStr);
+	}
+	catch (final Exception exception) {
+	    Log.e(TAG, String.format(Locale.US, "%s %s failed", method, endpoint), exception);
+
+	    return new RestResponse(0, "");
+	}
+    }
+
+    private RestResponse executeGet(final String endpoint) {
+	return executeRequest("GET", endpoint, null);
+    }
+
+    private RestResponse executePost(final String endpoint, final JSONObject body) {
+	return executeRequest("POST", endpoint, body);
+    }
+
+    private RestResponse executePut(final String endpoint, final JSONObject body) {
+	return executeRequest("PUT", endpoint, body);
+    }
+
+    private RestResponse executeDelete(final String endpoint) {
+	return executeRequest("DELETE", endpoint, null);
+    }
+
+    /**
+     * GET returning a JSON object, where 401/403 really does mean "this session is not accepted".
+     * Only the endpoint that describes the signed-in account itself uses it; the CRUD endpoints go
+     * through {@link #executeGet(String)} so that a 403 stays a permission problem.
+     */
+    private JSONObject makeGETRequest(final String endpoint) {
+	final RestResponse response = executeGet(endpoint);
+
+	if (response.isSuccessful()) {
+	    return response.asJson();
+	}
+
+	if (response.statusCode() == 401 || response.statusCode() == 403) {
+	    handleAuthError(response.statusCode(), String.format(Locale.US, "GET %s was rejected", endpoint));
+	}
+
+	return null;
+    }
+
+    /**
+     * {@link #makeGETRequest(String)} for the collection endpoints, such as a channel's member keys.
+     */
+    private JSONArray makeGETRequestCollection(final String endpoint) {
+	final RestResponse response = executeGet(endpoint);
+
+	if (response.isSuccessful()) {
+	    return response.asJsonArray();
+	}
+
+	if (response.statusCode() == 401 || response.statusCode() == 403) {
+	    handleAuthError(response.statusCode(), String.format(Locale.US, "GET %s was rejected", endpoint));
+	}
+
+	return null;
+    }
+
+    /**
+     * Delivers a failure on the main thread; a request that fails without a message (an unreachable
+     * server, for instance) still needs to say something to the caller.
+     */
+    private <T> void postFailure(final Callback<T> callback, final String error) {
+	final String message = error == null || error.isEmpty() ? "The server request failed" : error;
+
+	mainHandler.post(() -> callback.onFailure(message));
+    }
+
+    /**
+     * Turns a failed CRUD response into a {@link Callback} failure.
+     * <p>
+     * 401 means the session really is gone, so it goes through {@link #handleAuthError}. 403 on the
+     * other hand only says the signed-in user is not the administrator of that virtual server or
+     * channel - the server enforces the same rule the UI gates on - so the session must survive it
+     * and the user merely gets a permission message.
+     *
+     * @param action what was being attempted, e.g. "Renaming the server"
+     */
+    private <T> void failRest(final RestResponse response, final Callback<T> callback, final String action) {
+	if (response.statusCode() == 401) {
+	    postFailure(callback, action + " failed: your session has expired");
+	    handleAuthError(response.statusCode(), action + " was rejected by the server");
+
+	    return;
+	}
+
+	if (response.statusCode() == 403) {
+	    Log.w(TAG, action + " rejected with 403 - the user is not an administrator, keeping the session");
+	    postFailure(callback, ERROR_PERMISSION_DENIED);
+
+	    return;
+	}
+
+	postFailure(callback, action + " failed with HTTP " + response.statusCode());
+    }
+
+    /**
+     * Registers a new user on {@code /api/auth/register} of {@link #deployBaseUrl()} and returns the
+     * JWT token, or "" on any failure. Like {@link #login(String, String)} it takes no address.
+     *
+     * <p>Must be called off the main thread.
+     */
+    public String register(String username, String password, String publicKey) {
 	try {
 	    JSONObject regJson = new JSONObject();
 	    regJson.put("username", username);
@@ -684,7 +1163,7 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 		    MediaType.parse("application/json; charset=utf-8")
 		    );
 
-	    String baseUrl = (httpUrl != null && !httpUrl.isEmpty()) ? httpUrl : currentServerHTTPIp;
+	    String baseUrl = deployBaseUrl();
 	    Request regRequest = new Request.Builder()
 		.url(baseUrl + "/api/auth/register")
 		.post(regBody)
@@ -699,6 +1178,7 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 		    if (!token.isEmpty()) {
 			this.jwtToken = token;
 			this.jwtTokenIssuer = baseUrl;
+			new AccountStore(context).saveJwtToken(token, baseUrl);
 		    }
 		    return token;
 		}
@@ -884,7 +1364,7 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 			break;
 		    }
 
-		    final var peers = makeGETRequestCollection(String.format("/api/channels/%d/keys", channelId));
+		    final var peers = makeGETRequestCollection(String.format(Locale.US, "/api/channels/%d/keys", channelId));
 		    if (peers == null) {
 			Log.w(TAG, "No peer keys available for channel " + channelId + ", cannot unicast the rotated key");
 			break;
@@ -993,10 +1473,10 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 	handleAuthError(statusCode, message);
     }
 
-    private void notifyStateChanged(boolean connected, String serverIp) {
+    private void notifyStateChanged(boolean connected, String serverBaseUrl) {
 	mainHandler.post(() -> {
 	    for (ConnectionListener l : listeners) {
-		l.onConnectionStateChanged(connected, serverIp);
+		l.onConnectionStateChanged(connected, serverBaseUrl);
 	    }
 	});
     }

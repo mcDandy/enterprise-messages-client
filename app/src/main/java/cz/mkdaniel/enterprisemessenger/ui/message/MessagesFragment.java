@@ -40,8 +40,9 @@ import cz.mkdaniel.enterprisemessenger.net.ServerConnectionManager;
 import cz.mkdaniel.enterprisemessenger.notification.NotificationHelper;
 
 /**
- * Chat screen showing messages in a room.
- * Communicates with the remote server via WebSocket using ServerConnectionManager.
+ * Chat screen showing messages in a channel of a virtual server.
+ * Communicates with the one physical server via WebSocket using ServerConnectionManager; the
+ * address is never a navigation argument, only the channel selected here is.
  * Displays a red underline on the message input field if the server cannot be reached.
  */
 public class MessagesFragment extends Fragment implements ServerConnectionManager.ConnectionListener {
@@ -55,7 +56,7 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
     private MessageAdapter adapter;
     private ServerConnectionManager connectionManager;
 
-    private String serverIp;
+    private long serverId;
     private String roomId;
     private String roomName;
     private String encryptionKey;
@@ -67,10 +68,10 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
     private final ActivityResultLauncher<String> localNetworkPermissionLauncher =
             registerForActivityResult(new ActivityResultContracts.RequestPermission(), isGranted -> {
                 if (isGranted) {
-                    Log.d(TAG, "ACCESS_LOCAL_NETWORK granted, connecting to " + serverIp);
+                    Log.d(TAG, "ACCESS_LOCAL_NETWORK granted, connecting to the deployment server");
                     startConnection();
                 } else {
-                    Log.w(TAG, "ACCESS_LOCAL_NETWORK denied - cannot reach local server " + serverIp);
+                    Log.w(TAG, "ACCESS_LOCAL_NETWORK denied - cannot reach the deployment server");
                     updateInputUnderline(false);
                 }
             });
@@ -86,15 +87,15 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
     public void onViewCreated(@NonNull View view, Bundle savedInstanceState) {
         super.onViewCreated(view, savedInstanceState);
 
-        // --- Arguments setup (server IP & channel encryption key) ---
+        // --- Arguments setup (virtual server, channel and its encryption key) ---
         if (getArguments() != null) {
-            serverIp = getArguments().getString("serverIp", "");
+            serverId = getArguments().getLong("serverId", -1L);
             roomId = getArguments().getString("roomId", "");
             roomName = getArguments().getString("roomName", "");
             encryptionKey = getArguments().getString("encryptionKey", "");
         }
 
-        Log.d(TAG, "Opening MessagesFragment for serverIp=" + serverIp
+        Log.d(TAG, "Opening MessagesFragment for virtual server " + serverId
                 + ", room=" + roomName + " (" + roomId + ")"
                 + ", encryptionKey=" + encryptionKey);
 
@@ -114,7 +115,7 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
         if (hasLocalNetworkPermission()) {
             startConnection();
         } else {
-            Log.w(TAG, "ACCESS_LOCAL_NETWORK not granted yet, requesting it before connecting to " + serverIp);
+            Log.w(TAG, "ACCESS_LOCAL_NETWORK not granted yet, requesting it before connecting");
             requestLocalNetworkPermission();
         }
 
@@ -148,14 +149,17 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
                 == PackageManager.PERMISSION_GRANTED;
     }
 
+    /**
+     * Opens the session to the physical server - it takes no address, that is compile-time
+     * configuration - and selects this channel on it.
+     */
     private void startConnection() {
-        if (connectionManager == null || serverIp == null || serverIp.isEmpty()) {
+        if (connectionManager == null) {
             return;
         }
 
-        connectionManager.connectToServer(serverIp);
-        //connectionManager.joinRoom(roomId);
-        connectionManager.joinChannel(roomId/*, encryptionKey*/);
+        connectionManager.connect();
+        connectionManager.joinChannel(roomId);
     }
 
     @Override

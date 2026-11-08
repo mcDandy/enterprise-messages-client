@@ -2,6 +2,7 @@ package cz.mkdaniel.enterprisemessenger.ui.auth;
 
 import android.os.Bundle;
 import android.text.TextUtils;
+import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -60,20 +61,35 @@ public class RegisterFragment extends Fragment {
         setLoading(true);
 
         ServerConnectionManager connectionManager = ServerConnectionManager.getInstance(requireContext());
-        // Register on the deployment address from @string/server_ip and record it as the issuer of
-        // the returned token.
-        final String serverUrl = connectionManager.getCurrentServerIp();
+        // No address is passed around: registration happens on the deployment address from
+        // @string/server_ip, which is also recorded as the issuer of the returned token.
         new Thread(() -> {
             String pubKey = CryptoManager.getInstance(requireActivity().getApplicationContext()).getPublicKeyBase64();
             if (pubKey == null) pubKey = "dummyPublicKeyBase64StringForE2EE";
-            String token = connectionManager.register(serverUrl, username, password, pubKey);
+            String token = connectionManager.register(username, password, pubKey);
             if (isAdded() && getActivity() != null) {
                 getActivity().runOnUiThread(() -> {
                     if (!isAdded()) return;
                     setLoading(false);
                     if (!token.isEmpty()) {
-                        new AccountStore(requireContext()).saveSession(username, password, token, serverUrl);
-                        connectionManager.connectToServer(serverUrl);
+                        new AccountStore(requireContext())
+                                .saveSession(username, password, token, connectionManager.deployBaseUrl());
+
+                        // Cache the id the server just assigned to the account - the server list
+                        // needs it to tell an administrator from a plain member.
+                        connectionManager.fetchUserId(new ServerConnectionManager.Callback<>() {
+                            @Override
+                            public void onResult(Long userId) {
+                                Log.d("RegisterFragment", "Cached user id " + userId);
+                            }
+
+                            @Override
+                            public void onFailure(String error) {
+                                Log.w("RegisterFragment", "Could not read the user id: " + error);
+                            }
+                        });
+
+                        connectionManager.connect();
                         NavOptions navOptions = new NavOptions.Builder()
                                 .setPopUpTo(R.id.nav_login, true)
                                 .build();
