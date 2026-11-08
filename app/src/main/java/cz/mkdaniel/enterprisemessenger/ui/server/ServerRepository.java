@@ -23,6 +23,9 @@ public class ServerRepository {
     private static final String PREF_NAME = "EnterpriseMessenger_Servers";
     private static final String KEY_SERVER_LIST = "server_list_json";
 
+    /** Id of the entry that mirrors the {@code @string/server_ip} deployment address. */
+    private static final String DEFAULT_SERVER_ID = "srv_default";
+
     private static final int[] AVATAR_DRAWABLES = {
             R.drawable.avatar_1,
             R.drawable.avatar_2,
@@ -72,6 +75,7 @@ public class ServerRepository {
         }
 
         List<ServerViewItem> servers = new ArrayList<>();
+        boolean reserialized = false;
         try {
             JSONArray jsonArray = new JSONArray(json);
             for (int i = 0; i < jsonArray.length(); i++) {
@@ -83,6 +87,20 @@ public class ServerRepository {
                 int drawableId = AVATAR_DRAWABLES[avatarIndex % AVATAR_DRAWABLES.length];
                 int unreadCount = obj.optInt("unreadCount", 0);
 
+                // The built-in entry is not user input, so it always follows @string/server_ip.
+                // Without this the copy persisted on the first launch would keep pointing at the
+                // address of an older build, and every request would go to a server the user never
+                // entered - it is rejected with 401, which clears the session ("logs the user out")
+                // while the WebSocket keeps retrying that stale address.
+                if (DEFAULT_SERVER_ID.equals(id)) {
+                    String currentDefaultIp = defaultServerAddress(context);
+                    if (!currentDefaultIp.equals(ipAddress)) {
+                        Log.i(TAG, "Refreshing built-in server address to " + currentDefaultIp);
+                        ipAddress = currentDefaultIp;
+                        reserialized = true;
+                    }
+                }
+
                 servers.add(new ServerViewItem(id, name, ipAddress, drawableId, unreadCount));
             }
         } catch (JSONException e) {
@@ -90,6 +108,10 @@ public class ServerRepository {
             List<ServerViewItem> defaultServers = createDefaultServers(context);
             saveServers(context, defaultServers);
             return defaultServers;
+        }
+
+        if (reserialized) {
+            saveServers(context, servers);
         }
 
         return servers;
@@ -171,12 +193,24 @@ public class ServerRepository {
         getPrefs(context).edit().putString(KEY_SERVER_LIST, jsonArray.toString()).apply();
     }
 
-    private List<ServerViewItem> createDefaultServers(Context context) {
-        List<ServerViewItem> items = new ArrayList<>();
+    /**
+     * Address of the built-in server: {@code @string/server_ip} plus {@code @integer/server_port},
+     * the only configuration of the deployment address.
+     */
+    private String defaultServerAddress(Context context) {
         String serverIp = context.getString(R.string.server_ip);
         int serverPort = context.getResources().getInteger(R.integer.server_port);
-        String formattedIp = serverIp + ":" + serverPort;
-        items.add(new ServerViewItem("srv_default", context.getString(R.string.default_server_name), formattedIp, AVATAR_DRAWABLES[0], 0));
+        return serverIp + ":" + serverPort;
+    }
+
+    private List<ServerViewItem> createDefaultServers(Context context) {
+        List<ServerViewItem> items = new ArrayList<>();
+        items.add(new ServerViewItem(
+                DEFAULT_SERVER_ID,
+                context.getString(R.string.default_server_name),
+                defaultServerAddress(context),
+                AVATAR_DRAWABLES[0],
+                0));
         return items;
     }
 }

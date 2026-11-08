@@ -1,9 +1,30 @@
 <?xml version="1.0" encoding="utf-8"?>
 <network-security-config>
-    <base-config cleartextTrafficPermitted="true">
-	<trust-anchors>
-	    <certificates src="system" />
-	    <certificates src="user" />
-	</trust-anchors>
+    <!--
+        Only system-installed certificate authorities are trusted and cleartext (http://, ws://)
+        is forbidden. Trusting <certificates src="user"/> would let any app or tool that installs
+        a root CA on the device (the standard technique behind cheap TLS-inspection proxies)
+        silently decrypt the login password, the JWT and every chat payload.
+
+        The deployment is reachable at https://TLS_HOST:HTTPS_PORT (see the server's compose.yaml),
+        so cleartext is never required.
+
+        Debug builds additionally accept user-installed CAs via <debug-overrides> below, which the
+        platform applies only when android:debuggable="true". That is enough to develop against the
+        self-signed certificate produced by the server's scripts/ensure-dev-cert.sh. For a release
+        build, either use a certificate from a real CA or bundle the deployment's certificate.pem
+        here as a pinned trust anchor.
+    -->
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
     </base-config>
+
+    <debug-overrides>
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="user" />
+        </trust-anchors>
+    </debug-overrides>
 </network-security-config>

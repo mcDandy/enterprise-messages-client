@@ -53,15 +53,18 @@ public class LoginFragment extends Fragment {
         setLoading(true);
 
         ServerConnectionManager connectionManager = ServerConnectionManager.getInstance(requireContext());
+        // Log in to the deployment address from @string/server_ip and remember it as the issuer of
+        // the token, so a later launch never offers that token to a server the user did not use.
+        final String serverUrl = connectionManager.getCurrentServerIp();
         new Thread(() -> {
-            String token = connectionManager.login(connectionManager.getCurrentServerIp(), username, password);
+            String token = connectionManager.login(serverUrl, username, password);
             if (isAdded() && getActivity() != null) {
                 getActivity().runOnUiThread(() -> {
                     if (!isAdded()) return;
                     setLoading(false);
                     if (!token.isEmpty()) {
-                        new AccountStore(requireContext()).saveSession(username, password, token);
-                        connectionManager.connectToServer(connectionManager.getCurrentServerIp());
+                        new AccountStore(requireContext()).saveSession(username, password, token, serverUrl);
+                        connectionManager.connectToServer(serverUrl);
                         NavOptions navOptions = new NavOptions.Builder()
                                 .setPopUpTo(R.id.nav_login, true)
                                 .build();

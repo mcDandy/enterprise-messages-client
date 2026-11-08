@@ -60,17 +60,20 @@ public class RegisterFragment extends Fragment {
         setLoading(true);
 
         ServerConnectionManager connectionManager = ServerConnectionManager.getInstance(requireContext());
+        // Register on the deployment address from @string/server_ip and record it as the issuer of
+        // the returned token.
+        final String serverUrl = connectionManager.getCurrentServerIp();
         new Thread(() -> {
-            String pubKey = CryptoManager.getInstance(requireContext()).getPublicKeyBase64();
+            String pubKey = CryptoManager.getInstance(requireActivity().getApplicationContext()).getPublicKeyBase64();
             if (pubKey == null) pubKey = "dummyPublicKeyBase64StringForE2EE";
-            String token = connectionManager.register(connectionManager.getCurrentServerIp(), username, password, pubKey);
+            String token = connectionManager.register(serverUrl, username, password, pubKey);
             if (isAdded() && getActivity() != null) {
                 getActivity().runOnUiThread(() -> {
                     if (!isAdded()) return;
                     setLoading(false);
                     if (!token.isEmpty()) {
-                        new AccountStore(requireContext()).saveSession(username, password, token);
-                        connectionManager.connectToServer(connectionManager.getCurrentServerIp());
+                        new AccountStore(requireContext()).saveSession(username, password, token, serverUrl);
+                        connectionManager.connectToServer(serverUrl);
                         NavOptions navOptions = new NavOptions.Builder()
                                 .setPopUpTo(R.id.nav_login, true)
                                 .build();

@@ -48,11 +48,16 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
     public static final String HTTPS_PROTOCOL = "https";
     public static final String WS_PROTOCOL = "wss";
 
-    /** Default host from {@code @string/server_ip}; refreshed when the singleton is created. */
-    public static String WS_HOST = "192.168.1.115";
+    /**
+     * Default host, the value of {@code @string/server_ip}. It is deliberately empty: the resource
+     * is the single point of truth for the deployment address and is read through
+     * {@link #applyDeploymentDefault} when the singleton is created, so no address may ever be
+     * duplicated in code.
+     */
+    public static String WS_HOST = "";
 
-    /** Default port from {@code @integer/server_port}; refreshed when the singleton is created. */
-    public static Integer WS_PORT = 8443;
+    /** Default port, the value of {@code @integer/server_port}; read with the host above. */
+    public static Integer WS_PORT = 0;
 
     /** Binary WebSocket endpoint of the server, see its {@code WebSocketConfig}. */
     public static final String WS_ENDPOINT_PATH = "wss";
@@ -72,6 +77,20 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
     private String currentServerWSIp;
 
     private String jwtToken = "";
+
+    /**
+     * HTTP base URL of the server that issued {@link #jwtToken}. A JWT only authenticates on the
+     * server that signed it, so offering a token from another address always comes back as 401,
+     * which clears the session and looks to the user like a spontaneous log-out.
+     */
+    private String jwtTokenIssuer = "";
+
+    /**
+     * Set when the server rejected our credentials with 401/403. It distinguishes a genuinely
+     * invalid session (clear it) from a server that is merely unreachable (keep it).
+     */
+    private boolean lastLoginRejected = false;
+
     private long visibleChannelId;
 
     /**
@@ -95,8 +114,16 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
     }
 
     public static String normalizeHttpUrl(String rawIp) {
+        // No implicit fallback to another host: an empty address is a caller error, and silently
+        // dialling @string/server_ip instead would send the JWT to a server the user never picked.
         if (rawIp == null || rawIp.trim().isEmpty()) {
-            return String.format("%s://%s:%d", HTTPS_PROTOCOL, WS_HOST, WS_PORT);
+            throw new IllegalArgumentException(
+                    "Server address is empty; @string/server_ip is the only default source");
+        }
+        if (WS_PORT == null || WS_PORT <= 0) {
+            // @integer/server_port has not been read yet, which would build a "host:0" URL.
+            throw new IllegalStateException(
+                    "Deployment port not loaded; obtain the singleton with getInstance(context) first");
         }
         String ip = rawIp.trim();
         if (ip.startsWith("http://") || ip.startsWith("https://")) {
@@ -105,7 +132,7 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
         if (ip.contains(":")) {
             return "https://" + ip;
         } else {
-            return "https://" + ip + ":" + WS_PORT;
+            return HTTPS_PROTOCOL + "://" + ip + ":" + WS_PORT;
         }
     }
 
@@ -121,7 +148,6 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
     public void fetchChannels(String serverIp, Callback<List<Room>> callback) {
 	executor.execute(() -> {
 	    try {
-		JSONArray channelsArray = makeGETRequestCollection("/api/servers/1/channels");
 		if (channelsArray == null) {
 		    mainHandler.post(() -> callback.onFailure("Failed to fetch channels from server"));
 
@@ -188,30 +214,26 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
                     public java.security.cert.X509Certificate[] getAcceptedIssuers() {
                         return new java.security.cert.X509Certificate[]{};
                     }
-                }
-            };
+        return new OkHttpClient();
+    }
 
-            final javax.net.ssl.SSLContext sslContext = javax.net.ssl.SSLContext.getInstance("SSL");
-            sslContext.init(null, trustAllCerts, new java.security.SecureRandom());
-            final javax.net.ssl.SSLSocketFactory sslSocketFactory = sslContext.getSocketFactory();
-
-            return new OkHttpClient.Builder()
-                    .sslSocketFactory(sslSocketFactory, (javax.net.ssl.X509TrustManager) trustAllCerts[0])
-                    .hostnameVerifier((hostname, session) -> true)
-                    .build();
-        } catch (Exception e) {
-            return new OkHttpClient();
-        }
+    /**
+     * Reads the deployment address from {@code @string/server_ip} and {@code @integer/server_port},
+     * the only place it is configured. Called before the first URL is built.
+     */
+    private static void applyDeploymentDefault(Context context) {
+	final Context appContext = context.getApplicationContext();
+	WS_HOST = appContext.getString(cz.mkdaniel.enterprisemessenger.R.string.server_ip);
+	WS_PORT = appContext.getResources().getInteger(cz.mkdaniel.enterprisemessenger.R.integer.server_port);
     }
 
     private ServerConnectionManager(Context context) {
 	this.context = context.getApplicationContext();
 	this.cryptoManager = CryptoManager.getInstance(context);
 
-	// The configured deployment is the default target; a server entry selected in the UI can
-	// still override it through connectToServer().
-	WS_HOST = context.getString(cz.mkdaniel.enterprisemessenger.R.string.server_ip);
-	WS_PORT = context.getResources().getInteger(cz.mkdaniel.enterprisemessenger.R.integer.server_port);
+	// The address in @string/server_ip is the default target; a server entry selected in the UI
+	// can still override it through connectToServer().
+	applyDeploymentDefault(this.context);
 
 	this.currentServerHTTPIp = normalizeHttpUrl(WS_HOST + ":" + WS_PORT);
 	this.currentServerWSIp = normalizeWsUrl(WS_HOST + ":" + WS_PORT);
@@ -223,8 +245,12 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 	    }
 	    AccountStore accountStore = new AccountStore(context);
 	    String savedToken = accountStore.getJwtToken();
-	    if (savedToken != null && !savedToken.isEmpty()) {
+	    // Only reuse the persisted token while it was issued by the server the socket is dialling;
+	    // otherwise the reconnect loop would keep offering a foreign token and be rejected forever.
+	    if (savedToken != null && !savedToken.isEmpty()
+		    && currentServerHTTPIp.equalsIgnoreCase(accountStore.getTokenIssuer())) {
 		jwtToken = savedToken;
+		jwtTokenIssuer = currentServerHTTPIp;
 		return savedToken;
 	    }
 	    return "";
@@ -263,6 +289,7 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
     public void handleAuthError(int statusCode, String message) {
 	Log.w(TAG, "Authentication error (" + statusCode + "): " + message + ". Clearing session and disconnecting.");
 	this.jwtToken = "";
+	this.jwtTokenIssuer = "";
 	AccountStore accountStore = new AccountStore(context);
 	accountStore.clearSession();
 	webSocketClient.disconnect();
@@ -273,16 +300,41 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
      * Authenticates via REST API (if needed) and connects to remote WebSocket server.
      */
     public void connectToServer(String serverIp) {
-	String httpUrl = normalizeHttpUrl(serverIp);
-	String wsUrl = normalizeWsUrl(serverIp);
+	// Never fall back to another address here: dialling the deployment default when the caller
+	// knows no address is exactly what makes the app reconnect to a host the user never entered.
+	if (serverIp == null || serverIp.trim().isEmpty()) {
+	    Log.w(TAG, "connectToServer: no address given, keeping " + currentServerHTTPIp);
+	    return;
+	}
+
+	final String httpUrl = normalizeHttpUrl(serverIp);
+	final String wsUrl = normalizeWsUrl(serverIp);
+
+	final boolean targetChanged = !wsUrl.equalsIgnoreCase(webSocketClient.getCurrentUrl());
 
 	this.currentServerHTTPIp = httpUrl;
 	this.currentServerWSIp = wsUrl;
 
-	if (webSocketClient.isConnected() && wsUrl.equalsIgnoreCase(webSocketClient.getCurrentUrl())) {
+	// A token signed by another server cannot authenticate here. Dropping it makes the code below
+	// log in again with the stored credentials instead of being rejected and clearing the session.
+	if (!jwtToken.isEmpty() && !httpUrl.equalsIgnoreCase(jwtTokenIssuer)) {
+	    Log.d(TAG, "Cached JWT was issued by " + jwtTokenIssuer + ", re-authenticating against " + httpUrl);
+	    jwtToken = "";
+	    jwtTokenIssuer = "";
+	}
+
+	if (webSocketClient.isConnected() && !targetChanged) {
 	    Log.d(TAG, "Already connected to " + httpUrl);
 	    notifyStateChanged(true, httpUrl);
 	    return;
+	}
+
+	// The socket keeps the URL of its last handshake and reconnects to that URL verbatim. Without
+	// this redial an already running (or retrying) connection to another address would keep its
+	// old URL while every REST call went to the newly selected server.
+	if (targetChanged) {
+	    Log.d(TAG, "Target address changed, reconnecting the WebSocket to " + httpUrl);
+	    webSocketClient.disconnect();
 	}
 
 	Log.d(TAG, "Initiating authentication & connection to: " + httpUrl);
@@ -294,8 +346,20 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 	    var pubKey = cryptoManager.getPublicKeyBase64();
 	    AccountStore accountStore = new AccountStore(context);
 
+	    // A token restored from the previous launch belongs to the server that stored it; using it
+	    // against another address only produces a 401 and clears the session.
 	    if (jwtToken == null || jwtToken.isEmpty()) {
-		jwtToken = accountStore.getJwtToken();
+		final String storedToken = accountStore.getJwtToken();
+		final String storedIssuer = accountStore.getTokenIssuer();
+
+		if (storedToken != null && !storedToken.isEmpty()
+			&& httpUrl.equalsIgnoreCase(storedIssuer)) {
+		    jwtToken = storedToken;
+		    jwtTokenIssuer = storedIssuer;
+		} else if (storedToken != null && !storedToken.isEmpty()) {
+		    Log.d(TAG, "Stored JWT was issued by " + storedIssuer
+			    + ", not " + httpUrl + ", signing in again");
+		}
 	    }
 
 	    if (jwtToken.isEmpty() && accountStore.isLoggedIn()) {
@@ -306,7 +370,15 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 
 	    if (jwtToken == null || jwtToken.isEmpty()) {
 		Log.w(TAG, "No valid JWT token obtained from " + httpUrl + ", aborting WebSocket connection");
-		handleAuthError(401, "No valid JWT token available");
+		if (lastLoginRejected) {
+		    // The server answered 401/403 to our credentials: the session really is invalid.
+		    handleAuthError(401, "No valid JWT token available");
+		} else {
+		    // Unreachable server or a failed request is not a rejected login, so the stored
+		    // session must survive it; the socket keeps retrying on its own.
+			notifyError("Cannot reach " + httpUrl);
+			notifyStateChanged(false, httpUrl);
+		}
 		return;
 	    }
 
@@ -340,6 +412,8 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
      * Posts credentials to {@code /api/auth/login} and returns the JWT token, or "" on any failure.
      */
     public String login(String httpUrl, String username, String password) {
+	lastLoginRejected = false;
+
 	try {
 	    final var loginJson = new JSONObject();
 
@@ -363,11 +437,14 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 
 		    if (!token.isEmpty()) {
 			this.jwtToken = token;
+			this.jwtTokenIssuer = baseUrl;
+			new AccountStore(context).saveJwtToken(token, baseUrl);
 		    }
 
 		    return token;
 		}
 
+		lastLoginRejected = response.code() == 401 || response.code() == 403;
 		Log.w(TAG, "Login failed with HTTP " + response.code());
 		return "";
 	    }
@@ -471,15 +548,19 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
     }
 
     private JSONArray makeGETRequestCollection(final String endpoint) {
+	return makeGETRequestCollection(currentServerHTTPIp, endpoint);
+    }
+
+    private JSONArray makeGETRequestCollection(final String baseUrl, final String endpoint) {
 	final var loginRequest = new Request
 	    .Builder()
-	    .url(String.format("%s%s", currentServerHTTPIp, endpoint))
+	    .url(String.format("%s%s", baseUrl, endpoint))
 	    .addHeader("Authorization", String.format("Bearer %s", jwtToken))
 	    .get()
 	    .build();
 
 	try (final var response = httpClient.newCall(loginRequest).execute()) {
-	    Log.w(TAG, String.format("GET %s%s", currentServerHTTPIp, endpoint));
+	    Log.w(TAG, String.format("GET %s%s", baseUrl, endpoint));
 
 	    if (response.isSuccessful() && response.body() != null) {
 		final var resStr = response.body().string();
@@ -627,6 +708,7 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 		    Log.d(TAG, "Registration response, obtained token: " + !token.isEmpty());
 		    if (!token.isEmpty()) {
 			this.jwtToken = token;
+			this.jwtTokenIssuer = baseUrl;
 		    }
 		    return token;
 		}

@@ -87,41 +87,21 @@ public class WebSocketClient {
         this.okHttpClient = createOkHttpClient();
     }
 
+    /**
+     * Uses OkHttp's default trust manager and hostname verifier, so the server certificate is
+     * validated against the platform's trust anchors ({@code @xml/network_security_config}).
+     * A custom SSLSocketFactory/HostnameVerifier must never be installed here: doing so disables
+     * certificate validation and lets any network attacker read the JWT and all chat payloads.
+     */
     private static OkHttpClient createOkHttpClient() {
-        try {
-            final javax.net.ssl.TrustManager[] trustAllCerts = new javax.net.ssl.TrustManager[]{
-                new javax.net.ssl.X509TrustManager() {
-                    @Override
-                    public void checkClientTrusted(java.security.cert.X509Certificate[] chain, String authType) {}
-                    @Override
-                    public void checkServerTrusted(java.security.cert.X509Certificate[] chain, String authType) {}
-                    @Override
-                    public java.security.cert.X509Certificate[] getAcceptedIssuers() {
-                        return new java.security.cert.X509Certificate[]{};
-                    }
-                }
-            };
-
-            final javax.net.ssl.SSLContext sslContext = javax.net.ssl.SSLContext.getInstance("SSL");
-            sslContext.init(null, trustAllCerts, new java.security.SecureRandom());
-            final javax.net.ssl.SSLSocketFactory sslSocketFactory = sslContext.getSocketFactory();
-
-            return new OkHttpClient.Builder()
-                    .connectTimeout(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-                    .writeTimeout(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-                    .readTimeout(0, TimeUnit.MILLISECONDS)
-                    .pingInterval(PING_INTERVAL_SECONDS, TimeUnit.SECONDS)
-                    .sslSocketFactory(sslSocketFactory, (javax.net.ssl.X509TrustManager) trustAllCerts[0])
-                    .hostnameVerifier((hostname, session) -> true)
-                    .build();
-        } catch (Exception e) {
-            return new OkHttpClient.Builder()
-                    .connectTimeout(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-                    .writeTimeout(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
-                    .readTimeout(0, TimeUnit.MILLISECONDS)
-                    .pingInterval(PING_INTERVAL_SECONDS, TimeUnit.SECONDS)
-                    .build();
-        }
+        return new OkHttpClient.Builder()
+                .connectTimeout(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                .writeTimeout(CONNECT_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+                // Long-lived WebSocket connection: readTimeout MUST be 0 (no timeout)
+                .readTimeout(0, TimeUnit.MILLISECONDS)
+                // Send PING frames every 15s to keep the TCP socket alive against NAT/router timeouts
+                .pingInterval(PING_INTERVAL_SECONDS, TimeUnit.SECONDS)
+                .build();
     }
 
     public void setListener(WebSocketClientListener listener) {
