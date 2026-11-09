@@ -113,6 +113,12 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
      */
     private boolean lastLoginRejected = false;
 
+    private String lastRegisterError = "";
+
+    public String getLastRegisterError() {
+        return lastRegisterError;
+    }
+
     private long visibleChannelId;
 
     /**
@@ -1462,42 +1468,85 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
      * <p>Must be called off the main thread.
      */
     public String register(String username, String password, String publicKey) {
-	try {
-	    JSONObject regJson = new JSONObject();
-	    regJson.put("username", username);
-	    regJson.put("password", password);
-	    regJson.put("publicKey", (publicKey != null && !publicKey.isEmpty()) ? publicKey : cryptoManager.getPublicKeyBase64());
+        lastRegisterError = "";
+        try {
+            JSONObject regJson = new JSONObject();
+            regJson.put("username", username);
+            regJson.put("password", password);
+            regJson.put("publicKey", (publicKey != null && !publicKey.isEmpty()) ? publicKey : cryptoManager.getPublicKeyBase64());
 
-	    RequestBody regBody = RequestBody.create(
-		    regJson.toString(),
-		    MediaType.parse("application/json; charset=utf-8")
-		    );
+            RequestBody regBody = RequestBody.create(
+                    regJson.toString(),
+                    MediaType.parse("application/json; charset=utf-8")
+            );
 
-	    String baseUrl = deployBaseUrl();
-	    Request regRequest = new Request.Builder()
-		.url(baseUrl + "/api/auth/register")
-		.post(regBody)
-		.build();
+            String baseUrl = deployBaseUrl();
+            Request regRequest = new Request.Builder()
+                    .url(baseUrl + "/api/auth/register")
+                    .post(regBody)
+                    .build();
 
-	    try (Response regResponse = httpClient.newCall(regRequest).execute()) {
-		if (regResponse.body() != null) {
-		    String resStr = regResponse.body().string();
-		    JSONObject resObj = new JSONObject(resStr);
-		    String token = resObj.optString("token", "");
-		    Log.d(TAG, "Registration response, obtained token: " + !token.isEmpty());
-		    if (!token.isEmpty()) {
-			this.jwtToken = token;
-			this.jwtTokenIssuer = baseUrl;
-			new AccountStore(context).saveJwtToken(token, baseUrl, resObj.optLong("expiresAt", 0L));
-		    }
-		    return token;
-		}
-		Log.w(TAG, "Registration failed with HTTP " + regResponse.code());
-	    }
-	} catch (Exception e) {
-	    Log.w(TAG, "Registration request failed: " + e.getMessage());
-	}
-	return "";
+            try (Response regResponse = httpClient.newCall(regRequest).execute()) {
+                String resStr = regResponse.body() != null ? regResponse.body().string() : "";
+                JSONObject resObj = null;
+                if (!resStr.isEmpty()) {
+                    try {
+                        resObj = new JSONObject(resStr);
+                    } catch (Exception ignored) {}
+                }
+
+                if (regResponse.isSuccessful()) {
+                    String token = resObj != null ? resObj.optString("token", "") : "";
+                    Log.d(TAG, "Registration response, obtained token: " + !token.isEmpty());
+                    if (!token.isEmpty()) {
+                        this.jwtToken = token;
+                        this.jwtTokenIssuer = baseUrl;
+                        new AccountStore(context).saveJwtToken(token, baseUrl, resObj.optLong("expiresAt", 0L));
+                        return token;
+                    }
+
+                    Log.d(TAG, "Registration succeeded without token in response, attempting login fallback");
+                    String loginToken = login(username, password);
+                    if (!loginToken.isEmpty()) {
+                        return loginToken;
+                    }
+                }
+
+                int statusCode = regResponse.code();
+                String serverMsg = "";
+                if (resObj != null) {
+                    serverMsg = resObj.optString("message", resObj.optString("error", ""));
+                }
+
+                Log.w(TAG, "Registration failed with HTTP " + statusCode + (serverMsg.isEmpty() ? "" : ": " + serverMsg));
+
+                boolean isAlreadyExists = statusCode == 409 || statusCode == 400 ||
+                        serverMsg.toLowerCase(Locale.ROOT).contains("exist") ||
+                        serverMsg.toLowerCase(Locale.ROOT).contains("taken") ||
+                        serverMsg.toLowerCase(Locale.ROOT).contains("already");
+
+                if (isAlreadyExists) {
+                    Log.d(TAG, "Username already exists, attempting login fallback with provided credentials");
+                    String loginToken = login(username, password);
+                    if (!loginToken.isEmpty()) {
+                        Log.d(TAG, "Login fallback succeeded for existing username");
+                        return loginToken;
+                    }
+                }
+
+                if (!serverMsg.isEmpty()) {
+                    lastRegisterError = serverMsg;
+                } else if (isAlreadyExists) {
+                    lastRegisterError = "Username already exists. Please check your password or log in.";
+                } else {
+                    lastRegisterError = "Registration failed (HTTP " + statusCode + ")";
+                }
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "Registration request failed: " + e.getMessage());
+            lastRegisterError = e.getMessage() != null ? e.getMessage() : "Registration request failed";
+        }
+        return "";
     }
 
     /**

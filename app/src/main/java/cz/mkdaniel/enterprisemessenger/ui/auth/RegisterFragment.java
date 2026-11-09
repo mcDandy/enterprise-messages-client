@@ -77,7 +77,7 @@ public class RegisterFragment extends Fragment {
                         if (!isAdded()) return;
 
                         setLoading(false);
-                        showError(getString(R.string.error_register_failed));
+                        showError(getString(R.string.error_identity_key_unavailable));
                     });
                 }
 
@@ -114,7 +114,11 @@ public class RegisterFragment extends Fragment {
                                 .build();
                         navController.navigate(R.id.nav_transform, null, navOptions);
                     } else {
-                        showError(getString(R.string.error_register_failed));
+                        String lastErr = connectionManager.getLastRegisterError();
+                        if (TextUtils.isEmpty(lastErr)) {
+                            lastErr = getString(R.string.error_register_failed);
+                        }
+                        showError(lastErr);
                     }
                 });
             }
