@@ -39,9 +39,9 @@ public class WebSocketClient {
     private static final String TAG = "WebSocketClient";
     private static final int DEFAULT_TIMEOUT_SECONDS = 10;
     private static final int CONNECT_TIMEOUT_SECONDS = 10;
-    private static final int INITIAL_RECONNECT_DELAY_MS = 1000;
-    private static final int MAX_RECONNECT_DELAY_MS = 1000;
-    private static final int PING_INTERVAL_SECONDS = 15;
+    private static final int INITIAL_RECONNECT_DELAY_MS = 10000;
+    private static final int MAX_RECONNECT_DELAY_MS = 10000;
+    private static final int PING_INTERVAL_SECONDS = 1000;
 
     /**
      * Path of the binary WebSocket endpoint on the server (see server's {@code WebSocketConfig}).
@@ -201,7 +201,7 @@ public class WebSocketClient {
             }
 
             @Override
-            public void onMessage(@NonNull WebSocket webSocket, @NonNull ByteString bytes) {
+            public void onMessage(@NonNull final WebSocket webSocket, @NonNull final ByteString bytes) {
                 try {
                     // Server's PacketCodec frame: 1 type byte + payload, the WS frame is the framing.
                     byte[] raw = bytes.toByteArray();
@@ -219,13 +219,6 @@ public class WebSocketClient {
                     if (listener != null) {
                         listener.onError(e);
                     }
-                }
-            }
-
-            @Override
-            public void onMessage(@NonNull WebSocket webSocket, @NonNull String text) {
-                Log.d(TAG, "Received text frame: " + text);
-                if (listener != null) {
                 }
             }
 
@@ -376,30 +369,6 @@ public class WebSocketClient {
         });
     }
 
-    /**
-     * Closes the WebSocket connection.
-     * Sends a text frame asynchronously over the WebSocket connection.
-     */
-    public void sendTextAsync(String text) {
-        if (!isConnected()) {
-            Log.w(TAG, "Cannot send text: WebSocket client is not connected");
-            return;
-        }
-
-        executor.execute(() -> {
-            try {
-                if (webSocket != null) {
-                    webSocket.send(text);
-                    Log.d(TAG, "Sent text frame: " + text);
-                }
-            } catch (Exception e) {
-                Log.e(TAG, "Error sending text frame", e);
-                if (listener != null) {
-                    listener.onError(e);
-                }
-            }
-        });
-    }
 
     /**
      * Closes the WebSocket connection and disables automatic reconnection.

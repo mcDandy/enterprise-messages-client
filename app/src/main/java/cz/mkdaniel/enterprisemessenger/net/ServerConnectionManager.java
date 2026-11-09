@@ -72,6 +72,9 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
      * duplicated in code.
      */
     public static String WS_HOST = "";
+    private static final int INITIAL_RECONNECT_DELAY_MS = 1000;
+    private static final int MAX_RECONNECT_DELAY_MS = 1000;
+    private static final int PING_INTERVAL_SECONDS = 15;
 
     /** Default port, the value of {@code @integer/server_port}; read with the host above. */
     public static Integer WS_PORT = 0;
