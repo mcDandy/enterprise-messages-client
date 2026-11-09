@@ -5,6 +5,7 @@ import android.view.MenuItem;
 import android.view.Menu;
 import android.view.View;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import com.google.android.material.bottomnavigation.BottomNavigationView;
 import com.google.android.material.navigation.NavigationView;
@@ -31,8 +32,13 @@ public class MainActivity extends AppCompatActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        // Initialize / load Elliptic Curve (EC) KeyPair on first app startup
-        CryptoManager.getInstance(this).initializeKeysAsync();
+        // Initialize / load Elliptic Curve (EC) KeyPair on first app startup. A keystore that cannot
+        // hand out the identity key means this device cannot prove who it is, so the user hears about
+        // it - there is no silent software fallback that would quietly change his identity.
+        CryptoManager.getInstance(this).initializeKeysAsync(failure ->
+                runOnUiThread(() -> Toast.makeText(this,
+                        R.string.error_identity_key_unavailable,
+                        Toast.LENGTH_LONG).show()));
 
         // Initialize notification channel and check/request permission for Android 13+
         NotificationHelper.createNotificationChannel(this);

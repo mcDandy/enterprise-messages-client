@@ -32,6 +32,12 @@ android {
     buildFeatures {
         viewBinding true
     }
+    testOptions {
+        // The crypto classes log through android.util.Log, whose stubs throw in a JVM unit test.
+        // Returning default values keeps Log.d/Log.w inert there, so the sealing and key-registry
+        // logic can be tested without Robolectric.
+        unitTests.returnDefaultValues = true
+    }
 }
 
 dependencies {

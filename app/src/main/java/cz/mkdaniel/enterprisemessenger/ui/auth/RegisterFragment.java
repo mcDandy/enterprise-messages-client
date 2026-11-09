@@ -64,16 +64,35 @@ public class RegisterFragment extends Fragment {
         // No address is passed around: registration happens on the deployment address from
         // @string/server_ip, which is also recorded as the issuer of the returned token.
         new Thread(() -> {
-            String pubKey = CryptoManager.getInstance(requireActivity().getApplicationContext()).getPublicKeyBase64();
-            if (pubKey == null) pubKey = "dummyPublicKeyBase64StringForE2EE";
+            // The identity public key is what makes the account reachable at all. A placeholder in
+            // its place would register an account whose peers can never derive a secret with it, so
+            // registration stops here instead.
+            final String pubKey = CryptoManager
+                    .getInstance(requireActivity().getApplicationContext())
+                    .getPublicKeyBase64();
+
+            if (pubKey == null) {
+                if (isAdded() && getActivity() != null) {
+                    getActivity().runOnUiThread(() -> {
+                        if (!isAdded()) return;
+
+                        setLoading(false);
+                        showError(getString(R.string.error_register_failed));
+                    });
+                }
+
+                return;
+            }
+
             String token = connectionManager.register(username, password, pubKey);
             if (isAdded() && getActivity() != null) {
                 getActivity().runOnUiThread(() -> {
                     if (!isAdded()) return;
                     setLoading(false);
                     if (!token.isEmpty()) {
+                        // As on login: the password is used once and never stored.
                         new AccountStore(requireContext())
-                                .saveSession(username, password, token, connectionManager.deployBaseUrl());
+                                .saveSession(username, token, connectionManager.deployBaseUrl(), 0L);
 
                         // Cache the id the server just assigned to the account - the server list
                         // needs it to tell an administrator from a plain member.

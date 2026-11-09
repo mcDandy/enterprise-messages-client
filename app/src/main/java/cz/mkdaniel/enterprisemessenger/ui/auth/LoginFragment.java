@@ -64,8 +64,10 @@ public class LoginFragment extends Fragment {
                     if (!isAdded()) return;
                     setLoading(false);
                     if (!token.isEmpty()) {
+                        // The password ends its life here: login() already stored the token it
+                        // returned (sealed, with its expiry), and nothing persists the password.
                         new AccountStore(requireContext())
-                                .saveSession(username, password, token, connectionManager.deployBaseUrl());
+                                .saveSession(username, token, connectionManager.deployBaseUrl(), 0L);
 
                         // The numeric user id is what lets the app recognise itself in a virtual
                         // server's member list, so the server list can tell an administrator from a

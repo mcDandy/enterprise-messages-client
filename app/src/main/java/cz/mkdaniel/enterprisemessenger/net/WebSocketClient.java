@@ -57,7 +57,6 @@ public class WebSocketClient {
 
     private WebSocket webSocket;
     private WebSocketClientListener listener;
-    private byte[] channelEncryptionKey;
     private String token = "Invalid";
     private TokenProvider tokenProvider;
     private String currentAddress;
@@ -160,7 +159,10 @@ public class WebSocketClient {
         executor.execute(() -> {
             try {
                 disconnectInternal(false);
-                Log.d(TAG, "Connecting to WebSocket URL: " + currentUrl + " with token: " + redactToken(this.token));
+                // The token is never logged, not even partially: Logcat is readable over USB and by
+                // any debuggable sibling process, and a truncated JWT is still a replayable session
+                // for as long as it is valid.
+                Log.d(TAG, "Connecting to WebSocket URL: " + redactToken(currentUrl));
 
                 final var request = new Request
 		    .Builder()
@@ -353,7 +355,8 @@ public class WebSocketClient {
             try {
                 byte[] rawPacketBytes = packet.serialize();
 
-		Log.d(TAG, "Sending packet " + Packet.typeName(packet.getType()) + ": " + Arrays.toString(rawPacketBytes));
+		// The bytes are deliberately not dumped: they are the ciphertext of a user's message (and,
+		// for key unicasts, of a key).
 
                 if (webSocket != null) {
                     boolean success = webSocket.send(ByteString.of(rawPacketBytes));

@@ -66,7 +66,6 @@ public class RoomsFragment extends Fragment {
                 args.putLong("serverId", serverId);
                 args.putString("roomId", room.getId());
                 args.putString("roomName", room.getName());
-                args.putString("encryptionKey", room.getEncryptionKey());
                 NavController navController = NavHostFragment.findNavController(RoomsFragment.this);
                 navController.navigate(R.id.action_rooms_to_messages, args);
             }
@@ -225,8 +224,8 @@ public class RoomsFragment extends Fragment {
 
                 @Override
                 public boolean areContentsTheSame(@NonNull Room oldItem, @NonNull Room newItem) {
-                    return oldItem.getName().equals(newItem.getName())
-                            && oldItem.getEncryptionKey().equals(newItem.getEncryptionKey())
+                    return oldItem.getId().equals(newItem.getId())
+                            && oldItem.getName().equals(newItem.getName())
                             && oldItem.hasNewMessages() == newItem.hasNewMessages();
                 }
             });

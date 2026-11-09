@@ -59,7 +59,6 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
     private long serverId;
     private String roomId;
     private String roomName;
-    private String encryptionKey;
 
     /**
      * Android 17 (targetSdk 37) blocks every socket to a LAN address until the user grants
@@ -87,17 +86,17 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
     public void onViewCreated(@NonNull View view, Bundle savedInstanceState) {
         super.onViewCreated(view, savedInstanceState);
 
-        // --- Arguments setup (virtual server, channel and its encryption key) ---
+        // --- Arguments setup (virtual server and channel) ---
+        // No key travels in the arguments: the channel's key is read from the sealed registry when
+        // joinChannel() runs, so it never appears in a Bundle, a log line or a saved instance state.
         if (getArguments() != null) {
             serverId = getArguments().getLong("serverId", -1L);
             roomId = getArguments().getString("roomId", "");
             roomName = getArguments().getString("roomName", "");
-            encryptionKey = getArguments().getString("encryptionKey", "");
         }
 
         Log.d(TAG, "Opening MessagesFragment for virtual server " + serverId
-                + ", room=" + roomName + " (" + roomId + ")"
-                + ", encryptionKey=" + encryptionKey);
+                + ", room=" + roomName + " (" + roomId + ")");
 
         // --- RecyclerView setup ---
         LinearLayoutManager layoutManager = new LinearLayoutManager(requireContext());

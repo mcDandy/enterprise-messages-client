@@ -31,6 +31,26 @@
     <string name="error_password_mismatch">Passwords do not match</string>
     <string name="error_login_failed">Login failed. Please check your credentials.</string>
     <string name="error_register_failed">Registration failed. Username may be taken.</string>
+    <string name="error_identity_key_unavailable">The device cannot provide its encryption identity. Chat stays unavailable until the keystore works again.</string>
+
+    <!-- Encryption key backup: the channel keys exist only on this device, so the user has to keep
+         his own passphrase-protected copy to read his history after losing the phone. -->
+    <string name="settings_backup_title">Encryption keys</string>
+    <string name="settings_backup_explanation">Chat keys exist only on this device and cannot be restored by the server. Back them up to read your message history after you lose the phone or reinstall.</string>
+    <string name="action_backup_keys">Back up chat keys</string>
+    <string name="action_restore_keys">Restore from backup</string>
+    <string name="dialog_backup_passphrase_title">Choose a passphrase</string>
+    <string name="dialog_restore_passphrase_title">Passphrase of the backup</string>
+    <string name="dialog_passphrase_hint">At least 8 characters</string>
+    <string name="dialog_passphrase_confirm_hint">Repeat the passphrase</string>
+    <string name="backup_exported">Backed up %1$d channels</string>
+    <string name="backup_restored">Restored keys of %1$d channels</string>
+    <string name="backup_error_wrong_passphrase">Wrong passphrase</string>
+    <string name="backup_error_not_archive">That file is not a chat key backup</string>
+    <string name="backup_error_empty">This device has no chat keys to back up yet</string>
+    <string name="backup_error_short_passphrase">Use at least 8 characters</string>
+    <string name="backup_error_mismatch">The passphrases do not match</string>
+    <string name="backup_warning">The file contains the keys that decrypt your chats. Store it outside the phone; the passphrase is its only protection.</string>
 
     <!-- Virtual servers and channels are named only; the address of the physical server is
          compile-time configuration (@string/server_ip), never a name the user can type. -->

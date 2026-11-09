@@ -31,7 +31,10 @@ import okhttp3.Request;
 import okhttp3.RequestBody;
 import okhttp3.Response;
 
+import cz.mkdaniel.enterprisemessenger.crypto.AppSecrets;
+import cz.mkdaniel.enterprisemessenger.crypto.ChannelKeyRegistry;
 import cz.mkdaniel.enterprisemessenger.crypto.CryptoManager;
+import cz.mkdaniel.enterprisemessenger.crypto.PeerSecretRegistry;
 import cz.mkdaniel.enterprisemessenger.notification.NotificationHelper;
 import cz.mkdaniel.enterprisemessenger.ui.message.Message;
 import cz.mkdaniel.enterprisemessenger.ui.transform.Room;
@@ -82,6 +85,9 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 
     private final Context context;
     private final CryptoManager cryptoManager;
+    /** Per-channel AES keys and the peer ECDH secrets, sealed in the Android KeyStore. */
+    private final ChannelKeyRegistry channelKeys;
+    private final PeerSecretRegistry peerSecrets;
     private final WebSocketClient webSocketClient;
     private final OkHttpClient httpClient;
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
@@ -110,9 +116,9 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
     private long visibleChannelId;
 
     /**
-     * Symmetric key of the channel the user is currently chatting in, derived from
-     * {@link #defaultChannelSecret(long)}. Chat payloads are AES-GCM ciphertext of a small JSON
-     * envelope, so the server can store and echo them without being able to read them.
+     * Symmetric key of the channel the user is currently chatting in, read from
+     * {@link ChannelKeyRegistry}. Chat payloads are AES-GCM ciphertext of a small JSON envelope, so
+     * the server can store and echo them without being able to read them.
      */
     private volatile byte[] activeChannelKey;
     private volatile long activeChannelId = -1L;
@@ -377,7 +383,7 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
     /**
      * Lists the channels of a virtual server the user is a member of
      * ({@code GET /api/servers/{id}/channels/my}); every room carries the channel key the members
-     * agree on, see {@link #defaultChannelSecret(long)}.
+     * agree on, see {@link ChannelKeyRegistry}.
      */
     public void fetchChannels(final long serverId, Callback<List<Room>> callback) {
 	executor.execute(() -> {
@@ -410,7 +416,9 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 		    final String id = String.format(Locale.US, "%d", channelId);
 		    final String name = obj.optString("name", "channel-" + id);
 
-		    rooms.add(new Room(id, name, defaultChannelSecret(channelId), false));
+		    // A room carries no key on purpose: the key lives in ChannelKeyRegistry, sealed, and is
+	    // never a value that travels through navigation arguments or a log line.
+	    rooms.add(new Room(id, name));
 		}
 		mainHandler.post(() -> callback.onResult(rooms));
 	    } catch (Exception e) {
@@ -461,8 +469,7 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 		final String channelIdText = String.format(Locale.US, "%d", channelId);
 		final String channelName = created.optString("name", trimmedName);
 
-		mainHandler.post(() -> callback.onResult(new Room(channelIdText, channelName,
-			defaultChannelSecret(channelId), false)));
+		mainHandler.post(() -> callback.onResult(new Room(channelIdText, channelName)));
 	    } catch (final Exception e) {
 		postFailure(callback, e.getMessage());
 	    }
@@ -524,6 +531,14 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 		return;
 	    }
 
+	    // The channel is gone for good, so is its key: keeping it would only grow the sealed store.
+	    if (channelId == activeChannelId) {
+		this.activeChannelId = -1L;
+		this.activeChannelKey = null;
+	    }
+
+	    channelKeys.forget(channelId);
+
 	    mainHandler.post(() -> callback.onResult(null));
 	});
     }
@@ -538,9 +553,9 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
      */
     private String ensureJwt() {
 	final String baseUrl = deployBaseUrl();
+	final AccountStore accountStore = new AccountStore(context);
 
 	if (jwtToken == null || jwtToken.isEmpty()) {
-	    final AccountStore accountStore = new AccountStore(context);
 	    final String storedToken = accountStore.getJwtToken();
 
 	    // A token only authenticates on the server that signed it, and after a deployment address
@@ -549,9 +564,14 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 		    && baseUrl.equalsIgnoreCase(accountStore.getTokenIssuer())) {
 		jwtToken = storedToken;
 		jwtTokenIssuer = baseUrl;
-	    } else if (accountStore.isLoggedIn()) {
-		jwtToken = login(accountStore.getUsername(), accountStore.getPassword());
 	    }
+	}
+
+	// A token about to expire is exchanged while it still works. Re-logging in is not an option any
+	// more: the password is deliberately not stored.
+	if (!jwtToken.isEmpty() && baseUrl.equalsIgnoreCase(jwtTokenIssuer)
+		&& accountStore.shouldRefreshToken()) {
+	    refreshToken();
 	}
 
 	return jwtToken == null ? "" : jwtToken;
@@ -616,14 +636,27 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
     }
 
     /**
-     * Shared secret a channel's AES key is derived from.
+     * Key of the scheme this app used before channel keys were random and distributed: a hash of a
+     * constant string plus the channel id, i.e. a value anyone who knows the (sequential, publicly
+     * listed) channel id can recompute.
      * <p>
-     * TODO: the server only stores channel key hashes and has no key distribution yet, so every
-     * member derives the same key from the channel id. Replace once channel keys are exchanged
-     * via the members' public keys.
+     * It survives as a read-only candidate so messages written by an older build stay readable after
+     * the update. It is never used to encrypt anything: doing so would put the message back within
+     * reach of the server and of every stranger who can enumerate channel ids.
      */
-    public static String defaultChannelSecret(long channelId) {
-	return "ems-channel-" + channelId;
+    private static byte[] legacyReadKey(long channelId) {
+	if (channelId < 0) {
+	    return null;
+	}
+
+	try {
+	    return CryptoManager.sha256(("ems-channel-" + channelId)
+			.getBytes(StandardCharsets.UTF_8));
+	} catch (final Exception exception) {
+	    Log.w(TAG, "Legacy channel key could not be derived for channel " + channelId);
+
+	    return null;
+	}
     }
 
     /**
@@ -657,6 +690,10 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
     private ServerConnectionManager(Context context) {
 	this.context = context.getApplicationContext();
 	this.cryptoManager = CryptoManager.getInstance(context);
+
+	final AppSecrets secrets = AppSecrets.getInstance(this.context);
+	this.channelKeys = secrets.channelKeys();
+	this.peerSecrets = secrets.peerSecrets();
 
 	// @string/server_ip is the only source of the address; nothing picked in the UI can override it,
 	// because what the UI lists are virtual servers living behind this one address.
@@ -722,6 +759,7 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 	Log.w(TAG, "Authentication error (" + statusCode + "): " + message + ". Clearing session and disconnecting.");
 	this.jwtToken = "";
 	this.jwtTokenIssuer = "";
+	this.activeChannelKey = null;
 	AccountStore accountStore = new AccountStore(context);
 	accountStore.clearSession();
 	webSocketClient.disconnect();
@@ -759,7 +797,6 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 
     private void fetchJwtTokenAndConnect(String httpUrl, String wsUrl) {
 	try {
-	    var pubKey = cryptoManager.getPublicKeyBase64();
 	    AccountStore accountStore = new AccountStore(context);
 
 	    // A token restored from the previous launch belongs to the server that stored it; using it
@@ -778,15 +815,23 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 		}
 	    }
 
+	    // The password is never stored, so an expired token is exchanged rather than replaced by a
+	    // re-login. A refresh failure means the session is over and the user has to sign in again.
 	    if (jwtToken.isEmpty() && accountStore.isLoggedIn()) {
-		String username = accountStore.getUsername();
-		String password = accountStore.getPassword();
-		jwtToken = login(username, password);
+		final String storedToken = accountStore.getJwtToken();
+
+		if (storedToken != null && !storedToken.isEmpty()) {
+		    refreshToken();
+		}
 	    }
 
 	    if (jwtToken == null || jwtToken.isEmpty()) {
 		Log.w(TAG, "No valid JWT token obtained from " + httpUrl + ", aborting WebSocket connection");
-		if (lastLoginRejected) {
+
+		// Without a sealed token there is nothing left to refresh - the password is deliberately
+		// not stored - so the session really is over and the user has to sign in again. A refusal of
+		// the refresh on an otherwise reachable server says the same thing.
+		if (lastLoginRejected || accountStore.getJwtToken().isEmpty()) {
 		    // The server answered 401/403 to our credentials: the session really is invalid.
 		    handleAuthError(401, "No valid JWT token available");
 		} else {
@@ -843,7 +888,7 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 		    if (!token.isEmpty()) {
 			this.jwtToken = token;
 			this.jwtTokenIssuer = baseUrl;
-			new AccountStore(context).saveJwtToken(token, baseUrl);
+			new AccountStore(context).saveJwtToken(token, baseUrl, resObj.optLong("expiresAt", 0L));
 		    }
 
 		    return token;
@@ -861,11 +906,76 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
     }
 
     /**
+     * Exchanges the stored token for a fresh one at {@code /api/auth/refresh} of
+     * {@link #deployBaseUrl()} and returns it, or "" when the refresh was refused.
+     * <p>
+     * The server's refresh endpoint accepts the current access token and answers with a new one, so
+     * no password is needed - which matters, because the app no longer stores one. A refusal is not
+     * fatal here; the caller keeps the old token and the next 401 ends the session properly.
+     *
+     * <p>Must be called off the main thread.
+     */
+    public String refreshToken() {
+	final AccountStore accountStore = new AccountStore(context);
+	final String currentToken = !jwtToken.isEmpty() ? jwtToken : accountStore.getJwtToken();
+
+	if (currentToken == null || currentToken.isEmpty()) {
+	    return "";
+	}
+
+	final String baseUrl = deployBaseUrl();
+
+	// A token of another deployment can only be refused; trying it would also leak it to that host.
+	if (!baseUrl.equalsIgnoreCase(jwtTokenIssuer.isEmpty() ? accountStore.getTokenIssuer() : jwtTokenIssuer)) {
+	    return "";
+	}
+
+	try {
+	    final var body = new JSONObject();
+	    body.put("refreshToken", currentToken);
+
+	    final var request = new Request.Builder()
+		    .url(baseUrl + "/api/auth/refresh")
+		    .post(RequestBody.create(body.toString(), MediaType.parse("application/json; charset=utf-8")))
+		    .build();
+
+	    try (final var response = httpClient.newCall(request).execute()) {
+		if (!response.isSuccessful() || response.body() == null) {
+		    Log.w(TAG, "Token refresh refused with HTTP " + response.code());
+		    lastLoginRejected = response.code() == 401 || response.code() == 403;
+
+		    return "";
+		}
+
+		final var resObj = new JSONObject(response.body().string());
+		final var token = resObj.optString("token", "");
+
+		if (token.isEmpty()) {
+		    return "";
+		}
+
+		this.jwtToken = token;
+		this.jwtTokenIssuer = baseUrl;
+		accountStore.saveJwtToken(token, baseUrl, resObj.optLong("expiresAt", 0L));
+
+		Log.d(TAG, "Session token refreshed");
+
+		return token;
+	    }
+	} catch (final Exception exception) {
+	    Log.w(TAG, "Token refresh request failed: " + exception.getMessage());
+
+	    return "";
+	}
+    }
+
+    /**
      * Selects the channel whose messages are sent and received on the shared WebSocket session.
      * <p>
-     * The server derives the target channel from its own session state, so there is nothing to
-     * transmit here yet; the client only needs the channel id (for notifications) and the channel
-     * key (for end-to-end encryption).
+     * The client needs the channel id (for notifications) and the channel key (for end-to-end
+     * encryption). The key is this device's own random key for that channel; if the channel has
+     * never been opened before, the key is created now and handed to the other members over their
+     * ECDH secrets, see {@link #establishChannelPeerKeys(long)}.
      */
     public void joinChannel(final String channelId) {
 	final long id = parseChannelId(channelId);
@@ -875,23 +985,45 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 	}
 
 	this.activeChannelId = id;
-	this.activeChannelKey = channelKey(id);
 
-	// While the socket is still dialling, onConnected() sends the join for us.
-	sendChannelJoin();
+	try {
+	    final ChannelKeyRegistry.GenerationResult key = channelKeys.ensureChannelKey(id);
 
-	// The channel's members are known only now, so their public keys - and with them the ECDH
-	// secrets that key-rotation packets are opened with - are established here rather than at
-	// login, when no channel had been chosen yet.
-	executor.execute(() -> establishChannelPeerKeys(id));
+	    this.activeChannelKey = key.key();
+
+	    // While the socket is still dialling, onConnected() sends the join for us.
+	    sendChannelJoin();
+
+	    // The channel's members are known only now, so their public keys - and with them the ECDH
+	    // secrets the channel key is wrapped with - are established here rather than at login,
+	    // when no channel had been chosen yet.
+	    if (key.freshlyCreated()) {
+		Log.d(TAG, "Channel " + id + " has a brand new key, distributing it");
+	    }
+
+	    executor.execute(() -> establishChannelPeerKeys(id));
+	} catch (final Exception exception) {
+	    // No usable KeyStore means no channel key can be persisted, so chat cannot be secured here.
+	    // The old (publicly recomputable) key is used for reading only; nothing is sent.
+	    Log.e(TAG, "No channel key available for channel " + id, exception);
+	    this.activeChannelKey = null;
+	    notifyError("Encryption keys are unavailable - open a channel after restarting the app");
+	}
     }
 
     /**
-     * Derives and caches an ECDH secret with every member of {@code channelId}.
+     * Derives and seals an ECDH secret with every member of {@code channelId} and hands this
+     * device's channel key to each of them.
      * <p>
-     * Without those secrets {@code TYPE_KEY_ROTATION} packets cannot be opened - the handler drops
-     * them with "No shared ECDH secret with peer N yet" - so this has to run before the first
-     * rotated message of a channel arrives. Peers whose secret is already known are skipped.
+     * Without those secrets nothing can be unicasted - the rotation handler used to drop packets
+     * with "No shared ECDH secret with peer N yet" - so this has to run before the first rotated
+     * message of a channel arrives. Peers whose secret is already sealed are skipped.
+     * <p>
+     * The key is offered on <i>every</i> join, not only when this device invented it: a member that
+     * joined later has no way to learn who among the others already holds a key, and re-offering is
+     * free, because a receiver that already holds exactly that key treats the unicast as a no-op.
+     * Two members that both generated a key converge after one round of re-distribution, the last
+     * delivery winning for everybody.
      */
     private void establishChannelPeerKeys(final long channelId) {
 	try {
@@ -915,19 +1047,229 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 
 		final var peerId = peer.optLong("userId", -1L);
 		final var peerPublicKey = peer.optString("publicKey", "");
-		if (peerId < 0 || peerPublicKey.isEmpty()
-			|| cryptoManager.retrieveSecretSymmetricKey(peerId) != null) {
-		    // Unknown shape, or a secret already derived while visiting another channel.
+		if (peerId < 0 || peerPublicKey.isEmpty()) {
 		    continue;
 		}
 
-		cryptoManager.putNewPeerKeyEntry(peerId,
-			cryptoManager.deriveSharedSecret(Base64.decode(peerPublicKey, Base64.NO_WRAP)));
+		if (!peerSecrets.knows(peerId)) {
+		    final byte[] decodedPeerKey = CryptoManager.decodePeerKey(peerPublicKey);
+		    if (decodedPeerKey == null) {
+			continue;
+		    }
 
-		Log.d(TAG, "Established ECDH secret with peer " + peerId + " for channel " + channelId);
+		    peerSecrets.store(peerId, cryptoManager.deriveSharedSecret(decodedPeerKey));
+
+		    Log.d(TAG, "Established an ECDH secret with peer " + peerId);
+		}
+
+		unicastsChannelKeyTo(channelId, peerId);
 	    }
 	} catch (final Exception exception) {
 	    Log.w(TAG, "Failed to establish peer keys for channel " + channelId, exception);
+	}
+    }
+
+    /**
+     * Wraps this device's channel key in the ECDH secret shared with {@code peerId} and sends it as
+     * {@code TYPE_UNICAST_ROTATED_KEY}, which the server relays to that one member (or queues).
+     * <p>
+     * The payload the server expects is {@code [recipientUserId][channelId][ciphertext]}. The
+     * version UUID travels <i>inside</i> the ciphertext rather than in the header the server
+     * rewrites: {@code KeyRotationService} stamps the header with the {@code channel_key} row of its
+     * own table, which describes a different rotation than ours, so trusting it would adopt keys
+     * under a mismatched version.
+     */
+    private void unicastsChannelKeyTo(final long channelId, final long peerId) {
+	unicastsChannelKeyTo(channelId, peerId, activeChannelKey, channelKeys.currentVersion(channelId));
+    }
+
+    /**
+     * Worker of {@link #unicastsChannelKeyTo(long, long)} with the key given explicitly, so the
+     * rotation path can hand out the key it just generated instead of the channel's active one.
+     */
+    private void unicastsChannelKeyTo(final long channelId, final long peerId,
+		final byte[] key, final UUID version) {
+	try {
+	    final byte[] peerSecret = peerSecrets.secret(peerId);
+
+	    if (peerSecret == null || key == null || version == null) {
+		Log.w(TAG, "Cannot hand channel key " + channelId + " to peer " + peerId + ": missing material");
+
+		return;
+	    }
+
+	    final var envelope = new JSONObject();
+	    envelope.put("channelId", channelId);
+	    envelope.put("version", version.toString());
+	    envelope.put("key", Base64.encodeToString(key, Base64.NO_WRAP));
+
+	    final byte[] ciphertext = cryptoManager.encryptPayload(
+		    envelope.toString().getBytes(StandardCharsets.UTF_8), peerSecret);
+
+	    final var buffer = ByteBuffer.allocate(2 * Long.BYTES + ciphertext.length);
+	    buffer.putLong(peerId);
+	    buffer.putLong(channelId);
+	    buffer.put(ciphertext);
+
+	    webSocketClient.sendPacketAsync(new Packet(Packet.TYPE_UNICAST_ROTATED_KEY, buffer.array()));
+
+	    Log.d(TAG, "Handed channel key " + version + " to peer " + peerId);
+	} catch (final Exception exception) {
+	    Log.w(TAG, "Failed to hand channel key of channel " + channelId + " to peer " + peerId, exception);
+	}
+    }
+
+    /**
+     * Answers the server's request to re-key {@code channelId}: a fresh random key replaces the old
+     * one (which stays readable through the registry's history) and is handed to every member.
+     *
+     * <p>Runs on the background executor; it performs REST calls and sealing.
+     */
+    private void rotateAndDistributeChannelKey(final long channelId) {
+	try {
+	    final ChannelKeyRegistry.GenerationResult rotated = channelKeys.rotateChannelKey(channelId);
+
+	    if (channelId == activeChannelId) {
+		this.activeChannelKey = rotated.key();
+	    }
+
+	    for (final JSONObject peer : channelMembers(channelId)) {
+		final long peerId = peer.optLong("userId", -1L);
+		if (peerId < 0) {
+		    continue;
+		}
+
+		ensurePeerSecret(peerId, peer.optString("publicKey", ""));
+		unicastsChannelKeyTo(channelId, peerId, rotated.key(), rotated.version());
+	    }
+	} catch (final Exception exception) {
+	    Log.e(TAG, "Rotation of channel " + channelId + " failed", exception);
+	    notifyError("Could not rotate the key of this channel");
+	}
+    }
+
+    /**
+     * Opens a {@code TYPE_UNICAST_ROTATED_KEY} envelope with the ECDH secret shared with
+     * {@code senderUserId} and adopts the channel key inside it. The {@code channelId} and the key
+     * version are read from the <i>decrypted</i> payload, so neither can be forged by whoever the
+     * server claims sent the packet.
+     */
+    private void adoptUnicastChannelKey(final long senderUserId, final byte[] ciphertext) {
+	try {
+	    byte[] peerSecret = peerSecrets.secret(senderUserId);
+
+	    if (peerSecret == null) {
+		// The server's offline queue replays queued unicasts after a restart, when the secret has
+		// to be re-derived from the sender's public key first.
+		final JSONObject senderKeyResponse =
+			executeGet(String.format(Locale.US, "/api/users/%d/key", senderUserId)).asJson();
+		final byte[] senderKey = senderKeyResponse == null
+			? null
+			: CryptoManager.decodePeerKey(senderKeyResponse.optString("publicKey", ""));
+
+		if (senderKey == null) {
+		    Log.w(TAG, "No shared ECDH secret with peer " + senderUserId + " yet, dropping rotated key");
+
+		    return;
+		}
+
+		peerSecrets.store(senderUserId, cryptoManager.deriveSharedSecret(senderKey));
+		peerSecret = peerSecrets.secret(senderUserId);
+
+		if (peerSecret == null) {
+		    return;
+		}
+	    }
+
+	    final var envelope = new JSONObject(new String(
+		    cryptoManager.decryptPayload(ciphertext, peerSecret), StandardCharsets.UTF_8));
+
+	    final long channelId = envelope.optLong("channelId", -1L);
+	    final String versionText = envelope.optString("version", "");
+	    final byte[] key = CryptoManager.decodePeerKey(envelope.optString("key", ""));
+
+	    if (channelId < 0 || versionText.isEmpty() || key == null) {
+		Log.w(TAG, "A key rotation unicast carried an incomplete envelope, ignoring it");
+
+		return;
+	    }
+
+	    final boolean adopted = channelKeys.adoptChannelKey(channelId, UUID.fromString(versionText), key);
+	    if (!adopted) {
+		// Already this device's key (its own unicast echoed back, or a duplicate delivery).
+		return;
+	    }
+
+	    if (channelId == activeChannelId || channelId == visibleChannelId) {
+		this.activeChannelKey = key;
+	    }
+
+	    Log.d(TAG, "Adopted key " + versionText + " of channel " + channelId + " from peer " + senderUserId);
+
+	    // Convergence: a member who learns the key also offers it to the members that were offline
+	    // when the sender unicasted. Those that already have it answer with a no-op, so this stops
+	    // after a single round.
+	    for (final JSONObject peer : channelMembers(channelId)) {
+		final long peerId = peer.optLong("userId", -1L);
+		if (peerId < 0 || peerId == senderUserId) {
+		    continue;
+		}
+
+		ensurePeerSecret(peerId, peer.optString("publicKey", ""));
+		unicastsChannelKeyTo(channelId, peerId, key, UUID.fromString(versionText));
+	    }
+	} catch (final Exception exception) {
+	    Log.w(TAG, "A key rotation unicast from peer " + senderUserId + " could not be opened", exception);
+	}
+    }
+
+    /**
+     * Members of {@code channelId} with their public keys
+     * ({@code GET /api/channels/{id}/keys}); empty when the server has nothing to offer.
+     */
+    private List<JSONObject> channelMembers(final long channelId) {
+	final List<JSONObject> members = new ArrayList<>();
+
+	try {
+	    final JSONArray peers = executeGet(String.format(Locale.US, "/api/channels/%d/keys", channelId))
+		    .asJsonArray();
+
+	    if (peers == null) {
+		return members;
+	    }
+
+	    for (var i = 0; i < peers.length(); ++i) {
+		final JSONObject peer = peers.optJSONObject(i);
+		if (peer != null) {
+		    members.add(peer);
+		}
+	    }
+	} catch (final Exception exception) {
+	    Log.w(TAG, "Member list of channel " + channelId + " could not be read", exception);
+	}
+
+	return members;
+    }
+
+    /**
+     * Derives and seals the ECDH secret with {@code peerId} unless it is sealed already.
+     */
+    private void ensurePeerSecret(final long peerId, final String peerPublicKey) {
+	if (peerSecrets.knows(peerId)) {
+	    return;
+	}
+
+	final byte[] decodedPeerKey = CryptoManager.decodePeerKey(peerPublicKey);
+	if (decodedPeerKey == null) {
+	    return;
+	}
+
+	try {
+	    peerSecrets.store(peerId, cryptoManager.deriveSharedSecret(decodedPeerKey));
+
+	    Log.d(TAG, "Established an ECDH secret with peer " + peerId);
+	} catch (final Exception exception) {
+	    Log.w(TAG, "ECDH secret with peer " + peerId + " could not be derived", exception);
 	}
     }
 
@@ -950,21 +1292,6 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 	webSocketClient.sendPacketAsync(new Packet(Packet.TYPE_CHANNEL_JOIN, joinPayload));
 
 	Log.d(TAG, "Sent CHANNEL_JOIN for channel " + channelId);
-    }
-
-    /**
-     * AES key a channel's messages are encrypted with. Every member derives the same key, which
-     * is why it must never be sent over the wire.
-     */
-    public static byte[] channelKey(long channelId) {
-	try {
-	    return java.security.MessageDigest
-		.getInstance("SHA-256")
-		.digest(defaultChannelSecret(channelId).getBytes(StandardCharsets.UTF_8));
-	} catch (final Exception exception) {
-	    Log.e(TAG, "Failed to derive channel key", exception);
-	    return null;
-	}
     }
 
     public long getActiveChannelId() {
@@ -1091,23 +1418,6 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
     }
 
     /**
-     * {@link #makeGETRequest(String)} for the collection endpoints, such as a channel's member keys.
-     */
-    private JSONArray makeGETRequestCollection(final String endpoint) {
-	final RestResponse response = executeGet(endpoint);
-
-	if (response.isSuccessful()) {
-	    return response.asJsonArray();
-	}
-
-	if (response.statusCode() == 401 || response.statusCode() == 403) {
-	    handleAuthError(response.statusCode(), String.format(Locale.US, "GET %s was rejected", endpoint));
-	}
-
-	return null;
-    }
-
-    /**
      * Delivers a failure on the main thread; a request that fails without a message (an unreachable
      * server, for instance) still needs to say something to the caller.
      */
@@ -1178,7 +1488,7 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 		    if (!token.isEmpty()) {
 			this.jwtToken = token;
 			this.jwtTokenIssuer = baseUrl;
-			new AccountStore(context).saveJwtToken(token, baseUrl);
+			new AccountStore(context).saveJwtToken(token, baseUrl, resObj.optLong("expiresAt", 0L));
 		    }
 		    return token;
 		}
@@ -1215,11 +1525,19 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 	    envelope.put("text", text);
 	    envelope.put("timestamp", System.currentTimeMillis());
 
-	    final byte[] key = activeChannelKey != null ? activeChannelKey : channelKey(activeChannelId);
+	    // Only this device's sealed channel key can seal an outgoing message. The legacy
+	    // id-derived key is deliberately not offered here: it is recomputable by anyone who knows
+	    // the channel id, including the server.
+	    final byte[] key = activeChannelKey != null
+		    ? activeChannelKey
+		    : (activeChannelId >= 0 ? channelKeys.currentKey(activeChannelId) : null);
+
 	    if (key == null) {
 		notifyError("No channel key available - open a channel before sending");
 		return;
 	    }
+
+	    this.activeChannelKey = key;
 
 	    final var payloadBytes = cryptoManager.encryptPayload(envelope.toString().getBytes(StandardCharsets.UTF_8), key);
 	    final var messagePacket = new Packet(Packet.TYPE_CHAT_MESSAGE, payloadBytes);
@@ -1244,17 +1562,36 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
      * @return the plaintext envelope, or {@code null} when no known key opens the payload
      */
     private byte[] decryptChatPayload(final byte[] ciphertext) {
-	final byte[][] candidates = {activeChannelKey, channelKey(visibleChannelId)};
+	final java.util.List<byte[]> candidates = new ArrayList<>();
 
-	for (final byte[] key : candidates) {
-	    if (key == null) {
+	if (activeChannelKey != null) {
+	    candidates.add(activeChannelKey);
+	}
+
+	for (final long channelId : new long[]{activeChannelId, visibleChannelId}) {
+	    if (channelId < 0) {
 		continue;
 	    }
 
+	    for (final ChannelKeyRegistry.KeyVersion version : channelKeys.decryptCandidates(channelId)) {
+		candidates.add(version.key());
+	    }
+	}
+
+	// Last resort: the key of the scheme used before channel keys were random, so messages an
+	// older build wrote remain readable. Read-only by construction.
+	for (final long channelId : new long[]{activeChannelId, visibleChannelId}) {
+	    final byte[] legacyKey = legacyReadKey(channelId);
+	    if (legacyKey != null) {
+		candidates.add(legacyKey);
+	    }
+	}
+
+	for (final byte[] key : candidates) {
 	    try {
 		return cryptoManager.decryptPayload(ciphertext, key);
 	    } catch (final Exception ignored) {
-		// Wrong channel key - try the next one.
+		// Wrong channel key - try the next one. A bad GCM tag is the normal signal here.
 	    }
 	}
 
@@ -1341,69 +1678,20 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 			break;
 		    }
 
-		    final var mostSignificant = wrappedPayload.getLong(offset);
-		    
-		    offset += Long.SIZE/8;
+		    final var serverVersion = new UUID(wrappedPayload.getLong(offset),
+			    wrappedPayload.getLong(offset + Long.BYTES));
 
-		    final var leastSignigicant = wrappedPayload.getLong(offset);
-		    final var rotationUUID = new UUID(mostSignificant, leastSignigicant);
-
-		    offset += Long.SIZE/8;
-
-		    Log.d(TAG, "New key rotation UUID is set to: " + rotationUUID);
+		    offset += 2 * Long.BYTES;
 
 		    final var channelId = wrappedPayload.getLong(offset);
 
-		    offset += Long.SIZE/8;
+		    Log.d(TAG, "Server asked for a key rotation of channel " + channelId
+			    + " under its version " + serverVersion);
 
-		    Log.d(TAG, "New key rotation channelId is set to: " + channelId);
-
-		    final var newRotation = cryptoManager.generateSenderSymmetricSecretRotatedKey(rotationUUID);
-		    if (newRotation == null) {
-			Log.e(TAG, "Failed to generate rotated sender key for " + rotationUUID);
-			break;
-		    }
-
-		    final var peers = makeGETRequestCollection(String.format(Locale.US, "/api/channels/%d/keys", channelId));
-		    if (peers == null) {
-			Log.w(TAG, "No peer keys available for channel " + channelId + ", cannot unicast the rotated key");
-			break;
-		    }
-
-		    Log.d(TAG, peers.toString());
- 
-		    for (var i = 0; i < peers.length(); ++i) { // make collection request return Collection<JSONObject>
-			final var peer = peers.getJSONObject(i);
-			final var peerId = peers.getJSONObject(i).getLong("userId");
-
-			Log.d(TAG, String.format("Unicasting to %d", peerId));
-
-			var peerSecretSymmetricKey = cryptoManager.retrieveSecretSymmetricKey(peerId); // do checked cast
-
-
-			if (peerSecretSymmetricKey == null) {
-			    Log.d(TAG, String.format("Did not communicate with %d yet, will create the key on the spot", peerId));
-		
-			    final var peerPublicKey = peer.getString("publicKey");
-	    
-			    Log.d(TAG, String.format("Establishing public key %s with peer %d", peerPublicKey, peerId));
-
-			    peerSecretSymmetricKey = cryptoManager.deriveSharedSecret(Base64.decode(peerPublicKey, Base64.NO_WRAP));
-
-			    cryptoManager.putNewPeerKeyEntry(peerId, peerSecretSymmetricKey);
-			}
-
-			final var encryptedSenderKey = cryptoManager.encryptPayload(newRotation.getBytes(), peerSecretSymmetricKey);
-			final var unicastBuffer = ByteBuffer.allocate(2*Long.BYTES+encryptedSenderKey.length);
-	
-			unicastBuffer.putLong(peerId);
-			unicastBuffer.putLong(channelId);
-			unicastBuffer.put(encryptedSenderKey);
-
-			final var rotationUnicast = new Packet(Packet.TYPE_UNICAST_ROTATED_KEY, unicastBuffer.array());
-
-			webSocketClient.sendPacketAsync(rotationUnicast);
-		    }
+		    // The server's version identifies a row of its own channel_key table and says nothing
+		    // about the key we are about to invent, so it is logged and ignored; the version that
+		    // travels to the other members is ours, inside the encrypted envelope.
+		    executor.execute(() -> rotateAndDistributeChannelKey(channelId));
 		}
  
 		break;
@@ -1421,25 +1709,14 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 		    }
 
 		    final var peerId = wrappedPayload.getLong();
-		    final var mostSignificant = wrappedPayload.getLong();
-		    final var leastSignigicant = wrappedPayload.getLong();
-		    final var rotationUUID = new UUID(mostSignificant, leastSignigicant);
 		    final var newRotation = new byte[wrappedPayload.remaining()];
 		    
 		    wrappedPayload.get(newRotation);
-		    
-		    Log.d(TAG, String.format("Encrypted key is %s", Arrays.toString(newRotation)));
 
-		    final var sharedKey = cryptoManager.retrieveSecretSymmetricKey(peerId);
-		    if (sharedKey == null) {
-			Log.w(TAG, "No shared ECDH secret with peer " + peerId + " yet, dropping rotated key");
-			break;
-		    }
-
-		    final var newRotationDecrypted = new String(cryptoManager.decryptPayload(newRotation, sharedKey));
-		    
-		    cryptoManager.putNewUUIDRotationEntry(rotationUUID, Base64.decode(newRotationDecrypted, Base64.NO_WRAP));
-		    Log.d(TAG, String.format("Rotated to %s from %d", rotationUUID, peerId));
+		    // The two longs of the header after the sender id are the server's own channel_key
+		    // version, not the one of the key inside the envelope, so they are deliberately not
+		    // read: adopting a key under a version the sender never chose would split the channel.
+		    executor.execute(() -> adoptUnicastChannelKey(peerId, newRotation));
 		}
 
 		break;

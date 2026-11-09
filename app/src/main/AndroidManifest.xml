@@ -11,8 +11,14 @@
     -->
     <uses-permission android:name="android.permission.ACCESS_LOCAL_NETWORK"/>
 
+    <!--
+        Backup is off: the app's files hold the sealed session token and the sealed chat keys. The
+        KeyStore key that seals them does not travel with a backup, so restoring them onto another
+        device would yield unreadable blobs, and shipping the files at all only widens their
+        exposure. The user backs his chats up explicitly instead (Settings / Back up chat keys).
+    -->
     <application
-        android:allowBackup="true"
+        android:allowBackup="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
         android:fullBackupContent="@xml/backup_rules"
         android:icon="@mipmap/ic_launcher"

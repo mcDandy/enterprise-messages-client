@@ -1,13 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?><!--
-   Sample backup rules file; uncomment and customize as necessary.
+   Automatic backup rules for devices older than API 31. The app sets android:allowBackup="false",
+   so this file is only consulted if backup is ever re-enabled; it keeps the account file and the
+   sealed-secret file out of any backup, because the Android KeyStore key that seals them does not
+   travel with one and a restored copy would be unreadable anyway.
    See https://developer.android.com/guide/topics/data/autobackup
-   for details.
-   Note: This file is ignored for devices older than API 31
-   See https://developer.android.com/about/versions/12/backup-restore
 -->
 <full-backup-content>
-    <!--
-   <include domain="sharedpref" path="."/>
-   <exclude domain="sharedpref" path="device.xml"/>
--->
+    <exclude domain="sharedpref" path="EnterpriseMessenger_Account.xml" />
+    <exclude domain="sharedpref" path="EnterpriseMessenger_Secrets.xml" />
 </full-backup-content>
