@@ -84,19 +84,19 @@
         android:name="cz.mkdaniel.enterprisemessenger.ui.message.MessagesFragment"
         android:label="{roomName}"
         tools:layout="@layout/fragment_messages">
+        <!-- A long argument needs the "L" suffix: NavInflater reads a bare "0" as an integer and
+             refuses the graph with "Type is long but found integer", which crashes every launch. -->
         <argument
             android:name="serverId"
             app:argType="long"
-            android:defaultValue="0" />
+            android:defaultValue="0L" />
         <argument
             android:name="roomId"
             app:argType="string" />
         <argument
             android:name="roomName"
             app:argType="string" />
-        <argument
-            android:name="encryptionKey"
-            app:argType="string"
-            android:defaultValue="" />
+        <!-- No encryptionKey argument: a channel key is read from the sealed registry by channel id,
+             never passed around in a Bundle or a log line. -->
     </fragment>
 </navigation>
