@@ -84,6 +84,7 @@
 
     <!-- Server Connection Configuration: the single point of truth for the address of the one
          physical server. Nothing else may carry a host name. -->
-    <string name="server_ip">192.168.1.115</string>
+    <string name="server_ip">172.18.0.1</string>
+    <string name="default_server_name">Default Server</string>
     <integer name="server_port">8443</integer>
 </resources>
