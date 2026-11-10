@@ -19,6 +19,7 @@ import org.junit.runner.RunWith;
 import androidx.test.espresso.action.ViewActions;
 import androidx.test.espresso.matcher.ViewMatchers;
 import androidx.test.ext.junit.rules.ActivityScenarioRule;
+import androidx.test.rule.GrantPermissionRule;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
 import androidx.test.filters.LargeTest;
 
@@ -44,11 +45,13 @@ public class ExampleInstrumentedTest {
      */
     public static final String PASSWORD = "secret";
 
+    /**
+     * Context of the app under test.
+     */
     @Test
     public void useAppContext() {
-        // Context of the app under test.
-        Context appContext = InstrumentationRegistry.getInstrumentation().getTargetContext();
-        assertEquals("cz.mkdaniel.enterprisemessenger", appContext.getPackageName());
+	Context appContext = InstrumentationRegistry.getInstrumentation().getTargetContext();
+	assertEquals("cz.mkdaniel.enterprisemessenger", appContext.getPackageName());
     }
 
     /**
@@ -57,18 +60,24 @@ public class ExampleInstrumentedTest {
      */
     @Rule
     public ActivityScenarioRule<MainActivity> activityScenarioRule = new ActivityScenarioRule<>(MainActivity.class);
+    @Rule
+    public GrantPermissionRule mRuntimePermissionRule = GrantPermissionRule.grant(android.Manifest.permission.POST_NITIFICATIONS);
 
     @Test
-    public void changeText_sameActivity() {
-        onView(withId(R.id.edittext_username)).perform(typeText(USERNAME), closeSoftKeyboard());
-        //onView(withId(R.id.changeTextBt)).perform(click());
-        //onView(withId(R.id.textToBeChanged)).check(matches(withText(STRING_TO_BE_TYPED)));
+    public void login_success() {
+	onView(withId(R.id.edittext_username)).perform(typeText(USERNAME), closeSoftKeyboard());
+	onView(withId(R.id.edittext_password)).perform(typeText(PASSWORD), closeSoftKeyboard());
+	onView(withId(R.id.button_login)).perform(click());
+	onView(withId(R.id.image_view_item_transform));
     }
 
     @Test
-    public void changeText_newActivity() {
-        //onView(withId(R.id.editTextUserInput)).perform(typeText(STRING_TO_BE_TYPED), closeSoftKeyboard());
-        //onView(withId(R.id.activityChangeTextBtn)).perform(click());
-        //onView(withId(R.id.show_text_view)).check(matches(withText(STRING_TO_BE_TYPED)));
+    public void register_success() {
+	onView(withId(R.id.button_go_to_register)).perform(click());
+	onView(withId(R.id.edittext_username)).perform(typeText(USERNAME), closeSoftKeyboard());
+	onView(withId(R.id.edittext_password)).perform(typeText(PASSWORD), closeSoftKeyboard());
+	onView(withId(R.id.edittext_confirm_password)).perform(typeText(PASSWORD), closeSoftKeyboard());
+	onView(withId(R.id.button_register)).perform(click());
+	onView(withId(R.id.image_view_item_transform));
     }
 }
