@@ -55,7 +55,7 @@ import cz.mkdaniel.enterprisemessenger.ui.transform.ServerViewItem;
  *         - messages                    WebSocket /wss packets
  * </pre>
  * Flow: REST login/register -> WebSocket {@code /wss} with {@code Authorization: Bearer <jwt>} ->
- * announce the channel with {@code CHANNEL_JOIN} -> end-to-end encrypted {@code CHAT_MESSAGE}
+ * join channel via REST {@code POST /api/channels/{id}/join} -> end-to-end encrypted {@code CHAT_MESSAGE}
  * packets.
  * <p>
  * Only the scheme and the {@code /wss} path are code constants; {@link #deployBaseUrl()} is the one
@@ -1000,17 +1000,21 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 
 	    this.activeChannelKey = key.key();
 
-	    // While the socket is still dialling, onConnected() sends the join for us.
-	    sendChannelJoin();
-
-	    // The channel's members are known only now, so their public keys - and with them the ECDH
-	    // secrets the channel key is wrapped with - are established here rather than at login,
-	    // when no channel had been chosen yet.
 	    if (key.freshlyCreated()) {
 		Log.d(TAG, "Channel " + id + " has a brand new key, distributing it");
 	    }
 
-	    executor.execute(() -> establishChannelPeerKeys(id));
+	    executor.execute(() -> {
+		if (!ensureJwt().isEmpty()) {
+		    final RestResponse response = executePost(String.format(Locale.US, "/api/channels/%d/members", id), new JSONObject());
+		    if (response.isSuccessful()) {
+			Log.d(TAG, "Joined channel " + id + " via REST API");
+		    } else {
+			Log.w(TAG, "REST join for channel " + id + " failed with status " + response.statusCode());
+		    }
+		}
+		establishChannelPeerKeys(id);
+	    });
 	} catch (final Exception exception) {
 	    // No usable KeyStore means no channel key can be persisted, so chat cannot be secured here.
 	    // The old (publicly recomputable) key is used for reading only; nothing is sent.
@@ -1280,27 +1284,6 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 	} catch (final Exception exception) {
 	    Log.w(TAG, "ECDH secret with peer " + peerId + " could not be derived", exception);
 	}
-    }
-
-    /**
-     * Tells the server which channel our packets belong to. The server keeps the active channel
-     * per WebSocket session, so this has to be repeated after every (re)connection.
-     */
-    private void sendChannelJoin() {
-	final long channelId = activeChannelId;
-	if (channelId < 0) {
-	    return;
-	}
-
-	if (!webSocketClient.isConnected()) {
-	    Log.d(TAG, "WebSocket not connected yet, channel " + channelId + " join deferred until open");
-	    return;
-	}
-
-	final var joinPayload = ByteBuffer.allocate(Long.BYTES).putLong(channelId).array();
-	webSocketClient.sendPacketAsync(new Packet(Packet.TYPE_CHANNEL_JOIN, joinPayload));
-
-	Log.d(TAG, "Sent CHANNEL_JOIN for channel " + channelId);
     }
 
     public long getActiveChannelId() {
@@ -1653,9 +1636,6 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
     @Override
     public void onConnected(String url) {
 	Log.d(TAG, "WebSocket connected successfully: " + url);
-
-	// Re-announce the channel: the server's active-channel state lives on the dead session.
-	sendChannelJoin();
 
 	notifyStateChanged(true, currentServerHTTPIp);
     }
