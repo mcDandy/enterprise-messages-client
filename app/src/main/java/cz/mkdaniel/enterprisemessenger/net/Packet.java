@@ -37,7 +37,6 @@ public class Packet {
     public static final byte TYPE_UNKNOWN = 0x0;
     public static final byte TYPE_CHAT_MESSAGE = 0x1;
     public static final byte TYPE_ACK = 0x2;
-    public static final byte TYPE_CHANNEL_JOIN = 0x4;
     public static final byte TYPE_KEY_ROTATION = 0xa;
     public static final byte TYPE_UNICAST_ROTATED_KEY = 0xd;
 
@@ -126,7 +125,6 @@ public class Packet {
 	switch (type) {
 	    case TYPE_UNKNOWN: return "UNKNOWN";
 	    case TYPE_CHAT_MESSAGE: return "CHAT_MESSAGE";
-	    case TYPE_CHANNEL_JOIN: return "CHANNEL_JOIN";
 	    case TYPE_KEY_ROTATION: return "KEY_ROTATION";
 	    case TYPE_UNICAST_ROTATED_KEY: return "UNICAST_ROTATED_KEY";
 	    default: return String.format("0x%02x", type);

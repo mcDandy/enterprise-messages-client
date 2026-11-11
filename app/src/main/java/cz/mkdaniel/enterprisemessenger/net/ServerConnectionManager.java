@@ -1100,7 +1100,7 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
      * Worker of {@link #unicastsChannelKeyTo(long, long)} with the key given explicitly, so the
      * rotation path can hand out the key it just generated instead of the channel's active one.
      */
-    private void unicastsChannelKeyTo(final long channelId, final long peerId,
+		private void unicastsChannelKeyTo(final long channelId, final long peerId,
 		final byte[] key, final UUID version) {
 	try {
 	    final byte[] peerSecret = peerSecrets.secret(peerId);
@@ -1111,13 +1111,13 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 		return;
 	    }
 
-	    final var envelope = new JSONObject();
-	    envelope.put("channelId", channelId);
-	    envelope.put("version", version.toString());
-	    envelope.put("key", Base64.encodeToString(key, Base64.NO_WRAP));
+	    final var plainBuffer = ByteBuffer.allocate(Long.BYTES + 2 * Long.BYTES + key.length);
+	    plainBuffer.putLong(channelId);
+	    plainBuffer.putLong(version.getMostSignificantBits());
+	    plainBuffer.putLong(version.getLeastSignificantBits());
+	    plainBuffer.put(key);
 
-	    final byte[] ciphertext = cryptoManager.encryptPayload(
-		    envelope.toString().getBytes(StandardCharsets.UTF_8), peerSecret);
+	    final byte[] ciphertext = cryptoManager.encryptPayload(plainBuffer.array(), peerSecret);
 
 	    final var buffer = ByteBuffer.allocate(2 * Long.BYTES + ciphertext.length);
 	    buffer.putLong(peerId);
@@ -1194,20 +1194,22 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 		}
 	    }
 
-	    final var envelope = new JSONObject(new String(
-		    cryptoManager.decryptPayload(ciphertext, peerSecret), StandardCharsets.UTF_8));
-
-	    final long channelId = envelope.optLong("channelId", -1L);
-	    final String versionText = envelope.optString("version", "");
-	    final byte[] key = CryptoManager.decodePeerKey(envelope.optString("key", ""));
-
-	    if (channelId < 0 || versionText.isEmpty() || key == null) {
+	    final byte[] plain = cryptoManager.decryptPayload(ciphertext, peerSecret);
+	    if (plain == null || plain.length < Long.BYTES + 2 * Long.BYTES + 32) {
 		Log.w(TAG, "A key rotation unicast carried an incomplete envelope, ignoring it");
 
 		return;
 	    }
 
-	    final boolean adopted = channelKeys.adoptChannelKey(channelId, UUID.fromString(versionText), key);
+	    final ByteBuffer plainBuffer = ByteBuffer.wrap(plain);
+	    final long channelId = plainBuffer.getLong();
+	    final long versionMsb = plainBuffer.getLong();
+	    final long versionLsb = plainBuffer.getLong();
+	    final UUID version = new UUID(versionMsb, versionLsb);
+	    final byte[] key = new byte[32];
+	    plainBuffer.get(key);
+
+	    final boolean adopted = channelKeys.adoptChannelKey(channelId, version, key);
 	    if (!adopted) {
 		// Already this device's key (its own unicast echoed back, or a duplicate delivery).
 		return;
@@ -1217,7 +1219,7 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 		this.activeChannelKey = key;
 	    }
 
-	    Log.d(TAG, "Adopted key " + versionText + " of channel " + channelId + " from peer " + senderUserId);
+	    Log.d(TAG, "Adopted key " + version + " of channel " + channelId + " from peer " + senderUserId);
 
 	    // Convergence: a member who learns the key also offers it to the members that were offline
 	    // when the sender unicasted. Those that already have it answer with a no-op, so this stops
@@ -1229,7 +1231,7 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 		}
 
 		ensurePeerSecret(peerId, peer.optString("publicKey", ""));
-		unicastsChannelKeyTo(channelId, peerId, key, UUID.fromString(versionText));
+		unicastsChannelKeyTo(channelId, peerId, key, version);
 	    }
 	} catch (final Exception exception) {
 	    Log.w(TAG, "A key rotation unicast from peer " + senderUserId + " could not be opened", exception);
@@ -1741,14 +1743,13 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 		    }
 
 		    final var peerId = wrappedPayload.getLong();
-		    final var newRotation = new byte[wrappedPayload.remaining()];
-		    
-		    wrappedPayload.get(newRotation);
+		    wrappedPayload.getLong(); // skip server version MSB
+		    wrappedPayload.getLong(); // skip server version LSB
 
-		    // The two longs of the header after the sender id are the server's own channel_key
-		    // version, not the one of the key inside the envelope, so they are deliberately not
-		    // read: adopting a key under a version the sender never chose would split the channel.
-		    executor.execute(() -> adoptUnicastChannelKey(peerId, newRotation));
+		    final var ciphertext = new byte[wrappedPayload.remaining()];
+		    wrappedPayload.get(ciphertext);
+
+		    executor.execute(() -> adoptUnicastChannelKey(peerId, ciphertext));
 		}
 
 		break;
