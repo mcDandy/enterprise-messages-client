@@ -34,8 +34,9 @@ import cz.mkdaniel.enterprisemessenger.crypto.CryptoManager;
  * by the caller before the payload is put into a packet (the server only stores ciphertext).
  */
 public class Packet {
-    public static final byte TYPE_UNKNOWN = 0x00;
+    public static final byte TYPE_UNKNOWN = 0x0;
     public static final byte TYPE_CHAT_MESSAGE = 0x1;
+    public static final byte TYPE_ACK = 0x2;
     public static final byte TYPE_CHANNEL_JOIN = 0x4;
     public static final byte TYPE_KEY_ROTATION = 0xa;
     public static final byte TYPE_UNICAST_ROTATED_KEY = 0xd;

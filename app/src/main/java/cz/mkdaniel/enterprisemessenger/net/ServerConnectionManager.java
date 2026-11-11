@@ -1758,6 +1758,10 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 
 		break;
 	}
+
+	final var acknowledgement = new Packet(Packet.TYPE_ACK, new byte[]{type});
+
+	webSocketClient.sendPacketAsync(acknowledgement);
 	}
 	catch (final Exception exception) {
 	    Log.e(TAG, exception.toString());
