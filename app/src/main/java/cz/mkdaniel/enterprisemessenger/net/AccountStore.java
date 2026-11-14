@@ -33,6 +33,18 @@ public class AccountStore {
     private static final String KEY_LOGGED_IN = "is_logged_in";
 
     /**
+     * The account this device's encryption identity belongs to. The identity key pair is generated
+     * once and published as that account's public key during registration, so a second account
+     * signing in here would inherit the first one's channel keys and peer secrets while the server
+     * kept trusting a public key this device can no longer back with a private one. Login and
+     * registration are therefore refused for anybody else.
+     * <p>
+     * Not a secret (a username already sits in {@link #KEY_USERNAME} beside it) and deliberately not
+     * cleared by {@link #clearSession()}: logging out must not hand the device to the next account.
+     */
+    private static final String KEY_BOUND_ACCOUNT = "bound_account";
+
+    /**
      * Numeric id the physical server assigned to this account ({@code GET /api/users/me}). Cached so
      * the app can recognise itself in a virtual server's member list and tell whether the signed-in
      * user is its ADMINISTRATOR, which is what gates the create/rename/delete controls.
@@ -116,6 +128,13 @@ public class AccountStore {
         plain.putString(KEY_USERNAME, username);
         plain.putString(KEY_LOGGED_IN, Boolean.TRUE.toString());
 
+        // The first account to sign in on an installation owns its identity: it either registered
+        // here, publishing this device's public key, or it is the account whose keys are already
+        // sealed on the device. Every later sign-in is gated by boundAccount(), never claimed.
+        if (boundAccount().isEmpty()) {
+            plain.putString(KEY_BOUND_ACCOUNT, username);
+        }
+
         saveJwtToken(token, tokenIssuer, expiresAt);
     }
 
@@ -138,6 +157,10 @@ public class AccountStore {
         saveJwtToken(token, tokenIssuer, 0L);
     }
 
+    /**
+     * Ends the session. The device binding survives on purpose: a log-out is not a hand-over, and
+     * forgetting it here is exactly what let another account inherit this device's keys.
+     */
     public synchronized void clearSession() {
         plain.remove(KEY_USERNAME);
         plain.remove(KEY_USER_ID);
@@ -214,6 +237,35 @@ public class AccountStore {
         final String username = plain.getString(KEY_USERNAME);
 
         return username == null ? "" : username;
+    }
+
+    /**
+     * The account this device's encryption identity is bound to, or {@code ""} when no account has
+     * ever signed in here (a fresh installation, or a reset device identity).
+     */
+    public synchronized String boundAccount() {
+        final String bound = plain.getString(KEY_BOUND_ACCOUNT);
+
+        return bound == null ? "" : bound;
+    }
+
+    /**
+     * Whether {@code username} may use this device's encryption identity: an unbound device accepts
+     * anybody, a bound one only its own account.
+     */
+    public synchronized boolean isBoundTo(String username) {
+        final String bound = boundAccount();
+
+        return bound.isEmpty() || bound.equalsIgnoreCase(username);
+    }
+
+    /**
+     * Releases the device for another account. Only the reset of the device identity may call this,
+     * and only together with deleting the identity key pair and emptying the sealed registries;
+     * clearing the binding alone would leave the next account reading the previous one's channels.
+     */
+    public synchronized void unbindAccount() {
+        plain.remove(KEY_BOUND_ACCOUNT);
     }
 
     private static byte[] bytesOf(String value) {

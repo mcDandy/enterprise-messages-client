@@ -1592,6 +1592,22 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
     }
 
     /**
+     * Drops every trace of the session this process still holds: the in-memory token, the active
+     * channel key and the socket. {@link #disconnect()} alone is not enough when the device identity
+     * is deleted underneath the session (Settings - reset encryption identity): the socket would
+     * stay closed but the token would still be handed to the next connect(), and the channel key of
+     * an account that no longer exists would still be offered to {@code sendChatMessage}.
+     */
+    public void clearSessionState() {
+	this.jwtToken = "";
+	this.jwtTokenIssuer = "";
+	this.activeChannelKey = null;
+	this.activeChannelId = -1L;
+
+	webSocketClient.disconnect();
+    }
+
+    /**
      * Decrypts a broadcast chat payload. A message can arrive before the user opened that
      * channel (or while browsing another one), so the active channel key is tried first and the
      * currently visible channel key second; a wrong key only fails the GCM tag check.
@@ -1772,6 +1788,23 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
     @Override
     public void onDisconnected() {
 	Log.d(TAG, "WebSocket disconnected from " + currentServerHTTPIp);
+	notifyStateChanged(false, currentServerHTTPIp);
+    }
+
+    /**
+     * A close the peer announced with a code. A server error (1011) means the peer killed the session
+     * while handling it - typically a moment after the handshake - and redialling immediately
+     * reproduces exactly that, so the reason is reported instead of the generic unreachable message.
+     */
+    @Override
+    public void onDisconnected(final int code, final String reason) {
+	Log.d(TAG, "WebSocket closed by the peer with code " + code
+		+ (reason == null || reason.isEmpty() ? "" : " (" + reason + ")"));
+
+	if (code == WebSocketClient.CLOSE_CODE_SERVER_ERROR) {
+	    notifyError(context.getString(cz.mkdaniel.enterprisemessenger.R.string.error_connection_closed, code));
+	}
+
 	notifyStateChanged(false, currentServerHTTPIp);
     }
 

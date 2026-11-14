@@ -57,6 +57,15 @@ public class RegisterFragment extends Fragment {
             return;
         }
 
+        // A second account registered on this device would be handed this device's public key while
+        // the first account's channel keys stayed sealed on it. Channel ids are global, so the two
+        // accounts would then be able to open each other's channels - registration stops here.
+        final AccountStore accountStore = new AccountStore(requireContext());
+        if (!accountStore.isBoundTo(username)) {
+            showError(getString(R.string.error_device_bound_for_register, accountStore.boundAccount()));
+            return;
+        }
+
         hideError();
         setLoading(true);
 

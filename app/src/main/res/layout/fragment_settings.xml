@@ -120,6 +120,27 @@
                     android:text="@string/action_restore_keys"
                     app:backgroundTint="@color/badge_unread" />
 
+                <!-- The device holds one KeyStore identity, published as one account's public key,
+                     so switching accounts means deleting that identity and every key sealed with
+                     it. Deliberately buried below the backup actions: it is irreversible. -->
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="24dp"
+                    android:text="@string/settings_identity_title"
+                    android:textColor="@color/text_primary"
+                    android:textSize="18sp"
+                    android:textStyle="bold" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/button_reset_identity"
+                    style="@style/Widget.App.MaterialButton"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="12dp"
+                    android:text="@string/action_reset_identity"
+                    app:backgroundTint="@color/badge_unread" />
+
             </LinearLayout>
 
         </com.google.android.material.card.MaterialCardView>

@@ -4,8 +4,8 @@ import android.util.Log;
 
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
+import java.security.InvalidAlgorithmParameterException;
 import java.util.Base64;
-import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -18,8 +18,13 @@ import javax.crypto.spec.GCMParameterSpec;
  * {@link MasterKeyProvider}. Nothing secret is kept in plaintext anywhere on disk.
  * <p>
  * Blob layout: {@code [12-byte IV][AES-GCM ciphertext + 16-byte tag]}, Base64 (no wrap) so it fits
- * into a {@code String} slot. A fresh random IV is generated for every {@link #put}, because GCM
- * loses both confidentiality and integrity if a nonce is ever reused with the same key.
+ * into a {@code String} slot. Every {@link #put} seals under a fresh IV, because GCM loses both
+ * confidentiality and integrity if a nonce is ever reused with the same key. The IV is minted by the
+ * provider of the master key rather than by this class: an Android KeyStore key is generated with
+ * randomized encryption required, which is precisely the promise that no caller picks its nonces,
+ * and it answers {@code Cipher.init} carrying an IV with
+ * {@code InvalidAlgorithmParameterException: Caller-provided IV not permitted}. Reading is not
+ * affected - a nonce is not secret, so {@link #load} passes the stored one in.
  * <p>
  * Reading never throws for recoverable damage: a blob that cannot be opened (corrupted file, master
  * key replaced by an OS reinstall) reads back as {@code null}, which callers treat as "the user has
@@ -35,7 +40,6 @@ public class SecureBlobStore {
 
     private final KeyValueSink sink;
     private final MasterKeyProvider masterKeyProvider;
-    private final SecureRandom random = new SecureRandom();
 
     public SecureBlobStore(KeyValueSink sink, MasterKeyProvider masterKeyProvider) {
         this.sink = sink;
@@ -43,7 +47,8 @@ public class SecureBlobStore {
     }
 
     /**
-     * Seals {@code value} under {@code key}, always with a new IV.
+     * Seals {@code value} under {@code key} with a fresh IV handed out by the provider of the master
+     * key, so no value is ever sealed twice under the same nonce.
      *
      * @throws KeyStoreUnavailableException when the master key cannot be created or used
      */
@@ -54,25 +59,32 @@ public class SecureBlobStore {
             return;
         }
 
-        final byte[] iv = new byte[IV_LENGTH_BYTES];
-        random.nextBytes(iv);
+        final byte[] blob;
 
         try {
             final Cipher cipher = Cipher.getInstance(AES_GCM_TRANSFORM);
-            cipher.init(Cipher.ENCRYPT_MODE, masterKeyProvider.masterKey(), new GCMParameterSpec(TAG_LENGTH_BITS, iv));
+            cipher.init(Cipher.ENCRYPT_MODE, masterKeyProvider.masterKey());
+
+            // The nonce has to be read back before doFinal(): finishing the operation resets the
+            // cipher, and without the IV in front of the ciphertext the blob could never be opened.
+            final byte[] iv = cipher.getIV();
+            if (iv == null || iv.length != IV_LENGTH_BYTES) {
+                throw new InvalidAlgorithmParameterException("The master key offered no "
+                        + IV_LENGTH_BYTES + "-byte IV, so nothing was sealed");
+            }
 
             final byte[] ciphertext = cipher.doFinal(value);
-            final byte[] blob = new byte[iv.length + ciphertext.length];
+            blob = new byte[iv.length + ciphertext.length];
 
             System.arraycopy(iv, 0, blob, 0, iv.length);
             System.arraycopy(ciphertext, 0, blob, iv.length, ciphertext.length);
-
-            // java.util.Base64 rather than android.util.Base64: it is available since API 26 (this
-            // app's minSdk is 35) and it works in JVM unit tests, which android.util.Base64 does not.
-            sink.putString(key, Base64.getEncoder().encodeToString(blob));
         } catch (GeneralSecurityException securityException) {
             throw new KeyStoreUnavailableException("Could not seal '" + key + "'", securityException);
         }
+
+        // java.util.Base64 rather than android.util.Base64: it is available since API 26 (this
+        // app's minSdk is 35) and it works in JVM unit tests, which android.util.Base64 does not.
+        sink.putString(key, Base64.getEncoder().encodeToString(blob));
     }
 
     /**

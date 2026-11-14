@@ -184,6 +184,44 @@ public class CryptoManager {
 	return generated;
     }
 
+    /**
+     * Deletes this device's identity key pair from the KeyStore, for the one action that has to end
+     * an identity: the user is handing the device to another account (see the reset in Settings).
+     * <p>
+     * Every ciphertext this device sealed under the old pair becomes unreadable, which is the point:
+     * one device holding two accounts' keys lets both of them read each other's channels, because
+     * channel ids are global. Callers are expected to empty the sealed registries
+     * ({@link SecureBlobStore#clearAll()}) in the same action.
+     *
+     * @return {@code true} when the alias is gone from the KeyStore afterwards
+     */
+    public synchronized boolean deleteIdentityKey() {
+	try {
+	    final KeyStore keyStore = KeyStore.getInstance(ANDROID_KEYSTORE);
+	    keyStore.load(null);
+
+	    if (keyStore.containsAlias(KEY_ALIAS)) {
+		keyStore.deleteEntry(KEY_ALIAS);
+	    }
+
+	    // The cached pair is a handle into the entry that has just been deleted; the next call has
+	    // to observe a fresh identity rather than reuse the removed one.
+	    keyPair = null;
+
+	    Log.d(TAG, "Deleted the identity key pair from KeyStore");
+
+	    return !keyStore.containsAlias(KEY_ALIAS);
+	} catch (GeneralSecurityException securityException) {
+	    Log.e(TAG, "The identity key pair could not be deleted", securityException);
+
+	    return false;
+	} catch (java.io.IOException ioException) {
+	    Log.e(TAG, "AndroidKeyStore could not be loaded", ioException);
+
+	    return false;
+	}
+    }
+
     public PublicKey getPublicKey() {
 	final KeyPair pair = tryGetKeyPair();
 

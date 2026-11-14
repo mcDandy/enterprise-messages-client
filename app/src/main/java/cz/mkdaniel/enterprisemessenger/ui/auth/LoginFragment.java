@@ -50,6 +50,16 @@ public class LoginFragment extends Fragment {
             return;
         }
 
+        // One device, one identity. The key pair in the KeyStore was handed to the server as one
+        // account's public key, so signing in as somebody else would pair that account with keys it
+        // does not own: it gets in, then fails to send or read anything. Switching accounts is an
+        // explicit action in Settings, where the identity is deleted along with the keys.
+        final AccountStore accountStore = new AccountStore(requireContext());
+        if (!accountStore.isBoundTo(username)) {
+            showError(getString(R.string.error_device_bound_to_other_account, accountStore.boundAccount()));
+            return;
+        }
+
         hideError();
         setLoading(true);
 

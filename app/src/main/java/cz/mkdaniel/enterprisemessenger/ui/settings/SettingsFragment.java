@@ -31,6 +31,7 @@ import java.util.concurrent.Executors;
 
 import cz.mkdaniel.enterprisemessenger.R;
 import cz.mkdaniel.enterprisemessenger.crypto.AppSecrets;
+import cz.mkdaniel.enterprisemessenger.crypto.CryptoManager;
 import cz.mkdaniel.enterprisemessenger.crypto.KeyBackup;
 import cz.mkdaniel.enterprisemessenger.databinding.FragmentSettingsBinding;
 import cz.mkdaniel.enterprisemessenger.net.AccountStore;
@@ -104,7 +105,10 @@ public class SettingsFragment extends Fragment {
 
         binding.buttonLogout.setOnClickListener(v -> {
             new AccountStore(requireContext()).clearSession();
-            ServerConnectionManager.getInstance(requireContext()).disconnect();
+            // Closing the socket is not logging out: the manager still holds the token and the
+            // channel key in memory, and the next connect() would resume the session that was just
+            // ended.
+            ServerConnectionManager.getInstance(requireContext()).clearSessionState();
             NavController navController = NavHostFragment.findNavController(this);
             NavOptions navOptions = new NavOptions.Builder()
                     .setPopUpTo(R.id.nav_transform, true)
@@ -117,6 +121,8 @@ public class SettingsFragment extends Fragment {
 
         binding.buttonRestoreKeys.setOnClickListener(v ->
                 openDocumentLauncher.launch(new String[]{BACKUP_MIME_TYPE, "application/octet-stream"}));
+
+        binding.buttonResetIdentity.setOnClickListener(v -> confirmIdentityReset());
     }
 
     /**
@@ -173,6 +179,81 @@ public class SettingsFragment extends Fragment {
         } catch (Exception failure) {
             return getString(R.string.backup_error_not_archive);
         }
+    }
+
+    /**
+     * Asks before the device's encryption identity is destroyed. The dialog names the account the
+     * device is bound to, because those are the messages that stop being readable.
+     */
+    private void confirmIdentityReset() {
+        final String bound = new AccountStore(requireContext()).boundAccount();
+
+        new AlertDialog.Builder(requireContext())
+                .setTitle(R.string.dialog_reset_identity_title)
+                .setMessage(bound.isEmpty()
+                        ? getString(R.string.dialog_reset_identity_body_unbound)
+                        : getString(R.string.dialog_reset_identity_body, bound))
+                .setPositiveButton(R.string.action_reset_identity, (dialog, which) -> resetIdentity())
+                .setNegativeButton(R.string.action_cancel, null)
+                .show();
+    }
+
+    /**
+     * Hands the device over: the identity key pair leaves the KeyStore, every sealed channel and
+     * peer key is dropped, and the binding is released so the next account can claim the device.
+     * Deleting a KeyStore entry is slow enough to stay off the main thread, like the backup work.
+     */
+    private void resetIdentity() {
+        final Context context = requireContext().getApplicationContext();
+
+        backupExecutor.execute(() -> {
+            postToast(resetResult(context));
+
+            if (!isAdded() || getActivity() == null) {
+                return;
+            }
+
+            getActivity().runOnUiThread(() -> {
+                if (!isAdded()) {
+                    return;
+                }
+
+                // The identity behind this session has just been deleted, so the token and the
+                // channel key the manager still holds have to go with it - not only the socket.
+                ServerConnectionManager.getInstance(context).clearSessionState();
+
+                NavHostFragment.findNavController(this).navigate(R.id.nav_login, null,
+                        new NavOptions.Builder().setPopUpTo(R.id.nav_transform, true).build());
+            });
+        });
+    }
+
+    /**
+     * The irreversible part of {@link #resetIdentity}; returns the message to show the user.
+     * <p>
+     * The session is cleared before the key is deleted, and the binding only after the KeyStore
+     * confirms the entry is gone: a device whose identity is still there must stay bound to its
+     * account, otherwise the next sign-in would inherit keys it cannot prove it owns.
+     */
+    private String resetResult(Context context) {
+        final AppSecrets secrets = AppSecrets.getInstance(context);
+
+        secrets.channelKeys().forgetAll();
+        secrets.peerSecrets().forgetAll();
+        // Both registries write through this store, so this also drops the sealed token and any slot
+        // a future registry adds: nothing of the old account is left to read.
+        secrets.blobs().clearAll();
+
+        final AccountStore accountStore = new AccountStore(context);
+        accountStore.clearSession();
+
+        if (!CryptoManager.getInstance(context).deleteIdentityKey()) {
+            return getString(R.string.identity_reset_failed);
+        }
+
+        accountStore.unbindAccount();
+
+        return getString(R.string.identity_reset_done);
     }
 
     /**

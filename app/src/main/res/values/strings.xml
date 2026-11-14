@@ -33,6 +33,12 @@
     <string name="error_register_failed">Registration failed. Username may be taken.</string>
     <string name="error_identity_key_unavailable">The device cannot provide its encryption identity. Chat stays unavailable until the keystore works again.</string>
 
+    <!-- One Android KeyStore identity per device: it is handed to the server as one account\'s
+         public key at registration, so a second account signing in here would inherit chat keys it
+         does not own and be unable to send or read anything. Switching is an explicit reset below. -->
+    <string name="error_device_bound_to_other_account">This device belongs to the account %1$s. Log out and reset its encryption identity in Settings before signing in as somebody else.</string>
+    <string name="error_device_bound_for_register">This device already belongs to the account %1$s. Reset its encryption identity in Settings before registering another account.</string>
+
     <!-- Encryption key backup: the channel keys exist only on this device, so the user has to keep
          his own passphrase-protected copy to read his history after losing the phone. -->
     <string name="settings_backup_title">Encryption keys</string>
@@ -51,6 +57,16 @@
     <string name="backup_error_short_passphrase">Use at least 8 characters</string>
     <string name="backup_error_mismatch">The passphrases do not match</string>
     <string name="backup_warning">The file contains the keys that decrypt your chats. Store it outside the phone; the passphrase is its only protection.</string>
+
+    <!-- The only supported way to hand the device to another account: the identity key and every
+         key sealed with it are deleted, which is irreversible by design. -->
+    <string name="settings_identity_title">Device identity</string>
+    <string name="action_reset_identity">Reset encryption identity</string>
+    <string name="dialog_reset_identity_title">Reset encryption identity?</string>
+    <string name="dialog_reset_identity_body">This device is bound to the account %1$s. Resetting deletes its identity key and every chat key sealed with it. Messages stay undecryptable for you and for everybody you wrote to; there is no undo and the server cannot restore them.</string>
+    <string name="dialog_reset_identity_body_unbound">This deletes the device\'s identity key and every chat key sealed with it. Messages stay undecryptable for you and for everybody you wrote to; there is no undo and the server cannot restore them.</string>
+    <string name="identity_reset_done">The device identity and its chat keys were deleted</string>
+    <string name="identity_reset_failed">The device identity could not be deleted; try again</string>
 
     <!-- Virtual servers and channels are named only; the address of the physical server is
          compile-time configuration (@string/server_ip), never a name the user can type. -->
@@ -77,6 +93,9 @@
     <string name="hint_type_message">Type a message&#8230;</string>
     <string name="desc_send_message">Send message</string>
     <string name="error_server_unreachable">Server cannot be reached</string>
+    <!-- A server that hangs up on our session is reachable; saying otherwise sends the user to the
+         network settings. The close code is what identifies the real failure. -->
+    <string name="error_connection_closed">Server closed the connection (code %1$d)</string>
 
     <string name="image_view_item_transform_content_description">Represents an image view in the item</string>
     <string name="subtitle_server_item">Workspace</string>

@@ -43,6 +43,18 @@ public class WebSocketClient {
     private static final int MAX_RECONNECT_DELAY_MS = 10000;
     private static final int PING_INTERVAL_SECONDS = 1000;
 
+    /** A socket that died sooner than this never carried anything: the peer refused us outright. */
+    private static final long INSTANT_CLOSE_MILLIS = 5_000L;
+
+    /** That many instant closures in a row means the refusal is not going to fix itself soon. */
+    private static final int RAPID_FAILURE_LIMIT = 3;
+
+    /** The patient retry interval once the peer has refused us {@value #RAPID_FAILURE_LIMIT} times. */
+    private static final long PATIENT_RECONNECT_DELAY_MS = 60_000L;
+
+    /** Close code of {@code CloseStatus.SERVER_ERROR}: the peer failed while handling the session. */
+    public static final int CLOSE_CODE_SERVER_ERROR = 1011;
+
     /**
      * Path of the binary WebSocket endpoint on the server (see server's {@code WebSocketConfig}).
      * The JWT is sent as the {@code token} query parameter (server's {@code JwtHandshakeInterceptor}).
@@ -64,10 +76,26 @@ public class WebSocketClient {
     private long reconnectDelayMs = 1000;
     private ScheduledFuture<?> reconnectTask;
 
+    /** When the current socket opened, to recognise a closure that came moments later. */
+    private long connectedAtNanos = 0L;
+
+    /** Consecutive connections the peer killed almost immediately after opening them. */
+    private int rapidFailures = 0;
+
     public interface WebSocketClientListener {
         void onConnected(String url);
         void onPacketReceived(Packet packet);
         void onDisconnected();
+
+        /**
+         * A disconnect that knows why. {@code code} is the close code the peer sent (OkHttp reports
+         * 1005 when it sent none), which is the difference between "the network is down" and "the
+         * server closed our session" - the second one never heals by redialling at full speed.
+         */
+        default void onDisconnected(int code, String reason) {
+            onDisconnected();
+        }
+
         void onError(Throwable t);
         default void onAuthError(int statusCode, String message) {}
     }
@@ -194,6 +222,7 @@ public class WebSocketClient {
             public void onOpen(@NonNull WebSocket webSocket, @NonNull Response response) {
                 Log.d(TAG, "WebSocket connected: " + redactToken(currentUrl));
                 isConnected.set(true);
+                connectedAtNanos = System.nanoTime();
                 reconnectDelayMs = INITIAL_RECONNECT_DELAY_MS; // Reset reconnect delay on success
                 if (listener != null) {
                     listener.onConnected(currentUrl);
@@ -232,8 +261,11 @@ public class WebSocketClient {
             public void onClosed(@NonNull WebSocket webSocket, int code, @NonNull String reason) {
                 Log.d(TAG, "WebSocket closed: " + code + " / " + reason);
                 boolean wasConnected = isConnected.getAndSet(false);
+
+                noteConnectionEnd(wasConnected);
+
                 if (wasConnected && listener != null) {
-                    listener.onDisconnected();
+                    listener.onDisconnected(code, reason);
                 }
                 if (shouldConnect.get() && isTokenValid(token)) {
                     scheduleReconnect();
@@ -244,6 +276,8 @@ public class WebSocketClient {
             public void onFailure(@NonNull WebSocket webSocket, @NonNull Throwable t, @Nullable Response response) {
                 Log.w(TAG, "WebSocket failure: " + t.getMessage() + (response != null ? " HTTP " + response.code() : ""));
                 boolean wasConnected = isConnected.getAndSet(false);
+
+                noteConnectionEnd(wasConnected);
 
                 boolean isAuthError = false;
                 int statusCode = 0;
@@ -275,6 +309,23 @@ public class WebSocketClient {
         };
     }
 
+    /**
+     * Counts how often the peer hangs up moments after opening. A connection that lived longer than
+     * {@link #INSTANT_CLOSE_MILLIS} proves the path itself works, so the streak resets and the retry
+     * interval returns to normal.
+     */
+    private void noteConnectionEnd(boolean wasConnected) {
+        if (!wasConnected) {
+            return;
+        }
+
+        if ((System.nanoTime() - connectedAtNanos) / 1_000_000L < INSTANT_CLOSE_MILLIS) {
+            rapidFailures++;
+        } else {
+            rapidFailures = 0;
+        }
+    }
+
     private synchronized void scheduleReconnect() {
         if (!shouldConnect.get()) {
             Log.d(TAG, "Skipping WebSocket reconnect: shouldConnect is false");
@@ -302,7 +353,14 @@ public class WebSocketClient {
         cancelScheduledReconnect();
 
         long delay = reconnectDelayMs;
-        Log.d(TAG, "Scheduling WebSocket reconnect in " + delay + " ms");
+
+        if (rapidFailures >= RAPID_FAILURE_LIMIT) {
+            delay = PATIENT_RECONNECT_DELAY_MS;
+        }
+
+        Log.d(TAG, "Scheduling WebSocket reconnect in " + delay + " ms" + (rapidFailures >= RAPID_FAILURE_LIMIT
+                ? ", after " + rapidFailures + " connections the peer closed at once"
+                : ""));
         reconnectDelayMs = Math.min(reconnectDelayMs * 2, MAX_RECONNECT_DELAY_MS);
 
         final String tokenToUse = currentToken;

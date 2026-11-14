@@ -68,6 +68,25 @@ public class SecureBlobStoreTest {
     }
 
     @Test
+    public void everyBlobCarriesTheIvItsProviderMintedForIt() throws Exception {
+        final byte[] secret = SECRET.getBytes(StandardCharsets.UTF_8);
+
+        store.put("a", secret);
+        final byte[] first = java.util.Base64.getDecoder().decode(sink.getString("a"));
+
+        store.put("a", secret);
+        final byte[] second = java.util.Base64.getDecoder().decode(sink.getString("a"));
+
+        // The IV is the first IV_LENGTH_BYTES of the blob and the cipher's provider chooses it (an
+        // AndroidKeyStore key refuses one handed in by the caller), so the two blobs cannot agree on
+        // it - and the store must still open the one it wrote.
+        assertFalse(java.util.Arrays.equals(
+                java.util.Arrays.copyOfRange(first, 0, 12),
+                java.util.Arrays.copyOfRange(second, 0, 12)));
+        assertArrayEquals(secret, store.load("a"));
+    }
+
+    @Test
     public void missingSlotReadsAsNull() {
         assertNull(store.load("never-written"));
         assertFalse(store.contains("never-written"));

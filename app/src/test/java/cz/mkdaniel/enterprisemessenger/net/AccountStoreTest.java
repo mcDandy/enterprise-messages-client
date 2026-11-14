@@ -94,6 +94,51 @@ public class AccountStoreTest {
     }
 
     @Test
+    public void theFirstAccountToSignInOwnsTheDevice() {
+        assertEquals("an untouched installation is unbound", "", store.boundAccount());
+        assertTrue("an unbound device accepts anybody", store.isBoundTo("alice"));
+
+        store.saveSession("alice", TOKEN, ISSUER, 0L);
+
+        assertEquals("alice", store.boundAccount());
+        assertTrue(store.isBoundTo("alice"));
+        assertTrue("the name is compared as the server compares it", store.isBoundTo("Alice"));
+        assertFalse("a second account may not inherit the device", store.isBoundTo("bob"));
+    }
+
+    @Test
+    public void aSecondAccountCannotStealTheBinding() {
+        store.saveSession("alice", TOKEN, ISSUER, 0L);
+        store.saveSession("bob", TOKEN, ISSUER, 0L);
+
+        assertEquals("only the reset in Settings may rebind a device", "alice", store.boundAccount());
+    }
+
+    @Test
+    public void loggingOutKeepsTheDeviceBound() {
+        store.saveSession("alice", TOKEN, ISSUER, 0L);
+
+        store.clearSession();
+
+        assertFalse(store.isLoggedIn());
+        assertEquals("a log-out is not a hand-over", "alice", store.boundAccount());
+    }
+
+    @Test
+    public void unbindingIsTheOnlyWayToAcceptAnotherAccount() {
+        store.saveSession("alice", TOKEN, ISSUER, 0L);
+
+        store.unbindAccount();
+
+        assertEquals("", store.boundAccount());
+        assertTrue(store.isBoundTo("bob"));
+
+        store.saveSession("bob", TOKEN, ISSUER, 0L);
+
+        assertEquals("bob", store.boundAccount());
+    }
+
+    @Test
     public void tokenExpiryDrivesTheRefreshDecision() {
         store.saveSession("alice", TOKEN, ISSUER, 0L);
 

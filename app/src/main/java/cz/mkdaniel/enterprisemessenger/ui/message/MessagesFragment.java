@@ -61,6 +61,17 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
     private String roomName;
 
     /**
+     * Until when an error we were told stands in for the generic "cannot be reached" toast. A server
+     * that closes our session is reachable, and repeating the network message over the real reason
+     * sends the user looking in the wrong place. Short enough that an unrelated error reported while
+     * connected cannot silence a later, genuinely unexplained drop.
+     */
+    private long dropWasExplainedUntil = 0L;
+
+    /** How long an explicit reason may cover a connection drop that follows it. */
+    private static final long DROP_EXPLAINED_MILLIS = 2_000L;
+
+    /**
      * Android 17 (targetSdk 37) blocks every socket to a LAN address until the user grants
      * ACCESS_LOCAL_NETWORK; without it connect() just times out. Requested before connecting.
      */
@@ -224,9 +235,14 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
         Log.d(TAG, "Connection state changed: connected=" + connected + ", ip=" + ip);
         updateInputUnderline(connected);
         if (connected) {
+            dropWasExplainedUntil = 0L;
             Toast.makeText(getContext(), "Connected to server: " + ip, Toast.LENGTH_SHORT).show();
         } else {
-            Toast.makeText(getContext(), R.string.error_server_unreachable, Toast.LENGTH_SHORT).show();
+            if (System.currentTimeMillis() > dropWasExplainedUntil) {
+                Toast.makeText(getContext(), R.string.error_server_unreachable, Toast.LENGTH_SHORT).show();
+            }
+
+            dropWasExplainedUntil = 0L;
         }
     }
 
@@ -253,6 +269,11 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
         if (!isAdded()) return;
         Log.e(TAG, "Server connection error: " + errorMessage);
         updateInputUnderline(false);
+
+        // Every error the manager reports is the user's problem to know about (a missing channel key
+        // means his message was not sent), and none of them was visible until now.
+        dropWasExplainedUntil = System.currentTimeMillis() + DROP_EXPLAINED_MILLIS;
+        Toast.makeText(requireContext(), errorMessage, Toast.LENGTH_SHORT).show();
     }
 
     @Override
