@@ -125,6 +125,7 @@ public class Packet {
 	switch (type) {
 	    case TYPE_UNKNOWN: return "UNKNOWN";
 	    case TYPE_CHAT_MESSAGE: return "CHAT_MESSAGE";
+	    case TYPE_ACK: return "ACK";
 	    case TYPE_KEY_ROTATION: return "KEY_ROTATION";
 	    case TYPE_UNICAST_ROTATED_KEY: return "UNICAST_ROTATED_KEY";
 	    default: return String.format("0x%02x", type);

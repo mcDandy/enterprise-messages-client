@@ -1669,6 +1669,16 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 
 	Log.d(TAG, "Incoming packet type: 0x" + Integer.toHexString(type) + ", payload size: " + packet.getPayload().length);
 
+	// ACK packets confirm delivery and must never generate another ACK. Acknowleding an ACK
+	// would make the peer send it back repeatedly.
+	if (type == Packet.TYPE_ACK) {
+	    Log.d(TAG, "Received acknowledgement for packet type 0x"
+		    + (packet.getPayload().length > 0
+			    ? Integer.toHexString(packet.getPayload()[0] & 0xff)
+			    : "unknown"));
+	    return;
+	}
+
 	switch (type) {
 	    case Packet.TYPE_CHAT_MESSAGE:
 		// Payload is exactly what the sender put on the wire: AES-GCM ciphertext of the envelope.

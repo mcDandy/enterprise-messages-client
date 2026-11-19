@@ -76,4 +76,16 @@ public class PacketCodecTest {
         assertNotNull(decoded);
         assertEquals(0, decoded.getPayload().length);
     }
+
+    @Test
+    public void acknowledgementPacketRoundTripsAndHasReadableTypeName() throws Exception {
+        final byte[] frame = new Packet(Packet.TYPE_ACK,
+                new byte[]{Packet.TYPE_CHAT_MESSAGE}).serialize();
+
+        final Packet decoded = Packet.readFromByteArray(frame);
+
+        assertEquals(Packet.TYPE_ACK, decoded.getType());
+        assertArrayEquals(new byte[]{Packet.TYPE_CHAT_MESSAGE}, decoded.getPayload());
+        assertEquals("ACK", Packet.typeName(decoded.getType()));
+    }
 }
