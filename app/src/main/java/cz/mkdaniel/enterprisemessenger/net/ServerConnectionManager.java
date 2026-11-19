@@ -1258,7 +1258,7 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
      * version are read from the <i>decrypted</i> payload, so neither can be forged by whoever the
      * server claims sent the packet.
      */
-    private void adoptUnicastChannelKey(final long senderUserId, final byte[] ciphertext) {
+    private void adoptUnicastChannelKey(final long senderUserId, final byte[] cipher_text) {
         try {
             byte[] peerSecret = peerSecrets.secret(senderUserId);
 
@@ -1285,7 +1285,7 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
                 }
             }
 
-            final byte[] plain = cryptoManager.decryptPayload(ciphertext, peerSecret);
+            final byte[] plain = cryptoManager.decryptPayload(cipher_text, peerSecret);
             if (plain == null || plain.length < Long.BYTES + 2 * Long.BYTES + 32) {
                 Log.w(TAG, "A key rotation unicast carried an incomplete envelope, ignoring it");
 
