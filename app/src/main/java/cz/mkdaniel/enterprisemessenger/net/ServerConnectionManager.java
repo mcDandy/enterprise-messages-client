@@ -131,6 +131,7 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
      */
     private volatile byte[] activeChannelKey;
     private volatile long activeChannelId = -1L;
+    private final Set<Long> joinedChannelIds = new CopyOnWriteArraySet<>();
 
     private ServerConnectionManager(Context context) {
         this.context = context.getApplicationContext();
@@ -655,6 +656,7 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
                 this.activeChannelKey = null;
             }
 
+            joinedChannelIds.remove(channelId);
             channelKeys.forget(channelId);
 
             mainHandler.post(() -> callback.onResult(null));
@@ -1048,6 +1050,23 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
                 if (!ensureJwt().isEmpty()) {
                     Log.d(TAG, "Selected channel " + id + "; membership is provided by the server");
                 }
+
+                if (!joinedChannelIds.contains(id)) {
+                    final RestResponse joined = executePost(
+                            String.format(Locale.US, "/api/channels/%d/join", id),
+                            new JSONObject());
+                    if (!joined.isSuccessful()) {
+                        final String error = joined.statusCode() == 403
+                                ? "You do not have permission to send messages in this channel"
+                                : "Could not join channel " + id;
+                        Log.w(TAG, error + " (HTTP " + joined.statusCode() + ")");
+                        notifyError(error);
+                        return;
+                    }
+                    joinedChannelIds.add(id);
+                    Log.d(TAG, "Joined channel " + id + " via REST");
+                }
+
                 establishChannelPeerKeys(id);
             });
         } catch (final Exception exception) {
@@ -1596,6 +1615,7 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
         this.jwtTokenIssuer = "";
         this.activeChannelKey = null;
         this.activeChannelId = -1L;
+        joinedChannelIds.clear();
 
         webSocketClient.disconnect();
     }
@@ -1674,9 +1694,9 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 
             switch (type) {
                 case Packet.TYPE_CHAT_MESSAGE:
-                    // Payload is exactly what the sender put on the wire: AES-GCM ciphertext of the envelope.
+                    // Payload is [4-byte channel id][AES-GCM ciphertext].
                     byte[] payload = packet.getPayload();
-                    if (payload == null || payload.length == 0) {
+                    if (payload == null || payload.length <= Integer.BYTES) {
                         Log.w(TAG, "Received empty CHAT_MESSAGE payload");
                         break;
                     }
@@ -1686,7 +1706,12 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
                     String messageId = String.valueOf(System.currentTimeMillis());
                     long sentAt = System.currentTimeMillis();
 
-                    byte[] plaintext = decryptChatPayload(payload);
+                    final ByteBuffer chatPayload = ByteBuffer.wrap(payload);
+                    final long packetChannelId = chatPayload.getInt() & 0xffff_ffffL;
+                    final byte[] ciphertext = new byte[chatPayload.remaining()];
+                    chatPayload.get(ciphertext);
+
+                    byte[] plaintext = decryptChatPayload(ciphertext);
                     if (plaintext == null) {
                         Log.w(TAG, "CHAT_MESSAGE could not be decrypted with the active channel key");
                         break;
