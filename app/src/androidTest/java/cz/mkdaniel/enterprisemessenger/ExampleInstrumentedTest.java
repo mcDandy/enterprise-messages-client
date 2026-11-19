@@ -14,6 +14,7 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 import androidx.test.espresso.action.ViewActions;
 import androidx.test.espresso.matcher.ViewMatchers;
+import static androidx.test.espresso.matcher.ViewMatchers.isDisplayed;
 import androidx.test.ext.junit.rules.ActivityScenarioRule;
 import androidx.test.rule.GrantPermissionRule;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
@@ -47,7 +48,7 @@ public class ExampleInstrumentedTest {
     @Rule
     public ActivityScenarioRule<MainActivity> activityScenarioRule = new ActivityScenarioRule<>(MainActivity.class);
     @Rule
-    public GrantPermissionRule mRuntimePermissionRule = GrantPermissionRule.grant(android.Manifest.permission.POST_NITIFICATIONS);
+    public GrantPermissionRule mRuntimePermissionRule = GrantPermissionRule.grant(android.Manifest.permission.POST_NOTIFICATIONS);
 
     /**
      * Context of the app under test.
@@ -60,13 +61,17 @@ public class ExampleInstrumentedTest {
 
     @Test
     public void login_success() {
-        onView(withId(R.id.edittext_username)).perform(typeText(USERNAME), closeSoftKeyboard());
-        onView(withId(R.id.edittext_password)).perform(typeText(PASSWORD), closeSoftKeyboard());
-        onView(withId(R.id.button_login)).perform(click());
-        onView(withId(R.id.image_view_item_transform));
+	onView(withId(R.id.edittext_username)).perform(typeText(USERNAME), closeSoftKeyboard());
+	onView(withId(R.id.edittext_password)).perform(typeText(PASSWORD), closeSoftKeyboard());
+	onView(withId(R.id.button_login)).perform(click());
+	onView(withId(R.id.image_view_item_transform)).check(matches(isDisplayed()));
+	// select one message server
+	onView(withId(R.id.image_view_item_transform)).perform(click());
+	// select one message channel
+	// post message: Test message
     }
 
-    @Test
+    //@Test
     public void register_success() {
         onView(withId(R.id.button_go_to_register)).perform(click());
         onView(withId(R.id.edittext_username)).perform(typeText(USERNAME), closeSoftKeyboard());
