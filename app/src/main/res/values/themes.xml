@@ -1,4 +1,4 @@
-<resources xmlns:tools="http://schemas.android.com/tools">
+<resources>
     <!-- Base application theme. -->
     <style name="Theme.EnterpriseMessenger" parent="Theme.MaterialComponents.DayNight.DarkActionBar">
         <!-- Primary brand color. -->
@@ -35,9 +35,9 @@
         <item name="windowNoTitle">true</item>
     </style>
 
-    <style name="Theme.EnterpriseMessenger.AppBarOverlay" parent="ThemeOverlay.AppCompat.Dark.ActionBar" />
+    <style name="Theme.EnterpriseMessenger.AppBarOverlay" parent="ThemeOverlay.AppCompat.Dark.ActionBar"/>
 
-    <style name="Theme.EnterpriseMessenger.PopupOverlay" parent="ThemeOverlay.AppCompat.Light" />
+    <style name="Theme.EnterpriseMessenger.PopupOverlay" parent="ThemeOverlay.AppCompat.Light"/>
 
     <!-- Custom Shapes -->
     <style name="ShapeAppearance.App.CornerSmall" parent="ShapeAppearance.MaterialComponents.SmallComponent">

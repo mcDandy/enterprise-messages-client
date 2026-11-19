@@ -7,12 +7,12 @@
 -->
 <data-extraction-rules>
     <cloud-backup>
-        <exclude domain="sharedpref" path="EnterpriseMessenger_Account.xml" />
-        <exclude domain="sharedpref" path="EnterpriseMessenger_Secrets.xml" />
+        <exclude domain="sharedpref" path="EnterpriseMessenger_Account.xml"/>
+        <exclude domain="sharedpref" path="EnterpriseMessenger_Secrets.xml"/>
     </cloud-backup>
 
     <device-transfer>
-        <exclude domain="sharedpref" path="EnterpriseMessenger_Account.xml" />
-        <exclude domain="sharedpref" path="EnterpriseMessenger_Secrets.xml" />
+        <exclude domain="sharedpref" path="EnterpriseMessenger_Account.xml"/>
+        <exclude domain="sharedpref" path="EnterpriseMessenger_Secrets.xml"/>
     </device-transfer>
 </data-extraction-rules>

@@ -37,24 +37,12 @@ public class ServerViewItem {
             R.drawable.avatar_15,
             R.drawable.avatar_16
     };
-
-    /**
-     * Avatar for the server at {@code index}; the id is accepted as well, so a freshly created
-     * server keeps the same avatar as the same entry fetched again later.
-     */
-    public static int avatarDrawableForIndex(int index) {
-        final int safeIndex = index < 0 ? -index : index;
-
-        return AVATAR_DRAWABLES[safeIndex % AVATAR_DRAWABLES.length];
-    }
-
     private final long serverId;
     private final String text;
     private final String type;
     private final boolean isAdmin;
     private final int drawableId;
     private int unreadCount;
-
     public ServerViewItem(long serverId, String text, String type, boolean isAdmin, int drawableId, int unreadCount) {
         this.serverId = serverId;
         this.text = text;
@@ -68,7 +56,19 @@ public class ServerViewItem {
         this(serverId, text, type, isAdmin, drawableId, 0);
     }
 
-    /** Numeric id of the virtual server, as handed out by {@code GET /api/servers}. */
+    /**
+     * Avatar for the server at {@code index}; the id is accepted as well, so a freshly created
+     * server keeps the same avatar as the same entry fetched again later.
+     */
+    public static int avatarDrawableForIndex(int index) {
+        final int safeIndex = index < 0 ? -index : index;
+
+        return AVATAR_DRAWABLES[safeIndex % AVATAR_DRAWABLES.length];
+    }
+
+    /**
+     * Numeric id of the virtual server, as handed out by {@code GET /api/servers}.
+     */
     public long getServerId() {
         return serverId;
     }
@@ -84,7 +84,9 @@ public class ServerViewItem {
         return text;
     }
 
-    /** {@code "ORGANIZATION"} or {@code "DIRECT"} as the server reports it. */
+    /**
+     * {@code "ORGANIZATION"} or {@code "DIRECT"} as the server reports it.
+     */
     public String getType() {
         return type;
     }

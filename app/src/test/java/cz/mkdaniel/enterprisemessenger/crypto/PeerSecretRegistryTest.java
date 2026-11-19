@@ -22,6 +22,13 @@ public class PeerSecretRegistryTest {
     private SecureBlobStore store;
     private PeerSecretRegistry registry;
 
+    private static byte[] randomKey() {
+        final byte[] key = new byte[32];
+        new java.security.SecureRandom().nextBytes(key);
+
+        return Arrays.equals(key, new byte[32]) ? randomKey() : key;
+    }
+
     @Before
     public void setUp() throws GeneralSecurityException {
         store = new SecureBlobStore(new FakeKeyValueSink(), new FixedMasterKey());
@@ -83,12 +90,5 @@ public class PeerSecretRegistryTest {
         }
 
         assertTrue(rejected);
-    }
-
-    private static byte[] randomKey() {
-        final byte[] key = new byte[32];
-        new java.security.SecureRandom().nextBytes(key);
-
-        return Arrays.equals(key, new byte[32]) ? randomKey() : key;
     }
 }

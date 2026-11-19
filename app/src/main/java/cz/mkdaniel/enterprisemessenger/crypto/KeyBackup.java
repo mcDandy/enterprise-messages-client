@@ -9,7 +9,6 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
 import java.util.UUID;
-
 import javax.crypto.AEADBadTagException;
 import javax.crypto.Cipher;
 import javax.crypto.SecretKeyFactory;
@@ -51,15 +50,21 @@ public class KeyBackup {
     private static final String BEGIN_MARKER = "-----BEGIN EMS KEY BACKUP-----";
     private static final String END_MARKER = "-----END EMS KEY BACKUP-----";
 
-    /** First line of the decrypted body; also guards against importing some other text file. */
+    /**
+     * First line of the decrypted body; also guards against importing some other text file.
+     */
     private static final String BODY_HEADER = "EMSKEYBACKUP1";
 
     private static final byte[] MAGIC = "EMSKEY1".getBytes(StandardCharsets.UTF_8);
 
-    /** Field separator inside a body line; never appears in a UUID or in Base64. */
+    /**
+     * Field separator inside a body line; never appears in a UUID or in Base64.
+     */
     private static final String FIELD_SEPARATOR = "|";
 
-    /** {@link #FIELD_SEPARATOR} escaped for {@link String#split(String)}. */
+    /**
+     * {@link #FIELD_SEPARATOR} escaped for {@link String#split(String)}.
+     */
     private static final String FIELD_SEPARATOR_REGEX = "\\|";
 
     private static final int SALT_LENGTH_BYTES = 16;
@@ -81,135 +86,9 @@ public class KeyBackup {
         this.channelKeys = channelKeys;
     }
 
-    /** Thrown when an archive cannot be read: not our format, damaged, or the wrong passphrase. */
-    public static class BackupFormatException extends Exception {
-
-        private final boolean wrongPassphrase;
-
-        BackupFormatException(String message, boolean wrongPassphrase) {
-            this(message, wrongPassphrase, null);
-        }
-
-        BackupFormatException(String message, boolean wrongPassphrase, Throwable cause) {
-            super(message, cause);
-
-            this.wrongPassphrase = wrongPassphrase;
-        }
-
-        /** True when the only problem is the passphrase, so the UI can simply ask for it again. */
-        public boolean isWrongPassphrase() {
-            return wrongPassphrase;
-        }
-    }
-
     /**
-     * Serialises every readable channel key of this device into an armored archive.
-     *
-     * @return the text to write into the file the user picked; never contains a plaintext key
+     * Whether {@code blob} carries our header, i.e. it is a file this app wrote.
      */
-    public String export(final char[] passphrase) throws GeneralSecurityException {
-        if (passphrase == null || passphrase.length == 0) {
-            throw new IllegalArgumentException("The backup needs a passphrase");
-        }
-
-        final List<ChannelKeyRegistry.ChannelKeyEntry> entries = channelKeys.exportableEntries();
-
-        if (entries.isEmpty()) {
-            throw new IllegalStateException("This device has no channel keys to back up yet");
-        }
-
-        final byte[] salt = new byte[SALT_LENGTH_BYTES];
-        random.nextBytes(salt);
-
-        final byte[] iv = new byte[IV_LENGTH_BYTES];
-        random.nextBytes(iv);
-
-        final Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
-        cipher.init(Cipher.ENCRYPT_MODE, deriveKey(passphrase, salt),
-                new GCMParameterSpec(TAG_LENGTH_BITS, iv));
-
-        final byte[] ciphertext = cipher.doFinal(
-                bodyOf(entries).getBytes(StandardCharsets.UTF_8));
-
-        final byte[] blob = new byte[MAGIC.length + salt.length + iv.length + ciphertext.length];
-
-        System.arraycopy(MAGIC, 0, blob, 0, MAGIC.length);
-        System.arraycopy(salt, 0, blob, MAGIC.length, salt.length);
-        System.arraycopy(iv, 0, blob, MAGIC.length + salt.length, iv.length);
-        System.arraycopy(ciphertext, 0, blob, MAGIC.length + salt.length + iv.length, ciphertext.length);
-
-        Log.d(TAG, "Exported " + entries.size() + " channel keys");
-
-        return armor(Base64.getEncoder().encodeToString(blob));
-    }
-
-    /**
-     * Adopts the keys of an archive into this device's store. Everything is decrypted and parsed
-     * first and written only afterwards, so a wrong passphrase or a torn file leaves the store
-     * exactly as it was.
-     *
-     * @return how many channels received at least one key
-     */
-    public int importArchive(final String armored, final char[] passphrase)
-            throws GeneralSecurityException, KeyStoreUnavailableException, BackupFormatException {
-        if (passphrase == null || passphrase.length == 0) {
-            throw new IllegalArgumentException("The backup needs a passphrase");
-        }
-
-        final List<ChannelKeyRegistry.ChannelKeyEntry> entries =
-                parseBody(decryptToString(armored, passphrase));
-
-        if (entries.isEmpty()) {
-            throw new BackupFormatException("The backup contains no channel keys", false);
-        }
-
-        final int imported = channelKeys.importEntries(entries);
-
-        Log.d(TAG, "Imported keys of " + imported + " channels");
-
-        return imported;
-    }
-
-    /**
-     * How many channels an archive would restore, without touching the store. Useful to confirm a
-     * file is the right one before adopting its keys.
-     */
-    public int peekChannelCount(final String armored, final char[] passphrase)
-            throws GeneralSecurityException, BackupFormatException {
-        return parseBody(decryptToString(armored, passphrase)).size();
-    }
-
-    private String decryptToString(final String armored, final char[] passphrase)
-            throws GeneralSecurityException, BackupFormatException {
-        final byte[] blob = dearmor(armored);
-
-        if (!isOurArchive(blob)) {
-            throw new BackupFormatException("That file is not an Enterprise Messenger key backup", false);
-        }
-
-        final byte[] salt = new byte[SALT_LENGTH_BYTES];
-        System.arraycopy(blob, MAGIC.length, salt, 0, SALT_LENGTH_BYTES);
-
-        final byte[] iv = new byte[IV_LENGTH_BYTES];
-        System.arraycopy(blob, MAGIC.length + SALT_LENGTH_BYTES, iv, 0, IV_LENGTH_BYTES);
-
-        final int ciphertextOffset = MAGIC.length + SALT_LENGTH_BYTES + IV_LENGTH_BYTES;
-
-        try {
-            final Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
-            cipher.init(Cipher.DECRYPT_MODE, deriveKey(passphrase, salt),
-                    new GCMParameterSpec(TAG_LENGTH_BITS, iv));
-
-            return new String(cipher.doFinal(blob, ciphertextOffset, blob.length - ciphertextOffset),
-                    StandardCharsets.UTF_8);
-        } catch (AEADBadTagException badTag) {
-            throw new BackupFormatException("Wrong passphrase", true, badTag);
-        } catch (GeneralSecurityException securityException) {
-            throw new BackupFormatException("The backup could not be decrypted", false, securityException);
-        }
-    }
-
-    /** Whether {@code blob} carries our header, i.e. it is a file this app wrote. */
     public static boolean isOurArchive(byte[] blob) {
         if (blob == null || blob.length <= MAGIC.length + SALT_LENGTH_BYTES + IV_LENGTH_BYTES) {
             return false;
@@ -354,6 +233,138 @@ public class KeyBackup {
             return Base64.getDecoder().decode(cleaned.toString());
         } catch (IllegalArgumentException malformed) {
             throw new BackupFormatException("The backup file is not readable", false, malformed);
+        }
+    }
+
+    /**
+     * Serialises every readable channel key of this device into an armored archive.
+     *
+     * @return the text to write into the file the user picked; never contains a plaintext key
+     */
+    public String export(final char[] passphrase) throws GeneralSecurityException {
+        if (passphrase == null || passphrase.length == 0) {
+            throw new IllegalArgumentException("The backup needs a passphrase");
+        }
+
+        final List<ChannelKeyRegistry.ChannelKeyEntry> entries = channelKeys.exportableEntries();
+
+        if (entries.isEmpty()) {
+            throw new IllegalStateException("This device has no channel keys to back up yet");
+        }
+
+        final byte[] salt = new byte[SALT_LENGTH_BYTES];
+        random.nextBytes(salt);
+
+        final byte[] iv = new byte[IV_LENGTH_BYTES];
+        random.nextBytes(iv);
+
+        final Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+        cipher.init(Cipher.ENCRYPT_MODE, deriveKey(passphrase, salt),
+                new GCMParameterSpec(TAG_LENGTH_BITS, iv));
+
+        final byte[] ciphertext = cipher.doFinal(
+                bodyOf(entries).getBytes(StandardCharsets.UTF_8));
+
+        final byte[] blob = new byte[MAGIC.length + salt.length + iv.length + ciphertext.length];
+
+        System.arraycopy(MAGIC, 0, blob, 0, MAGIC.length);
+        System.arraycopy(salt, 0, blob, MAGIC.length, salt.length);
+        System.arraycopy(iv, 0, blob, MAGIC.length + salt.length, iv.length);
+        System.arraycopy(ciphertext, 0, blob, MAGIC.length + salt.length + iv.length, ciphertext.length);
+
+        Log.d(TAG, "Exported " + entries.size() + " channel keys");
+
+        return armor(Base64.getEncoder().encodeToString(blob));
+    }
+
+    /**
+     * Adopts the keys of an archive into this device's store. Everything is decrypted and parsed
+     * first and written only afterwards, so a wrong passphrase or a torn file leaves the store
+     * exactly as it was.
+     *
+     * @return how many channels received at least one key
+     */
+    public int importArchive(final String armored, final char[] passphrase)
+            throws GeneralSecurityException, KeyStoreUnavailableException, BackupFormatException {
+        if (passphrase == null || passphrase.length == 0) {
+            throw new IllegalArgumentException("The backup needs a passphrase");
+        }
+
+        final List<ChannelKeyRegistry.ChannelKeyEntry> entries =
+                parseBody(decryptToString(armored, passphrase));
+
+        if (entries.isEmpty()) {
+            throw new BackupFormatException("The backup contains no channel keys", false);
+        }
+
+        final int imported = channelKeys.importEntries(entries);
+
+        Log.d(TAG, "Imported keys of " + imported + " channels");
+
+        return imported;
+    }
+
+    /**
+     * How many channels an archive would restore, without touching the store. Useful to confirm a
+     * file is the right one before adopting its keys.
+     */
+    public int peekChannelCount(final String armored, final char[] passphrase)
+            throws GeneralSecurityException, BackupFormatException {
+        return parseBody(decryptToString(armored, passphrase)).size();
+    }
+
+    private String decryptToString(final String armored, final char[] passphrase)
+            throws GeneralSecurityException, BackupFormatException {
+        final byte[] blob = dearmor(armored);
+
+        if (!isOurArchive(blob)) {
+            throw new BackupFormatException("That file is not an Enterprise Messenger key backup", false);
+        }
+
+        final byte[] salt = new byte[SALT_LENGTH_BYTES];
+        System.arraycopy(blob, MAGIC.length, salt, 0, SALT_LENGTH_BYTES);
+
+        final byte[] iv = new byte[IV_LENGTH_BYTES];
+        System.arraycopy(blob, MAGIC.length + SALT_LENGTH_BYTES, iv, 0, IV_LENGTH_BYTES);
+
+        final int ciphertextOffset = MAGIC.length + SALT_LENGTH_BYTES + IV_LENGTH_BYTES;
+
+        try {
+            final Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+            cipher.init(Cipher.DECRYPT_MODE, deriveKey(passphrase, salt),
+                    new GCMParameterSpec(TAG_LENGTH_BITS, iv));
+
+            return new String(cipher.doFinal(blob, ciphertextOffset, blob.length - ciphertextOffset),
+                    StandardCharsets.UTF_8);
+        } catch (AEADBadTagException badTag) {
+            throw new BackupFormatException("Wrong passphrase", true, badTag);
+        } catch (GeneralSecurityException securityException) {
+            throw new BackupFormatException("The backup could not be decrypted", false, securityException);
+        }
+    }
+
+    /**
+     * Thrown when an archive cannot be read: not our format, damaged, or the wrong passphrase.
+     */
+    public static class BackupFormatException extends Exception {
+
+        private final boolean wrongPassphrase;
+
+        BackupFormatException(String message, boolean wrongPassphrase) {
+            this(message, wrongPassphrase, null);
+        }
+
+        BackupFormatException(String message, boolean wrongPassphrase, Throwable cause) {
+            super(message, cause);
+
+            this.wrongPassphrase = wrongPassphrase;
+        }
+
+        /**
+         * True when the only problem is the passphrase, so the UI can simply ask for it again.
+         */
+        public boolean isWrongPassphrase() {
+            return wrongPassphrase;
         }
     }
 }

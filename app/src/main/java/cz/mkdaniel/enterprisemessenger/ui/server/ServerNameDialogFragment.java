@@ -6,17 +6,14 @@ import android.text.TextUtils;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.widget.TextView;
-
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.annotation.StringRes;
 import androidx.appcompat.app.AlertDialog;
 import androidx.fragment.app.DialogFragment;
-
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import com.google.android.material.textfield.TextInputEditText;
 import com.google.android.material.textfield.TextInputLayout;
-
 import cz.mkdaniel.enterprisemessenger.R;
 
 /**
@@ -32,14 +29,6 @@ public class ServerNameDialogFragment extends DialogFragment {
     private static final String ARG_HINT_RES = "hint_res";
     private static final String ARG_CURRENT_NAME = "current_name";
     private static final String ARG_POSITIVE_BUTTON_RES = "positive_button_res";
-
-    /**
-     * Called with the confirmed, already trimmed name.
-     */
-    public interface OnNameConfirmed {
-        void onNameConfirmed(String name);
-    }
-
     @Nullable
     private OnNameConfirmed listener;
 
@@ -116,5 +105,12 @@ public class ServerNameDialogFragment extends DialogFragment {
     public void onDetach() {
         super.onDetach();
         listener = null;
+    }
+
+    /**
+     * Called with the confirmed, already trimmed name.
+     */
+    public interface OnNameConfirmed {
+        void onNameConfirmed(String name);
     }
 }

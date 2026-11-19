@@ -6,10 +6,8 @@ import android.view.Menu;
 import android.view.View;
 import android.widget.TextView;
 import android.widget.Toast;
-
 import com.google.android.material.bottomnavigation.BottomNavigationView;
 import com.google.android.material.navigation.NavigationView;
-
 import androidx.annotation.NonNull;
 import androidx.navigation.NavController;
 import androidx.navigation.Navigation;
@@ -17,7 +15,6 @@ import androidx.navigation.fragment.NavHostFragment;
 import androidx.navigation.ui.AppBarConfiguration;
 import androidx.navigation.ui.NavigationUI;
 import androidx.appcompat.app.AppCompatActivity;
-
 import cz.mkdaniel.enterprisemessenger.crypto.CryptoManager;
 import cz.mkdaniel.enterprisemessenger.databinding.ActivityMainBinding;
 import cz.mkdaniel.enterprisemessenger.net.AccountStore;
@@ -109,13 +106,16 @@ public class MainActivity extends AppCompatActivity {
         ServerConnectionManager conn = ServerConnectionManager.getInstance(this);
         conn.addListener(new ServerConnectionManager.ConnectionListener() {
             @Override
-            public void onConnectionStateChanged(boolean connected, String serverBaseUrl) {}
+            public void onConnectionStateChanged(boolean connected, String serverBaseUrl) {
+            }
 
             @Override
-            public void onMessageReceived(cz.mkdaniel.enterprisemessenger.ui.message.Message message) {}
+            public void onMessageReceived(cz.mkdaniel.enterprisemessenger.ui.message.Message message) {
+            }
 
             @Override
-            public void onError(String errorMessage) {}
+            public void onError(String errorMessage) {
+            }
 
             @Override
             public void onAuthRequired() {

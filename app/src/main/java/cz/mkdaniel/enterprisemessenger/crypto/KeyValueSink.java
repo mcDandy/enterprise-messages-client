@@ -10,14 +10,20 @@ import java.util.Set;
  */
 public interface KeyValueSink {
 
-    /** Stored value, or {@code null} when the slot is empty. */
+    /**
+     * Stored value, or {@code null} when the slot is empty.
+     */
     String getString(String key);
 
-    /** Stores {@code value}; {@code null} removes the slot. */
+    /**
+     * Stores {@code value}; {@code null} removes the slot.
+     */
     void putString(String key, String value);
 
     void remove(String key);
 
-    /** Every key currently held by this sink, for {@link SecureBlobStore#clearAll()} and export. */
+    /**
+     * Every key currently held by this sink, for {@link SecureBlobStore#clearAll()} and export.
+     */
     Set<String> keys();
 }

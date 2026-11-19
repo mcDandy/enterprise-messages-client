@@ -10,11 +10,9 @@ import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.os.Build;
-
 import androidx.core.app.ActivityCompat;
 import androidx.core.app.NotificationCompat;
 import androidx.core.content.ContextCompat;
-
 import cz.mkdaniel.enterprisemessenger.MainActivity;
 import cz.mkdaniel.enterprisemessenger.R;
 

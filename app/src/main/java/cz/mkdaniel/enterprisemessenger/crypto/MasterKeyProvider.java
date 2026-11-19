@@ -1,7 +1,6 @@
 package cz.mkdaniel.enterprisemessenger.crypto;
 
 import java.security.GeneralSecurityException;
-
 import javax.crypto.SecretKey;
 
 /**

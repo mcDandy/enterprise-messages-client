@@ -8,7 +8,6 @@ import java.security.InvalidAlgorithmParameterException;
 import java.util.Base64;
 import java.util.ArrayList;
 import java.util.List;
-
 import javax.crypto.Cipher;
 import javax.crypto.SecretKey;
 import javax.crypto.spec.GCMParameterSpec;
@@ -89,7 +88,7 @@ public class SecureBlobStore {
 
     /**
      * @return the plaintext previously stored under {@code key}, or {@code null} when the slot is
-     *         empty, the blob is malformed, or no known key opens it
+     * empty, the blob is malformed, or no known key opens it
      */
     public synchronized byte[] load(String key) {
         final String encoded = sink.getString(key);
@@ -135,7 +134,9 @@ public class SecureBlobStore {
         sink.remove(key);
     }
 
-    /** True when the slot holds a value, sealed or not. */
+    /**
+     * True when the slot holds a value, sealed or not.
+     */
     public synchronized boolean contains(String key) {
         final String encoded = sink.getString(key);
 

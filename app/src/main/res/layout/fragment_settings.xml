@@ -1,69 +1,69 @@
 <?xml version="1.0" encoding="utf-8"?>
 <ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:app="http://schemas.android.com/apk/res-auto"
-    xmlns:tools="http://schemas.android.com/tools"
-    android:layout_width="match_parent"
-    android:layout_height="match_parent"
-    android:fillViewport="true"
-    tools:context=".ui.settings.SettingsFragment">
+            xmlns:app="http://schemas.android.com/apk/res-auto"
+            xmlns:tools="http://schemas.android.com/tools"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:fillViewport="true"
+            tools:context=".ui.settings.SettingsFragment">
 
     <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="vertical"
-        android:padding="20dp">
-
-        <com.google.android.material.card.MaterialCardView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            app:cardBackgroundColor="@color/surface_card"
-            app:cardCornerRadius="24dp"
-            app:cardElevation="3dp"
-            app:strokeColor="@color/outline_border"
-            app:strokeWidth="1dp">
+            android:orientation="vertical"
+            android:padding="20dp">
 
-            <LinearLayout
+        <com.google.android.material.card.MaterialCardView
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:gravity="center_horizontal"
-                android:orientation="vertical"
-                android:padding="24dp">
+                app:cardBackgroundColor="@color/surface_card"
+                app:cardCornerRadius="24dp"
+                app:cardElevation="3dp"
+                app:strokeColor="@color/outline_border"
+                app:strokeWidth="1dp">
 
-                <com.google.android.material.imageview.ShapeableImageView
-                    android:layout_width="72dp"
-                    android:layout_height="72dp"
-                    android:layout_marginBottom="14dp"
-                    android:contentDescription="@string/app_name"
-                    android:scaleType="centerCrop"
-                    android:src="@drawable/avatar_3"
-                    app:shapeAppearanceOverlay="@style/ShapeAppearance.App.CircleImage" />
-
-                <TextView
-                    android:id="@+id/text_settings"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:textColor="@color/text_primary"
-                    android:textSize="22sp"
-                    android:textStyle="bold"
-                    tools:text="Settings" />
-
-                <TextView
-                    android:id="@+id/text_logged_user"
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="6dp"
-                    android:textColor="@color/text_secondary"
-                    android:textSize="15sp"
-                    tools:text="Logged in as: User" />
-
-                <com.google.android.material.button.MaterialButton
-                    android:id="@+id/button_logout"
-                    style="@style/Widget.App.MaterialButton"
+            <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="24dp"
-                    android:text="@string/action_logout"
-                    app:backgroundTint="@color/badge_unread" />
+                    android:gravity="center_horizontal"
+                    android:orientation="vertical"
+                    android:padding="24dp">
+
+                <com.google.android.material.imageview.ShapeableImageView
+                        android:layout_width="72dp"
+                        android:layout_height="72dp"
+                        android:layout_marginBottom="14dp"
+                        android:contentDescription="@string/app_name"
+                        android:scaleType="centerCrop"
+                        android:src="@drawable/avatar_3"
+                        app:shapeAppearanceOverlay="@style/ShapeAppearance.App.CircleImage"/>
+
+                <TextView
+                        android:id="@+id/text_settings"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:textColor="@color/text_primary"
+                        android:textSize="22sp"
+                        android:textStyle="bold"
+                        tools:text="Settings"/>
+
+                <TextView
+                        android:id="@+id/text_logged_user"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="6dp"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="15sp"
+                        tools:text="Logged in as: User"/>
+
+                <com.google.android.material.button.MaterialButton
+                        android:id="@+id/button_logout"
+                        style="@style/Widget.App.MaterialButton"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="24dp"
+                        android:text="@string/action_logout"
+                        app:backgroundTint="@color/badge_unread"/>
 
             </LinearLayout>
 
@@ -72,74 +72,74 @@
         <!-- Chat keys live only on this device and cannot be re-derived by the server, so the user
              has to keep his own passphrase-protected copy. -->
         <com.google.android.material.card.MaterialCardView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="20dp"
-            app:cardBackgroundColor="@color/surface_card"
-            app:cardCornerRadius="24dp"
-            app:cardElevation="3dp"
-            app:strokeColor="@color/outline_border"
-            app:strokeWidth="1dp">
-
-            <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:padding="24dp">
+                android:layout_marginTop="20dp"
+                app:cardBackgroundColor="@color/surface_card"
+                app:cardCornerRadius="24dp"
+                app:cardElevation="3dp"
+                app:strokeColor="@color/outline_border"
+                app:strokeWidth="1dp">
+
+            <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="24dp">
 
                 <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="@string/settings_backup_title"
-                    android:textColor="@color/text_primary"
-                    android:textSize="18sp"
-                    android:textStyle="bold" />
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="@string/settings_backup_title"
+                        android:textColor="@color/text_primary"
+                        android:textSize="18sp"
+                        android:textStyle="bold"/>
 
                 <TextView
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="8dp"
-                    android:text="@string/settings_backup_explanation"
-                    android:textColor="@color/text_secondary"
-                    android:textSize="14sp" />
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:text="@string/settings_backup_explanation"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="14sp"/>
 
                 <com.google.android.material.button.MaterialButton
-                    android:id="@+id/button_backup_keys"
-                    style="@style/Widget.App.MaterialButton"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="18dp"
-                    android:text="@string/action_backup_keys" />
+                        android:id="@+id/button_backup_keys"
+                        style="@style/Widget.App.MaterialButton"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="18dp"
+                        android:text="@string/action_backup_keys"/>
 
                 <com.google.android.material.button.MaterialButton
-                    android:id="@+id/button_restore_keys"
-                    style="@style/Widget.App.MaterialButton"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="10dp"
-                    android:text="@string/action_restore_keys"
-                    app:backgroundTint="@color/badge_unread" />
+                        android:id="@+id/button_restore_keys"
+                        style="@style/Widget.App.MaterialButton"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="10dp"
+                        android:text="@string/action_restore_keys"
+                        app:backgroundTint="@color/badge_unread"/>
 
                 <!-- The device holds one KeyStore identity, published as one account's public key,
                      so switching accounts means deleting that identity and every key sealed with
                      it. Deliberately buried below the backup actions: it is irreversible. -->
                 <TextView
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="24dp"
-                    android:text="@string/settings_identity_title"
-                    android:textColor="@color/text_primary"
-                    android:textSize="18sp"
-                    android:textStyle="bold" />
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="24dp"
+                        android:text="@string/settings_identity_title"
+                        android:textColor="@color/text_primary"
+                        android:textSize="18sp"
+                        android:textStyle="bold"/>
 
                 <com.google.android.material.button.MaterialButton
-                    android:id="@+id/button_reset_identity"
-                    style="@style/Widget.App.MaterialButton"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="12dp"
-                    android:text="@string/action_reset_identity"
-                    app:backgroundTint="@color/badge_unread" />
+                        android:id="@+id/button_reset_identity"
+                        style="@style/Widget.App.MaterialButton"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        android:text="@string/action_reset_identity"
+                        app:backgroundTint="@color/badge_unread"/>
 
             </LinearLayout>
 

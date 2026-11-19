@@ -1,21 +1,17 @@
 package cz.mkdaniel.enterprisemessenger;
 
 import android.content.Context;
-
 import androidx.test.platform.app.InstrumentationRegistry;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
-
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import static org.junit.Assert.*;
 
 import android.app.Activity;
-
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
-
 import androidx.test.espresso.action.ViewActions;
 import androidx.test.espresso.matcher.ViewMatchers;
 import androidx.test.ext.junit.rules.ActivityScenarioRule;
@@ -44,16 +40,6 @@ public class ExampleInstrumentedTest {
      * This is NOT a REAL account password.
      */
     public static final String PASSWORD = "secret";
-
-    /**
-     * Context of the app under test.
-     */
-    @Test
-    public void useAppContext() {
-	Context appContext = InstrumentationRegistry.getInstrumentation().getTargetContext();
-	assertEquals("cz.mkdaniel.enterprisemessenger", appContext.getPackageName());
-    }
-
     /**
      * Use {@link ActivityScenarioRule} to create and launch the activity under test, and close it
      * after test completes. This is a replacement for {@link androidx.test.rule.ActivityTestRule}.
@@ -63,21 +49,30 @@ public class ExampleInstrumentedTest {
     @Rule
     public GrantPermissionRule mRuntimePermissionRule = GrantPermissionRule.grant(android.Manifest.permission.POST_NITIFICATIONS);
 
+    /**
+     * Context of the app under test.
+     */
+    @Test
+    public void useAppContext() {
+        Context appContext = InstrumentationRegistry.getInstrumentation().getTargetContext();
+        assertEquals("cz.mkdaniel.enterprisemessenger", appContext.getPackageName());
+    }
+
     @Test
     public void login_success() {
-	onView(withId(R.id.edittext_username)).perform(typeText(USERNAME), closeSoftKeyboard());
-	onView(withId(R.id.edittext_password)).perform(typeText(PASSWORD), closeSoftKeyboard());
-	onView(withId(R.id.button_login)).perform(click());
-	onView(withId(R.id.image_view_item_transform));
+        onView(withId(R.id.edittext_username)).perform(typeText(USERNAME), closeSoftKeyboard());
+        onView(withId(R.id.edittext_password)).perform(typeText(PASSWORD), closeSoftKeyboard());
+        onView(withId(R.id.button_login)).perform(click());
+        onView(withId(R.id.image_view_item_transform));
     }
 
     @Test
     public void register_success() {
-	onView(withId(R.id.button_go_to_register)).perform(click());
-	onView(withId(R.id.edittext_username)).perform(typeText(USERNAME), closeSoftKeyboard());
-	onView(withId(R.id.edittext_password)).perform(typeText(PASSWORD), closeSoftKeyboard());
-	onView(withId(R.id.edittext_confirm_password)).perform(typeText(PASSWORD), closeSoftKeyboard());
-	onView(withId(R.id.button_register)).perform(click());
-	onView(withId(R.id.image_view_item_transform));
+        onView(withId(R.id.button_go_to_register)).perform(click());
+        onView(withId(R.id.edittext_username)).perform(typeText(USERNAME), closeSoftKeyboard());
+        onView(withId(R.id.edittext_password)).perform(typeText(PASSWORD), closeSoftKeyboard());
+        onView(withId(R.id.edittext_confirm_password)).perform(typeText(PASSWORD), closeSoftKeyboard());
+        onView(withId(R.id.button_register)).perform(click());
+        onView(withId(R.id.image_view_item_transform));
     }
 }

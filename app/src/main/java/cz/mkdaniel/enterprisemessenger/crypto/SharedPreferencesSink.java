@@ -14,11 +14,11 @@ import java.util.Set;
  */
 public class SharedPreferencesSink implements KeyValueSink {
 
-    private static final String TAG = "SharedPreferencesSink";
-
-    /** File name of the sealed store. Kept out of the system backup (see {@code allowBackup}). */
+    /**
+     * File name of the sealed store. Kept out of the system backup (see {@code allowBackup}).
+     */
     public static final String PREF_NAME = "EnterpriseMessenger_Secrets";
-
+    private static final String TAG = "SharedPreferencesSink";
     private final SharedPreferences prefs;
 
     public SharedPreferencesSink(Context context) {

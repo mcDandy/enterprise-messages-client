@@ -1,101 +1,101 @@
 <?xml version="1.0" encoding="utf-8"?>
 <navigation xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:app="http://schemas.android.com/apk/res-auto"
-    xmlns:tools="http://schemas.android.com/tools"
-    android:id="@+id/mobile_navigation"
-    app:startDestination="@+id/nav_transform">
+            xmlns:app="http://schemas.android.com/apk/res-auto"
+            xmlns:tools="http://schemas.android.com/tools"
+            android:id="@+id/mobile_navigation"
+            app:startDestination="@+id/nav_transform">
 
     <fragment
-        android:id="@+id/nav_login"
-        android:name="cz.mkdaniel.enterprisemessenger.ui.auth.LoginFragment"
-        android:label="@string/title_login"
-        tools:layout="@layout/fragment_login">
+            android:id="@+id/nav_login"
+            android:name="cz.mkdaniel.enterprisemessenger.ui.auth.LoginFragment"
+            android:label="@string/title_login"
+            tools:layout="@layout/fragment_login">
         <action
-            android:id="@+id/action_login_to_register"
-            app:destination="@id/nav_register"
-            app:enterAnim="@anim/slide_in_right"
-            app:exitAnim="@anim/slide_out_left"
-            app:popEnterAnim="@anim/slide_in_left"
-            app:popExitAnim="@anim/slide_out_right" />
+                android:id="@+id/action_login_to_register"
+                app:destination="@id/nav_register"
+                app:enterAnim="@anim/slide_in_right"
+                app:exitAnim="@anim/slide_out_left"
+                app:popEnterAnim="@anim/slide_in_left"
+                app:popExitAnim="@anim/slide_out_right"/>
     </fragment>
 
     <fragment
-        android:id="@+id/nav_register"
-        android:name="cz.mkdaniel.enterprisemessenger.ui.auth.RegisterFragment"
-        android:label="@string/title_register"
-        tools:layout="@layout/fragment_register">
+            android:id="@+id/nav_register"
+            android:name="cz.mkdaniel.enterprisemessenger.ui.auth.RegisterFragment"
+            android:label="@string/title_register"
+            tools:layout="@layout/fragment_register">
         <action
-            android:id="@+id/action_register_to_login"
-            app:destination="@id/nav_login"
-            app:enterAnim="@anim/slide_in_left"
-            app:exitAnim="@anim/slide_out_right"
-            app:popEnterAnim="@anim/slide_in_right"
-            app:popExitAnim="@anim/slide_out_left" />
+                android:id="@+id/action_register_to_login"
+                app:destination="@id/nav_login"
+                app:enterAnim="@anim/slide_in_left"
+                app:exitAnim="@anim/slide_out_right"
+                app:popEnterAnim="@anim/slide_in_right"
+                app:popExitAnim="@anim/slide_out_left"/>
     </fragment>
 
     <fragment
-        android:id="@+id/nav_transform"
-        android:name="cz.mkdaniel.enterprisemessenger.ui.transform.TransformFragment"
-        android:label="@string/menu_transform"
-        tools:layout="@layout/fragment_transform">
+            android:id="@+id/nav_transform"
+            android:name="cz.mkdaniel.enterprisemessenger.ui.transform.TransformFragment"
+            android:label="@string/menu_transform"
+            tools:layout="@layout/fragment_transform">
         <action
-            android:id="@+id/action_transform_to_rooms"
-            app:destination="@id/nav_rooms"
-            app:enterAnim="@anim/slide_in_right"
-            app:exitAnim="@anim/slide_out_left"
-            app:popEnterAnim="@anim/slide_in_left"
-            app:popExitAnim="@anim/slide_out_right" />
+                android:id="@+id/action_transform_to_rooms"
+                app:destination="@id/nav_rooms"
+                app:enterAnim="@anim/slide_in_right"
+                app:exitAnim="@anim/slide_out_left"
+                app:popEnterAnim="@anim/slide_in_left"
+                app:popExitAnim="@anim/slide_out_right"/>
     </fragment>
 
     <fragment
-        android:id="@+id/nav_settings"
-        android:name="cz.mkdaniel.enterprisemessenger.ui.settings.SettingsFragment"
-        android:label="@string/menu_settings"
-        tools:layout="@layout/fragment_settings" />
+            android:id="@+id/nav_settings"
+            android:name="cz.mkdaniel.enterprisemessenger.ui.settings.SettingsFragment"
+            android:label="@string/menu_settings"
+            tools:layout="@layout/fragment_settings"/>
 
     <fragment
-        android:id="@+id/nav_rooms"
-        android:name="cz.mkdaniel.enterprisemessenger.ui.transform.RoomsFragment"
-        android:label="{serverName}"
-        tools:layout="@layout/fragment_rooms">
+            android:id="@+id/nav_rooms"
+            android:name="cz.mkdaniel.enterprisemessenger.ui.transform.RoomsFragment"
+            android:label="{serverName}"
+            tools:layout="@layout/fragment_rooms">
         <argument
-            android:name="serverId"
-            app:argType="long" />
+                android:name="serverId"
+                app:argType="long"/>
         <argument
-            android:name="serverName"
-            app:argType="string" />
+                android:name="serverName"
+                app:argType="string"/>
         <!-- Whether the signed-in user administers this virtual server; it decides whether the
              channel create/rename/delete affordances are offered at all. -->
         <argument
-            android:name="isAdminServer"
-            app:argType="boolean"
-            android:defaultValue="false" />
+                android:name="isAdminServer"
+                app:argType="boolean"
+                android:defaultValue="false"/>
         <action
-            android:id="@+id/action_rooms_to_messages"
-            app:destination="@id/nav_messages"
-            app:enterAnim="@anim/slide_in_right"
-            app:exitAnim="@anim/slide_out_left"
-            app:popEnterAnim="@anim/slide_in_left"
-            app:popExitAnim="@anim/slide_out_right" />
+                android:id="@+id/action_rooms_to_messages"
+                app:destination="@id/nav_messages"
+                app:enterAnim="@anim/slide_in_right"
+                app:exitAnim="@anim/slide_out_left"
+                app:popEnterAnim="@anim/slide_in_left"
+                app:popExitAnim="@anim/slide_out_right"/>
     </fragment>
 
     <fragment
-        android:id="@+id/nav_messages"
-        android:name="cz.mkdaniel.enterprisemessenger.ui.message.MessagesFragment"
-        android:label="{roomName}"
-        tools:layout="@layout/fragment_messages">
+            android:id="@+id/nav_messages"
+            android:name="cz.mkdaniel.enterprisemessenger.ui.message.MessagesFragment"
+            android:label="{roomName}"
+            tools:layout="@layout/fragment_messages">
         <!-- A long argument needs the "L" suffix: NavInflater reads a bare "0" as an integer and
              refuses the graph with "Type is long but found integer", which crashes every launch. -->
         <argument
-            android:name="serverId"
-            app:argType="long"
-            android:defaultValue="0L" />
+                android:name="serverId"
+                app:argType="long"
+                android:defaultValue="0L"/>
         <argument
-            android:name="roomId"
-            app:argType="string" />
+                android:name="roomId"
+                app:argType="string"/>
         <argument
-            android:name="roomName"
-            app:argType="string" />
+                android:name="roomName"
+                app:argType="string"/>
         <!-- No encryptionKey argument: a channel key is read from the sealed registry by channel id,
              never passed around in a Bundle or a log line. -->
     </fragment>

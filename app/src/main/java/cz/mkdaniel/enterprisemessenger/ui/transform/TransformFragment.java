@@ -10,7 +10,6 @@ import android.view.ViewGroup;
 import android.widget.ImageView;
 import android.widget.TextView;
 import android.widget.Toast;
-
 import androidx.annotation.NonNull;
 import androidx.core.content.res.ResourcesCompat;
 import androidx.fragment.app.Fragment;
@@ -21,9 +20,7 @@ import androidx.recyclerview.widget.DiffUtil;
 import androidx.recyclerview.widget.GridLayoutManager;
 import androidx.recyclerview.widget.ListAdapter;
 import androidx.recyclerview.widget.RecyclerView;
-
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
-
 import cz.mkdaniel.enterprisemessenger.R;
 import cz.mkdaniel.enterprisemessenger.databinding.FragmentTransformBinding;
 import cz.mkdaniel.enterprisemessenger.databinding.ItemTransformBinding;
@@ -74,7 +71,7 @@ public class TransformFragment extends Fragment {
 
         // 2. Exact adjustment after layout measurement (accounts for notch, insets, margins, desktop resizing).
         recyclerView.addOnLayoutChangeListener((v, left, top, right, bottom,
-                                               oldLeft, oldTop, oldRight, oldBottom) -> {
+                                                oldLeft, oldTop, oldRight, oldBottom) -> {
             int widthPx = right - left;
             if (widthPx <= 0 || minItemWidthPx <= 0) return;
 
@@ -168,7 +165,9 @@ public class TransformFragment extends Fragment {
                 .show();
     }
 
-    /** Same navigation as a tap on the tile - "switch" to this virtual server. */
+    /**
+     * Same navigation as a tap on the tile - "switch" to this virtual server.
+     */
     private void openServer(ServerViewItem item) {
         item.setUnreadCount(0);
 
@@ -220,6 +219,12 @@ public class TransformFragment extends Fragment {
     public void onDestroyView() {
         super.onDestroyView();
         binding = null;
+    }
+
+    private interface OnServerClickListener {
+        void onServerClicked(ServerViewItem server);
+
+        void onServerLongClicked(ServerViewItem item);
     }
 
     private static class TransformAdapter extends ListAdapter<ServerViewItem, TransformViewHolder> {
@@ -301,10 +306,5 @@ public class TransformFragment extends Fragment {
             textView = binding.textViewItemTransform;
             subtitleView = binding.textServerSubtitle;
         }
-    }
-
-    private interface OnServerClickListener {
-        void onServerClicked(ServerViewItem server);
-        void onServerLongClicked(ServerViewItem item);
     }
 }

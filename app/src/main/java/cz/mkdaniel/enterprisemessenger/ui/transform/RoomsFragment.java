@@ -8,7 +8,6 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.TextView;
 import android.widget.Toast;
-
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.fragment.app.Fragment;
@@ -17,7 +16,6 @@ import androidx.navigation.fragment.NavHostFragment;
 import androidx.recyclerview.widget.DiffUtil;
 import androidx.recyclerview.widget.ListAdapter;
 import androidx.recyclerview.widget.RecyclerView;
-
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 
 import java.util.List;
@@ -210,6 +208,12 @@ public class RoomsFragment extends Fragment {
         adapter = null;
     }
 
+    private interface OnRoomClickListener {
+        void onRoomClicked(Room room);
+
+        void onRoomLongClicked(Room room);
+    }
+
     private static class RoomAdapter extends ListAdapter<Room, RoomViewHolder> {
 
         @NonNull
@@ -269,11 +273,5 @@ public class RoomsFragment extends Fragment {
             super(itemView);
             roomNameText = itemView.findViewById(R.id.textview_room_name);
         }
-    }
-
-    private interface OnRoomClickListener {
-        void onRoomClicked(Room room);
-
-        void onRoomLongClicked(Room room);
     }
 }

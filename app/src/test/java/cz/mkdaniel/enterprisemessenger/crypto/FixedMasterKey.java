@@ -1,7 +1,6 @@
 package cz.mkdaniel.enterprisemessenger.crypto;
 
 import java.security.GeneralSecurityException;
-
 import javax.crypto.KeyGenerator;
 import javax.crypto.SecretKey;
 import javax.crypto.spec.SecretKeySpec;
@@ -23,7 +22,9 @@ public class FixedMasterKey implements MasterKeyProvider {
         this.key = generator.generateKey();
     }
 
-    /** A store whose master key cannot be loaded, e.g. after a keystore reset. */
+    /**
+     * A store whose master key cannot be loaded, e.g. after a keystore reset.
+     */
     public static FixedMasterKey unavailable() throws GeneralSecurityException {
         final FixedMasterKey provider = new FixedMasterKey();
         provider.unavailable = true;
@@ -31,7 +32,9 @@ public class FixedMasterKey implements MasterKeyProvider {
         return provider;
     }
 
-    /** A provider holding a different key: what the app sees after the master key was regenerated. */
+    /**
+     * A provider holding a different key: what the app sees after the master key was regenerated.
+     */
     public FixedMasterKey different() throws GeneralSecurityException {
         return new FixedMasterKey();
     }

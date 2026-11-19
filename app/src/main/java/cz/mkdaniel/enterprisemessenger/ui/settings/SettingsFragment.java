@@ -10,7 +10,6 @@ import android.view.ViewGroup;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.Toast;
-
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.annotation.NonNull;
@@ -48,17 +47,20 @@ import cz.mkdaniel.enterprisemessenger.net.ServerConnectionManager;
  */
 public class SettingsFragment extends Fragment {
 
-    /** Suggested name of the archive; the user can rename it in the system picker. */
+    /**
+     * Suggested name of the archive; the user can rename it in the system picker.
+     */
     private static final String BACKUP_FILE_NAME = "enterprise-messenger-keys.txt";
 
-    /** Mime type the picker is offered for the archive: it is armored text, by design. */
+    /**
+     * Mime type the picker is offered for the archive: it is armored text, by design.
+     */
     private static final String BACKUP_MIME_TYPE = "text/plain";
 
-    /** PBKDF2 cost makes derivation slow, so the work must never touch the main thread. */
+    /**
+     * PBKDF2 cost makes derivation slow, so the work must never touch the main thread.
+     */
     private final ExecutorService backupExecutor = Executors.newSingleThreadExecutor();
-
-    private FragmentSettingsBinding binding;
-
     private final ActivityResultLauncher<String> createDocumentLauncher =
             registerForActivityResult(new ActivityResultContracts.CreateDocument(BACKUP_MIME_TYPE),
                     uri -> {
@@ -69,7 +71,6 @@ public class SettingsFragment extends Fragment {
                         askForPassphrase(R.string.dialog_backup_passphrase_title, true,
                                 passphrase -> exportKeys(uri, passphrase));
                     });
-
     private final ActivityResultLauncher<String[]> openDocumentLauncher =
             registerForActivityResult(new ActivityResultContracts.OpenDocument(), uri -> {
                 if (uri == null) {
@@ -79,6 +80,41 @@ public class SettingsFragment extends Fragment {
                 askForPassphrase(R.string.dialog_restore_passphrase_title, false,
                         passphrase -> importKeys(uri, passphrase));
             });
+    private FragmentSettingsBinding binding;
+
+    private static char[] charsOf(EditText field) {
+        final char[] value = new char[field.getText().length()];
+        field.getText().getChars(0, value.length, value, 0);
+
+        return value;
+    }
+
+    private static void writeText(Context context, Uri target, String text) throws Exception {
+        try (final OutputStream out = context.getContentResolver().openOutputStream(target, "wt")) {
+            if (out == null) {
+                throw new IllegalStateException("The document could not be opened for writing");
+            }
+
+            out.write(text.getBytes(StandardCharsets.UTF_8));
+        }
+    }
+
+    private static String readText(Context context, Uri source) throws Exception {
+        final StringBuilder builder = new StringBuilder();
+
+        try (final BufferedReader reader = new BufferedReader(
+                new InputStreamReader(context.getContentResolver().openInputStream(source),
+                        StandardCharsets.UTF_8))) {
+            final char[] chunk = new char[4096];
+            int read;
+
+            while ((read = reader.read(chunk)) != -1) {
+                builder.append(chunk, 0, read);
+            }
+        }
+
+        return builder.toString();
+    }
 
     public View onCreateView(@NonNull LayoutInflater inflater,
                              ViewGroup container, Bundle savedInstanceState) {
@@ -135,7 +171,9 @@ public class SettingsFragment extends Fragment {
         backupExecutor.execute(() -> postToast(exportResult(context, target, passphrase)));
     }
 
-    /** Body of {@link #exportKeys}; returns the message to show the user. */
+    /**
+     * Body of {@link #exportKeys}; returns the message to show the user.
+     */
     private String exportResult(Context context, Uri target, char[] passphrase) {
         try {
             final AppSecrets secrets = AppSecrets.getInstance(context);
@@ -164,7 +202,9 @@ public class SettingsFragment extends Fragment {
         backupExecutor.execute(() -> postToast(importResult(context, source, passphrase)));
     }
 
-    /** Body of {@link #importKeys}; returns the message to show the user. */
+    /**
+     * Body of {@link #importKeys}; returns the message to show the user.
+     */
     private String importResult(Context context, Uri source, char[] passphrase) {
         try {
             final String armored = readText(context, source);
@@ -309,40 +349,6 @@ public class SettingsFragment extends Fragment {
                 | InputType.TYPE_TEXT_VARIATION_PASSWORD);
 
         return field;
-    }
-
-    private static char[] charsOf(EditText field) {
-        final char[] value = new char[field.getText().length()];
-        field.getText().getChars(0, value.length, value, 0);
-
-        return value;
-    }
-
-    private static void writeText(Context context, Uri target, String text) throws Exception {
-        try (final OutputStream out = context.getContentResolver().openOutputStream(target, "wt")) {
-            if (out == null) {
-                throw new IllegalStateException("The document could not be opened for writing");
-            }
-
-            out.write(text.getBytes(StandardCharsets.UTF_8));
-        }
-    }
-
-    private static String readText(Context context, Uri source) throws Exception {
-        final StringBuilder builder = new StringBuilder();
-
-        try (final BufferedReader reader = new BufferedReader(
-                new InputStreamReader(context.getContentResolver().openInputStream(source),
-                        StandardCharsets.UTF_8))) {
-            final char[] chunk = new char[4096];
-            int read;
-
-            while ((read = reader.read(chunk)) != -1) {
-                builder.append(chunk, 0, read);
-            }
-        }
-
-        return builder.toString();
     }
 
     private void postToast(final String message) {

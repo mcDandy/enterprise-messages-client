@@ -1,7 +1,6 @@
 package cz.mkdaniel.enterprisemessenger.ui.transform;
 
 import android.app.Application;
-
 import androidx.annotation.NonNull;
 import androidx.lifecycle.AndroidViewModel;
 import androidx.lifecycle.LiveData;
@@ -36,7 +35,9 @@ public class TransformViewModel extends AndroidViewModel {
         return mItems;
     }
 
-    /** Message to surface as a toast whenever a request fails, or {@code null} when nothing failed. */
+    /**
+     * Message to surface as a toast whenever a request fails, or {@code null} when nothing failed.
+     */
     public LiveData<String> getErrorMessage() {
         return mErrorMessage;
     }

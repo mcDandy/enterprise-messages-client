@@ -39,22 +39,30 @@ public final class AppSecrets {
         return instance;
     }
 
-    /** The sealed key/value store itself, for secrets that belong to no registry (the JWT). */
+    /**
+     * The sealed key/value store itself, for secrets that belong to no registry (the JWT).
+     */
     public SecureBlobStore blobs() {
         return blobs;
     }
 
-    /** Per-channel AES keys, sealed. */
+    /**
+     * Per-channel AES keys, sealed.
+     */
     public ChannelKeyRegistry channelKeys() {
         return channelKeys;
     }
 
-    /** ECDH secrets shared with other users, sealed. */
+    /**
+     * ECDH secrets shared with other users, sealed.
+     */
     public PeerSecretRegistry peerSecrets() {
         return peerSecrets;
     }
 
-    /** Backup of {@link #channelKeys()} to a passphrase-protected archive the user keeps. */
+    /**
+     * Backup of {@link #channelKeys()} to a passphrase-protected archive the user keeps.
+     */
     public KeyBackup keyBackup() {
         return new KeyBackup(channelKeys);
     }

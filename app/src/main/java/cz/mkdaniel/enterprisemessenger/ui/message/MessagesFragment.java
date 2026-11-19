@@ -15,7 +15,6 @@ import android.widget.EditText;
 import android.widget.ImageButton;
 import android.widget.TextView;
 import android.widget.Toast;
-
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.annotation.NonNull;
@@ -49,28 +48,14 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
 
     private static final String TAG = "MessagesFragment";
 
-    /** Android 17 (API 37) is where the Local Network Permission became mandatory for all apps. */
-    private static final int LOCAL_NETWORK_PERMISSION_API = 37;
-
-    private FragmentMessagesBinding binding;
-    private MessageAdapter adapter;
-    private ServerConnectionManager connectionManager;
-
-    private long serverId;
-    private String roomId;
-    private String roomName;
-
     /**
-     * Until when an error we were told stands in for the generic "cannot be reached" toast. A server
-     * that closes our session is reachable, and repeating the network message over the real reason
-     * sends the user looking in the wrong place. Short enough that an unrelated error reported while
-     * connected cannot silence a later, genuinely unexplained drop.
+     * Android 17 (API 37) is where the Local Network Permission became mandatory for all apps.
      */
-    private long dropWasExplainedUntil = 0L;
-
-    /** How long an explicit reason may cover a connection drop that follows it. */
+    private static final int LOCAL_NETWORK_PERMISSION_API = 37;
+    /**
+     * How long an explicit reason may cover a connection drop that follows it.
+     */
     private static final long DROP_EXPLAINED_MILLIS = 2_000L;
-
     /**
      * Android 17 (targetSdk 37) blocks every socket to a LAN address until the user grants
      * ACCESS_LOCAL_NETWORK; without it connect() just times out. Requested before connecting.
@@ -85,6 +70,19 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
                     updateInputUnderline(false);
                 }
             });
+    private FragmentMessagesBinding binding;
+    private MessageAdapter adapter;
+    private ServerConnectionManager connectionManager;
+    private long serverId;
+    private String roomId;
+    private String roomName;
+    /**
+     * Until when an error we were told stands in for the generic "cannot be reached" toast. A server
+     * that closes our session is reachable, and repeating the network message over the real reason
+     * sends the user looking in the wrong place. Short enough that an unrelated error reported while
+     * connected cannot silence a later, genuinely unexplained drop.
+     */
+    private long dropWasExplainedUntil = 0L;
 
     @Override
     public View onCreateView(@NonNull LayoutInflater inflater,

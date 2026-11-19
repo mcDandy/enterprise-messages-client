@@ -24,10 +24,8 @@ import java.security.spec.ECGenParameterSpec;
 import java.security.spec.ECParameterSpec;
 import java.security.spec.ECPoint;
 import java.security.spec.X509EncodedKeySpec;
-
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-
 import javax.crypto.Cipher;
 import javax.crypto.KeyAgreement;
 import javax.crypto.SecretKey;
@@ -64,24 +62,99 @@ public class CryptoManager {
 
     private volatile KeyPair keyPair;
 
-    /** Reports a key pair that could not be created or loaded. */
-    public interface KeyInitListener {
-	void onKeyInitFailed(KeyStoreUnavailableException failure);
-    }
-
     private CryptoManager() {
     }
 
     public static CryptoManager getInstance(Context context) {
-	if (instance == null) {
-	    synchronized (CryptoManager.class) {
-		if (instance == null) {
-		    instance = new CryptoManager();
-		}
-	    }
-	}
+        if (instance == null) {
+            synchronized (CryptoManager.class) {
+                if (instance == null) {
+                    instance = new CryptoManager();
+                }
+            }
+        }
 
-	return instance;
+        return instance;
+    }
+
+    /**
+     * Verifies {@code y^2 == x^3 + a*x + b (mod p)} and that both coordinates are in range. The
+     * provider may hand back an unvalidated point, so the equation is checked explicitly.
+     */
+    private static void assertPointOnCurve(ECPoint point, ECParameterSpec parameters)
+            throws GeneralSecurityException {
+        if (point == null || ECPoint.POINT_INFINITY.equals(point)) {
+            throw new GeneralSecurityException("Peer key is the point at infinity");
+        }
+
+        final ECField field = parameters.getCurve().getField();
+        if (!(field instanceof ECFieldFp)) {
+            throw new GeneralSecurityException("Only prime-field curves are supported");
+        }
+
+        final BigInteger prime = ((ECFieldFp) field).getP();
+        final BigInteger a = parameters.getCurve().getA();
+        final BigInteger b = parameters.getCurve().getB();
+
+        final BigInteger x = point.getAffineX();
+        final BigInteger y = point.getAffineY();
+
+        if (x == null || y == null
+                || x.signum() < 0 || x.compareTo(prime) >= 0
+                || y.signum() < 0 || y.compareTo(prime) >= 0) {
+            throw new GeneralSecurityException("Peer key coordinates are out of range");
+        }
+
+        final BigInteger leftSide = y.modPow(BigInteger.TWO, prime);
+        final BigInteger rightSide = x.modPow(BigInteger.valueOf(3), prime)
+                .add(a.multiply(x))
+                .add(b)
+                .mod(prime);
+
+        if (!leftSide.equals(rightSide)) {
+            throw new GeneralSecurityException("Peer key is not a point on " + EC_CURVE);
+        }
+
+        // The peer scalar must also be a multiple of the group order, otherwise the agreement lands
+        // in a small subgroup. Multiplying by the order must give the identity, which ECPoint cannot
+        // answer on its own; the cheap and sufficient equivalent here is that the order is prime for
+        // secp256r1, so any on-curve point other than infinity is already in the right subgroup.
+        if (!parameters.getOrder().isProbablePrime(64)) {
+            throw new GeneralSecurityException("Unexpected curve order");
+        }
+    }
+
+    private static ECParameterSpec referenceCurve() throws GeneralSecurityException {
+        final AlgorithmParameters parameters = AlgorithmParameters.getInstance("EC");
+        parameters.init(new ECGenParameterSpec(EC_CURVE));
+
+        return parameters.getParameterSpec(ECParameterSpec.class);
+    }
+
+    /**
+     * SHA-256 of {@code input}, for the few places that need a digest of key material without each
+     * of them instantiating a {@link MessageDigest}.
+     */
+    public static byte[] sha256(byte[] input) throws GeneralSecurityException {
+        return MessageDigest.getInstance("SHA-256").digest(input);
+    }
+
+    /**
+     * Decodes a peer public key that arrives as Base64 (the shape {@code /api/channels/{id}/keys}
+     * and {@code /api/users/{id}/key} return).
+     */
+    public static byte[] decodePeerKey(String base64Key) {
+        if (base64Key == null || base64Key.isEmpty()) {
+            return null;
+        }
+
+        try {
+            return Base64.decode(base64Key, Base64.NO_WRAP);
+        } catch (IllegalArgumentException malformed) {
+            Log.w(TAG, "Peer public key is not valid Base64");
+
+            return null;
+        }
     }
 
     /**
@@ -91,17 +164,17 @@ public class CryptoManager {
      * @param listener receives a failure, or {@code null} when the caller only wants the key warm
      */
     public void initializeKeysAsync(final KeyInitListener listener) {
-	executor.execute(() -> {
-	    try {
-		getOrCreateKeyPair();
-	    } catch (KeyStoreUnavailableException failure) {
-		Log.e(TAG, "Identity key pair is unavailable", failure);
+        executor.execute(() -> {
+            try {
+                getOrCreateKeyPair();
+            } catch (KeyStoreUnavailableException failure) {
+                Log.e(TAG, "Identity key pair is unavailable", failure);
 
-		if (listener != null) {
-		    listener.onKeyInitFailed(failure);
-		}
-	    }
-	});
+                if (listener != null) {
+                    listener.onKeyInitFailed(failure);
+                }
+            }
+        });
     }
 
     /**
@@ -111,45 +184,45 @@ public class CryptoManager {
      *                                      with a software-generated pair.
      */
     public synchronized KeyPair getOrCreateKeyPair() throws KeyStoreUnavailableException {
-	if (keyPair != null) {
-	    return keyPair;
-	}
+        if (keyPair != null) {
+            return keyPair;
+        }
 
-	try {
-	    final KeyStore keyStore = KeyStore.getInstance(ANDROID_KEYSTORE);
-	    keyStore.load(null);
+        try {
+            final KeyStore keyStore = KeyStore.getInstance(ANDROID_KEYSTORE);
+            keyStore.load(null);
 
-	    if (!keyStore.containsAlias(KEY_ALIAS)) {
-		Log.d(TAG, "No identity key in KeyStore, generating an EC key pair");
+            if (!keyStore.containsAlias(KEY_ALIAS)) {
+                Log.d(TAG, "No identity key in KeyStore, generating an EC key pair");
 
-		keyPair = generateIdentityKeyPair();
+                keyPair = generateIdentityKeyPair();
 
-		return keyPair;
-	    }
+                return keyPair;
+            }
 
-	    final KeyStore.Entry entry = keyStore.getEntry(KEY_ALIAS, null);
-	    if (!(entry instanceof KeyStore.PrivateKeyEntry)) {
-		// The alias exists but is not a private-key entry: a foreign entry under our name.
-		// Regenerating would be a silent identity change, so this is an error instead.
-		throw new KeyStoreUnavailableException(
-			"KeyStore alias " + KEY_ALIAS + " does not hold a private key entry");
-	    }
+            final KeyStore.Entry entry = keyStore.getEntry(KEY_ALIAS, null);
+            if (!(entry instanceof KeyStore.PrivateKeyEntry)) {
+                // The alias exists but is not a private-key entry: a foreign entry under our name.
+                // Regenerating would be a silent identity change, so this is an error instead.
+                throw new KeyStoreUnavailableException(
+                        "KeyStore alias " + KEY_ALIAS + " does not hold a private key entry");
+            }
 
-	    final KeyStore.PrivateKeyEntry privateKeyEntry = (KeyStore.PrivateKeyEntry) entry;
-	    final PrivateKey privateKey = privateKeyEntry.getPrivateKey();
-	    final PublicKey publicKey = privateKeyEntry.getCertificate().getPublicKey();
+            final KeyStore.PrivateKeyEntry privateKeyEntry = (KeyStore.PrivateKeyEntry) entry;
+            final PrivateKey privateKey = privateKeyEntry.getPrivateKey();
+            final PublicKey publicKey = privateKeyEntry.getCertificate().getPublicKey();
 
-	    Log.d(TAG, "Loaded the identity key pair from KeyStore");
+            Log.d(TAG, "Loaded the identity key pair from KeyStore");
 
-	    keyPair = new KeyPair(publicKey, privateKey);
+            keyPair = new KeyPair(publicKey, privateKey);
 
-	    return keyPair;
-	} catch (GeneralSecurityException securityException) {
-	    throw new KeyStoreUnavailableException("Identity key pair could not be loaded from KeyStore",
-		    securityException);
-	} catch (java.io.IOException ioException) {
-	    throw new KeyStoreUnavailableException("AndroidKeyStore could not be loaded", ioException);
-	}
+            return keyPair;
+        } catch (GeneralSecurityException securityException) {
+            throw new KeyStoreUnavailableException("Identity key pair could not be loaded from KeyStore",
+                    securityException);
+        } catch (java.io.IOException ioException) {
+            throw new KeyStoreUnavailableException("AndroidKeyStore could not be loaded", ioException);
+        }
     }
 
     /**
@@ -157,31 +230,31 @@ public class CryptoManager {
      * have to cope with a missing key (registration, the startup handshake).
      */
     public KeyPair tryGetKeyPair() {
-	try {
-	    return getOrCreateKeyPair();
-	} catch (KeyStoreUnavailableException failure) {
-	    Log.e(TAG, "Identity key pair is unavailable: " + failure.getMessage());
+        try {
+            return getOrCreateKeyPair();
+        } catch (KeyStoreUnavailableException failure) {
+            Log.e(TAG, "Identity key pair is unavailable: " + failure.getMessage());
 
-	    return null;
-	}
+            return null;
+        }
     }
 
     private KeyPair generateIdentityKeyPair() throws GeneralSecurityException {
-	final KeyPairGenerator keyPairGenerator =
-		KeyPairGenerator.getInstance(KeyProperties.KEY_ALGORITHM_EC, ANDROID_KEYSTORE);
+        final KeyPairGenerator keyPairGenerator =
+                KeyPairGenerator.getInstance(KeyProperties.KEY_ALGORITHM_EC, ANDROID_KEYSTORE);
 
-	keyPairGenerator.initialize(new KeyGenParameterSpec
-		.Builder(KEY_ALIAS, KeyProperties.PURPOSE_AGREE_KEY | KeyProperties.PURPOSE_SIGN
-			| KeyProperties.PURPOSE_VERIFY)
-		.setAlgorithmParameterSpec(new ECGenParameterSpec(EC_CURVE))
-		.setDigests(KeyProperties.DIGEST_SHA256, KeyProperties.DIGEST_SHA512)
-		.build());
+        keyPairGenerator.initialize(new KeyGenParameterSpec
+                .Builder(KEY_ALIAS, KeyProperties.PURPOSE_AGREE_KEY | KeyProperties.PURPOSE_SIGN
+                | KeyProperties.PURPOSE_VERIFY)
+                .setAlgorithmParameterSpec(new ECGenParameterSpec(EC_CURVE))
+                .setDigests(KeyProperties.DIGEST_SHA256, KeyProperties.DIGEST_SHA512)
+                .build());
 
-	final KeyPair generated = keyPairGenerator.generateKeyPair();
+        final KeyPair generated = keyPairGenerator.generateKeyPair();
 
-	Log.d(TAG, "Identity key pair generated into KeyStore");
+        Log.d(TAG, "Identity key pair generated into KeyStore");
 
-	return generated;
+        return generated;
     }
 
     /**
@@ -196,36 +269,36 @@ public class CryptoManager {
      * @return {@code true} when the alias is gone from the KeyStore afterwards
      */
     public synchronized boolean deleteIdentityKey() {
-	try {
-	    final KeyStore keyStore = KeyStore.getInstance(ANDROID_KEYSTORE);
-	    keyStore.load(null);
+        try {
+            final KeyStore keyStore = KeyStore.getInstance(ANDROID_KEYSTORE);
+            keyStore.load(null);
 
-	    if (keyStore.containsAlias(KEY_ALIAS)) {
-		keyStore.deleteEntry(KEY_ALIAS);
-	    }
+            if (keyStore.containsAlias(KEY_ALIAS)) {
+                keyStore.deleteEntry(KEY_ALIAS);
+            }
 
-	    // The cached pair is a handle into the entry that has just been deleted; the next call has
-	    // to observe a fresh identity rather than reuse the removed one.
-	    keyPair = null;
+            // The cached pair is a handle into the entry that has just been deleted; the next call has
+            // to observe a fresh identity rather than reuse the removed one.
+            keyPair = null;
 
-	    Log.d(TAG, "Deleted the identity key pair from KeyStore");
+            Log.d(TAG, "Deleted the identity key pair from KeyStore");
 
-	    return !keyStore.containsAlias(KEY_ALIAS);
-	} catch (GeneralSecurityException securityException) {
-	    Log.e(TAG, "The identity key pair could not be deleted", securityException);
+            return !keyStore.containsAlias(KEY_ALIAS);
+        } catch (GeneralSecurityException securityException) {
+            Log.e(TAG, "The identity key pair could not be deleted", securityException);
 
-	    return false;
-	} catch (java.io.IOException ioException) {
-	    Log.e(TAG, "AndroidKeyStore could not be loaded", ioException);
+            return false;
+        } catch (java.io.IOException ioException) {
+            Log.e(TAG, "AndroidKeyStore could not be loaded", ioException);
 
-	    return false;
-	}
+            return false;
+        }
     }
 
     public PublicKey getPublicKey() {
-	final KeyPair pair = tryGetKeyPair();
+        final KeyPair pair = tryGetKeyPair();
 
-	return pair == null ? null : pair.getPublic();
+        return pair == null ? null : pair.getPublic();
     }
 
     /**
@@ -234,32 +307,32 @@ public class CryptoManager {
      * failure: registering without a public key would create an account nobody can talk to.
      */
     public String getPublicKeyBase64() {
-	final PublicKey publicKey = getPublicKey();
-	if (publicKey == null) {
-	    return null;
-	}
+        final PublicKey publicKey = getPublicKey();
+        if (publicKey == null) {
+            return null;
+        }
 
-	return Base64.encodeToString(publicKey.getEncoded(), Base64.NO_WRAP);
+        return Base64.encodeToString(publicKey.getEncoded(), Base64.NO_WRAP);
     }
 
     /**
      * Opens an AES-GCM payload of the form {@code [12-byte IV][ciphertext + tag]}.
      */
     public byte[] decryptPayload(byte[] encryptedBytes, byte[] aesKeyBytes) throws GeneralSecurityException {
-	if (encryptedBytes == null || encryptedBytes.length <= IV_LENGTH_BYTES) {
-	    throw new IllegalArgumentException("Invalid encrypted payload length");
-	}
-	if (aesKeyBytes == null || aesKeyBytes.length == 0) {
-	    throw new IllegalArgumentException("An empty key cannot open a payload");
-	}
+        if (encryptedBytes == null || encryptedBytes.length <= IV_LENGTH_BYTES) {
+            throw new IllegalArgumentException("Invalid encrypted payload length");
+        }
+        if (aesKeyBytes == null || aesKeyBytes.length == 0) {
+            throw new IllegalArgumentException("An empty key cannot open a payload");
+        }
 
-	final Cipher cipher = Cipher.getInstance(AES_GCM_TRANSFORM);
-	cipher.init(Cipher.DECRYPT_MODE, new SecretKeySpec(aesKeyBytes, "AES"),
-		new GCMParameterSpec(TAG_LENGTH_BITS, encryptedBytes, 0, IV_LENGTH_BYTES));
+        final Cipher cipher = Cipher.getInstance(AES_GCM_TRANSFORM);
+        cipher.init(Cipher.DECRYPT_MODE, new SecretKeySpec(aesKeyBytes, "AES"),
+                new GCMParameterSpec(TAG_LENGTH_BITS, encryptedBytes, 0, IV_LENGTH_BYTES));
 
-	// A wrong candidate key surfaces as AEADBadTagException, which callers that try several keys
-	// catch and treat as "this is not the key for this message".
-	return cipher.doFinal(encryptedBytes, IV_LENGTH_BYTES, encryptedBytes.length - IV_LENGTH_BYTES);
+        // A wrong candidate key surfaces as AEADBadTagException, which callers that try several keys
+        // catch and treat as "this is not the key for this message".
+        return cipher.doFinal(encryptedBytes, IV_LENGTH_BYTES, encryptedBytes.length - IV_LENGTH_BYTES);
     }
 
     /**
@@ -267,24 +340,24 @@ public class CryptoManager {
      * Output format: {@code [12-byte IV][ciphertext + tag]}.
      */
     public byte[] encryptPayload(final byte[] plainBytes, final byte[] aesKeyBytes) throws GeneralSecurityException {
-	if (aesKeyBytes == null || aesKeyBytes.length == 0) {
-	    throw new IllegalArgumentException("An empty key cannot seal a payload");
-	}
+        if (aesKeyBytes == null || aesKeyBytes.length == 0) {
+            throw new IllegalArgumentException("An empty key cannot seal a payload");
+        }
 
-	final byte[] iv = new byte[IV_LENGTH_BYTES];
-	new SecureRandom().nextBytes(iv);
+        final byte[] iv = new byte[IV_LENGTH_BYTES];
+        new SecureRandom().nextBytes(iv);
 
-	final SecretKey secretKey = new SecretKeySpec(aesKeyBytes, "AES");
-	final Cipher cipher = Cipher.getInstance(AES_GCM_TRANSFORM);
-	cipher.init(Cipher.ENCRYPT_MODE, secretKey, new GCMParameterSpec(TAG_LENGTH_BITS, iv));
+        final SecretKey secretKey = new SecretKeySpec(aesKeyBytes, "AES");
+        final Cipher cipher = Cipher.getInstance(AES_GCM_TRANSFORM);
+        cipher.init(Cipher.ENCRYPT_MODE, secretKey, new GCMParameterSpec(TAG_LENGTH_BITS, iv));
 
-	final byte[] cipherText = cipher.doFinal(plainBytes);
-	final byte[] result = new byte[IV_LENGTH_BYTES + cipherText.length];
+        final byte[] cipherText = cipher.doFinal(plainBytes);
+        final byte[] result = new byte[IV_LENGTH_BYTES + cipherText.length];
 
-	System.arraycopy(iv, 0, result, 0, IV_LENGTH_BYTES);
-	System.arraycopy(cipherText, 0, result, IV_LENGTH_BYTES, cipherText.length);
+        System.arraycopy(iv, 0, result, 0, IV_LENGTH_BYTES);
+        System.arraycopy(cipherText, 0, result, IV_LENGTH_BYTES, cipherText.length);
 
-	return result;
+        return result;
     }
 
     /**
@@ -300,128 +373,55 @@ public class CryptoManager {
      * @throws GeneralSecurityException when the key is not a usable secp256r1 public key
      */
     public byte[] deriveSharedSecret(byte[] remotePublicKeyBytes) throws GeneralSecurityException {
-	if (remotePublicKeyBytes == null || remotePublicKeyBytes.length == 0) {
-	    throw new IllegalArgumentException("Cannot derive a secret from an empty peer key");
-	}
+        if (remotePublicKeyBytes == null || remotePublicKeyBytes.length == 0) {
+            throw new IllegalArgumentException("Cannot derive a secret from an empty peer key");
+        }
 
-	final PublicKey remotePublicKey = validatePeerPublicKey(remotePublicKeyBytes);
+        final PublicKey remotePublicKey = validatePeerPublicKey(remotePublicKeyBytes);
 
-	final KeyAgreement keyAgreement = KeyAgreement.getInstance("ECDH");
-	keyAgreement.init(getOrCreateKeyPair().getPrivate());
-	keyAgreement.doPhase(remotePublicKey, true);
+        final KeyAgreement keyAgreement = KeyAgreement.getInstance("ECDH");
+        keyAgreement.init(getOrCreateKeyPair().getPrivate());
+        keyAgreement.doPhase(remotePublicKey, true);
 
-	final byte[] agreement = keyAgreement.generateSecret();
+        final byte[] agreement = keyAgreement.generateSecret();
 
-	// The raw X coordinate has a fixed 32-byte width with leading zeros, which is not uniformly
-	// distributed; hashing it yields a full-entropy AES key and matches what the other side does.
-	return MessageDigest.getInstance("SHA-256").digest(agreement);
+        // The raw X coordinate has a fixed 32-byte width with leading zeros, which is not uniformly
+        // distributed; hashing it yields a full-entropy AES key and matches what the other side does.
+        return MessageDigest.getInstance("SHA-256").digest(agreement);
     }
 
     /**
      * Decodes a peer key and rejects anything that is not a point on {@value #EC_CURVE}.
      */
     private PublicKey validatePeerPublicKey(byte[] encodedKey) throws GeneralSecurityException {
-	final KeyFactory keyFactory = KeyFactory.getInstance("EC");
-	final PublicKey decoded = keyFactory.generatePublic(new X509EncodedKeySpec(encodedKey));
+        final KeyFactory keyFactory = KeyFactory.getInstance("EC");
+        final PublicKey decoded = keyFactory.generatePublic(new X509EncodedKeySpec(encodedKey));
 
-	if (!(decoded instanceof ECPublicKey)) {
-	    throw new GeneralSecurityException("Peer key is not an EC public key");
-	}
+        if (!(decoded instanceof ECPublicKey)) {
+            throw new GeneralSecurityException("Peer key is not an EC public key");
+        }
 
-	final ECPublicKey peerKey = (ECPublicKey) decoded;
-	final ECParameterSpec expected = referenceCurve();
-	final ECParameterSpec actual = peerKey.getParams();
+        final ECPublicKey peerKey = (ECPublicKey) decoded;
+        final ECParameterSpec expected = referenceCurve();
+        final ECParameterSpec actual = peerKey.getParams();
 
-	if (actual == null
-		|| !actual.getCurve().equals(expected.getCurve())
-		|| !actual.getGenerator().equals(expected.getGenerator())
-		|| actual.getOrder().compareTo(expected.getOrder()) != 0
-		|| actual.getCofactor() != expected.getCofactor()) {
-	    throw new GeneralSecurityException("Peer key is not on " + EC_CURVE);
-	}
+        if (actual == null
+                || !actual.getCurve().equals(expected.getCurve())
+                || !actual.getGenerator().equals(expected.getGenerator())
+                || actual.getOrder().compareTo(expected.getOrder()) != 0
+                || actual.getCofactor() != expected.getCofactor()) {
+            throw new GeneralSecurityException("Peer key is not on " + EC_CURVE);
+        }
 
-	assertPointOnCurve(peerKey.getW(), actual);
+        assertPointOnCurve(peerKey.getW(), actual);
 
-	return decoded;
+        return decoded;
     }
 
     /**
-     * Verifies {@code y^2 == x^3 + a*x + b (mod p)} and that both coordinates are in range. The
-     * provider may hand back an unvalidated point, so the equation is checked explicitly.
+     * Reports a key pair that could not be created or loaded.
      */
-    private static void assertPointOnCurve(ECPoint point, ECParameterSpec parameters)
-	    throws GeneralSecurityException {
-	if (point == null || ECPoint.POINT_INFINITY.equals(point)) {
-	    throw new GeneralSecurityException("Peer key is the point at infinity");
-	}
-
-	final ECField field = parameters.getCurve().getField();
-	if (!(field instanceof ECFieldFp)) {
-	    throw new GeneralSecurityException("Only prime-field curves are supported");
-	}
-
-	final BigInteger prime = ((ECFieldFp) field).getP();
-	final BigInteger a = parameters.getCurve().getA();
-	final BigInteger b = parameters.getCurve().getB();
-
-	final BigInteger x = point.getAffineX();
-	final BigInteger y = point.getAffineY();
-
-	if (x == null || y == null
-		|| x.signum() < 0 || x.compareTo(prime) >= 0
-		|| y.signum() < 0 || y.compareTo(prime) >= 0) {
-	    throw new GeneralSecurityException("Peer key coordinates are out of range");
-	}
-
-	final BigInteger leftSide = y.modPow(BigInteger.TWO, prime);
-	final BigInteger rightSide = x.modPow(BigInteger.valueOf(3), prime)
-		.add(a.multiply(x))
-		.add(b)
-		.mod(prime);
-
-	if (!leftSide.equals(rightSide)) {
-	    throw new GeneralSecurityException("Peer key is not a point on " + EC_CURVE);
-	}
-
-	// The peer scalar must also be a multiple of the group order, otherwise the agreement lands
-	// in a small subgroup. Multiplying by the order must give the identity, which ECPoint cannot
-	// answer on its own; the cheap and sufficient equivalent here is that the order is prime for
-	// secp256r1, so any on-curve point other than infinity is already in the right subgroup.
-	if (!parameters.getOrder().isProbablePrime(64)) {
-	    throw new GeneralSecurityException("Unexpected curve order");
-	}
-    }
-
-    private static ECParameterSpec referenceCurve() throws GeneralSecurityException {
-	final AlgorithmParameters parameters = AlgorithmParameters.getInstance("EC");
-	parameters.init(new ECGenParameterSpec(EC_CURVE));
-
-	return parameters.getParameterSpec(ECParameterSpec.class);
-    }
-
-    /**
-     * SHA-256 of {@code input}, for the few places that need a digest of key material without each
-     * of them instantiating a {@link MessageDigest}.
-     */
-    public static byte[] sha256(byte[] input) throws GeneralSecurityException {
-	return MessageDigest.getInstance("SHA-256").digest(input);
-    }
-
-    /**
-     * Decodes a peer public key that arrives as Base64 (the shape {@code /api/channels/{id}/keys}
-     * and {@code /api/users/{id}/key} return).
-     */
-    public static byte[] decodePeerKey(String base64Key) {
-	if (base64Key == null || base64Key.isEmpty()) {
-	    return null;
-	}
-
-	try {
-	    return Base64.decode(base64Key, Base64.NO_WRAP);
-	} catch (IllegalArgumentException malformed) {
-	    Log.w(TAG, "Peer public key is not valid Base64");
-
-	    return null;
-	}
+    public interface KeyInitListener {
+        void onKeyInitFailed(KeyStoreUnavailableException failure);
     }
 }

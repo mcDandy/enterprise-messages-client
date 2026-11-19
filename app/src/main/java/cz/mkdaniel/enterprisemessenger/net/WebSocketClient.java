@@ -1,7 +1,6 @@
 package cz.mkdaniel.enterprisemessenger.net;
 
 import android.util.Log;
-
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
@@ -9,11 +8,8 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
-
 import java.util.Arrays;
-
 import java.nio.ByteBuffer;
-
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import okhttp3.OkHttpClient;
@@ -21,9 +17,7 @@ import okhttp3.Request;
 import okhttp3.Response;
 import okhttp3.WebSocket;
 import okhttp3.WebSocketListener;
-
 import okio.ByteString;
-
 import cz.mkdaniel.enterprisemessenger.crypto.CryptoManager;
 
 /**
@@ -36,25 +30,28 @@ import cz.mkdaniel.enterprisemessenger.crypto.CryptoManager;
  * and automatic reconnection logic.
  */
 public class WebSocketClient {
+    /**
+     * Close code of {@code CloseStatus.SERVER_ERROR}: the peer failed while handling the session.
+     */
+    public static final int CLOSE_CODE_SERVER_ERROR = 1011;
     private static final String TAG = "WebSocketClient";
     private static final int DEFAULT_TIMEOUT_SECONDS = 10;
     private static final int CONNECT_TIMEOUT_SECONDS = 10;
     private static final int INITIAL_RECONNECT_DELAY_MS = 10000;
     private static final int MAX_RECONNECT_DELAY_MS = 10000;
     private static final int PING_INTERVAL_SECONDS = 1000;
-
-    /** A socket that died sooner than this never carried anything: the peer refused us outright. */
+    /**
+     * A socket that died sooner than this never carried anything: the peer refused us outright.
+     */
     private static final long INSTANT_CLOSE_MILLIS = 5_000L;
-
-    /** That many instant closures in a row means the refusal is not going to fix itself soon. */
+    /**
+     * That many instant closures in a row means the refusal is not going to fix itself soon.
+     */
     private static final int RAPID_FAILURE_LIMIT = 3;
-
-    /** The patient retry interval once the peer has refused us {@value #RAPID_FAILURE_LIMIT} times. */
+    /**
+     * The patient retry interval once the peer has refused us {@value #RAPID_FAILURE_LIMIT} times.
+     */
     private static final long PATIENT_RECONNECT_DELAY_MS = 60_000L;
-
-    /** Close code of {@code CloseStatus.SERVER_ERROR}: the peer failed while handling the session. */
-    public static final int CLOSE_CODE_SERVER_ERROR = 1011;
-
     /**
      * Path of the binary WebSocket endpoint on the server (see server's {@code WebSocketConfig}).
      * The JWT is sent as the {@code token} query parameter (server's {@code JwtHandshakeInterceptor}).
@@ -64,9 +61,8 @@ public class WebSocketClient {
     private final AtomicBoolean shouldConnect = new AtomicBoolean(false);
 
     private final OkHttpClient okHttpClient;
-    private String currentUrl;
     private final CryptoManager cryptoManager;
-
+    private String currentUrl;
     private WebSocket webSocket;
     private WebSocketClientListener listener;
     private String token = "Invalid";
@@ -76,40 +72,18 @@ public class WebSocketClient {
     private long reconnectDelayMs = 1000;
     private ScheduledFuture<?> reconnectTask;
 
-    /** When the current socket opened, to recognise a closure that came moments later. */
+    /**
+     * When the current socket opened, to recognise a closure that came moments later.
+     */
     private long connectedAtNanos = 0L;
 
-    /** Consecutive connections the peer killed almost immediately after opening them. */
+    /**
+     * Consecutive connections the peer killed almost immediately after opening them.
+     */
     private int rapidFailures = 0;
 
-    public interface WebSocketClientListener {
-        void onConnected(String url);
-        void onPacketReceived(Packet packet);
-        void onDisconnected();
-
-        /**
-         * A disconnect that knows why. {@code code} is the close code the peer sent (OkHttp reports
-         * 1005 when it sent none), which is the difference between "the network is down" and "the
-         * server closed our session" - the second one never heals by redialling at full speed.
-         */
-        default void onDisconnected(int code, String reason) {
-            onDisconnected();
-        }
-
-        void onError(Throwable t);
-        default void onAuthError(int statusCode, String message) {}
-    }
-
-    /**
-     * Supplies a fresh JWT before every automatic reconnect (the old one may have expired).
-     * Called on a background thread, may block.
-     */
-    public interface TokenProvider {
-        String fetchToken();
-    }
-
     public WebSocketClient(final CryptoManager cryptoManager, final String initialWsUrl) {
-	currentUrl = initialWsUrl;
+        currentUrl = initialWsUrl;
         this.cryptoManager = cryptoManager;
         this.okHttpClient = createOkHttpClient();
     }
@@ -129,6 +103,10 @@ public class WebSocketClient {
                 // Send PING frames every 15s to keep the TCP socket alive against NAT/router timeouts
                 .pingInterval(PING_INTERVAL_SECONDS, TimeUnit.SECONDS)
                 .build();
+    }
+
+    private static String redactToken(String url) {
+        return url == null ? null : url.replaceAll("token=[^&]*", "token=***");
     }
 
     public void setListener(WebSocketClientListener listener) {
@@ -164,7 +142,7 @@ public class WebSocketClient {
 
     /**
      * Asynchronously connects to the remote WebSocket URL.
-     *
+     * <p>
      * Close existing connection, if any.
      */
     public void connectAsync(final String url, final String token) {
@@ -193,12 +171,12 @@ public class WebSocketClient {
                 Log.d(TAG, "Connecting to WebSocket URL: " + redactToken(currentUrl));
 
                 final var request = new Request
-		    .Builder()
-		    .url(currentUrl)
-		    .addHeader("Authorization", String.format("Bearer %s", this.token))
-		    .addHeader("Upgrade", "websocket")
-		    .addHeader("Connection", "Upgrade")
-		    .build();
+                        .Builder()
+                        .url(currentUrl)
+                        .addHeader("Authorization", String.format("Bearer %s", this.token))
+                        .addHeader("Upgrade", "websocket")
+                        .addHeader("Connection", "Upgrade")
+                        .build();
 
                 webSocket = okHttpClient.newWebSocket(request, createWebSocketListener());
             } catch (Exception e) {
@@ -406,8 +384,8 @@ public class WebSocketClient {
             try {
                 byte[] rawPacketBytes = packet.serialize();
 
-		// The bytes are deliberately not dumped: they are the ciphertext of a user's message (and,
-		// for key unicasts, of a key).
+                // The bytes are deliberately not dumped: they are the ciphertext of a user's message (and,
+                // for key unicasts, of a key).
 
                 if (webSocket != null) {
                     boolean success = webSocket.send(ByteString.of(rawPacketBytes));
@@ -426,7 +404,6 @@ public class WebSocketClient {
             }
         });
     }
-
 
     /**
      * Closes the WebSocket connection and disables automatic reconnection.
@@ -454,7 +431,33 @@ public class WebSocketClient {
         }
     }
 
-    private static String redactToken(String url) {
-        return url == null ? null : url.replaceAll("token=[^&]*", "token=***");
+    public interface WebSocketClientListener {
+        void onConnected(String url);
+
+        void onPacketReceived(Packet packet);
+
+        void onDisconnected();
+
+        /**
+         * A disconnect that knows why. {@code code} is the close code the peer sent (OkHttp reports
+         * 1005 when it sent none), which is the difference between "the network is down" and "the
+         * server closed our session" - the second one never heals by redialling at full speed.
+         */
+        default void onDisconnected(int code, String reason) {
+            onDisconnected();
+        }
+
+        void onError(Throwable t);
+
+        default void onAuthError(int statusCode, String message) {
+        }
+    }
+
+    /**
+     * Supplies a fresh JWT before every automatic reconnect (the old one may have expired).
+     * Called on a background thread, may block.
+     */
+    public interface TokenProvider {
+        String fetchToken();
     }
 }

@@ -24,21 +24,21 @@ import java.util.UUID;
  */
 public class ChannelKeyRegistry {
 
-    private static final String TAG = "ChannelKeyRegistry";
-
-    /** Sink key prefix of the current channel keys, e.g. {@code channel_42}. */
+    /**
+     * Sink key prefix of the current channel keys, e.g. {@code channel_42}.
+     */
     public static final String KEY_PREFIX = "channel_";
-
-    /** Suffix of the per-channel readable-key history, e.g. {@code channel_42_hist}. */
+    /**
+     * Suffix of the per-channel readable-key history, e.g. {@code channel_42_hist}.
+     */
     public static final String HISTORY_SUFFIX = "_hist";
-
     /**
      * How many superseded keys per channel stay readable. Rotation is rare (only when a member
      * joins the channel fresh or re-keys it), so eight versions cover a long history of them while
      * bounding both the sealed blob and the number of GCM attempts per incoming message.
      */
     static final int MAX_HISTORY = 8;
-
+    private static final String TAG = "ChannelKeyRegistry";
     private static final int KEY_LENGTH_BYTES = 32;
     private static final int UUID_LENGTH_BYTES = 16;
 
@@ -49,49 +49,51 @@ public class ChannelKeyRegistry {
         this.blobs = blobs;
     }
 
-    /** A key plus the version it is known by. */
-    public static final class KeyVersion {
-        private final UUID version;
-        private final byte[] key;
+    private static KeyVersion toKeyVersion(byte[] source, int offset) {
+        final long mostSignificant = readLong(source, offset);
+        final long leastSignificant = readLong(source, offset + Long.BYTES);
 
-        public KeyVersion(UUID version, byte[] key) {
-            this.version = version;
-            this.key = key;
-        }
+        final byte[] key = new byte[KEY_LENGTH_BYTES];
+        System.arraycopy(source, offset + UUID_LENGTH_BYTES, key, 0, KEY_LENGTH_BYTES);
 
-        public UUID version() {
-            return version;
-        }
+        return new KeyVersion(new UUID(mostSignificant, leastSignificant), key);
+    }
 
-        public byte[] key() {
-            return key;
+    private static void writeUuid(UUID uuid, byte[] target, int offset) {
+        writeLong(uuid.getMostSignificantBits(), target, offset);
+        writeLong(uuid.getLeastSignificantBits(), target, offset + Long.BYTES);
+    }
+
+    private static void writeLong(long value, byte[] target, int offset) {
+        for (int i = 0; i < Long.BYTES; ++i) {
+            target[offset + i] = (byte) (value >>> (8 * (Long.BYTES - 1 - i)));
         }
     }
 
-    /**
-     * Outcome of {@link #ensureChannelKey(long)}: the key to use and whether this device just
-     * invented it, which is exactly when it has to be distributed to the other members.
-     */
-    public static final class GenerationResult {
-        private final KeyVersion keyVersion;
-        private final boolean freshlyCreated;
+    private static long readLong(byte[] source, int offset) {
+        long value = 0;
 
-        GenerationResult(KeyVersion keyVersion, boolean freshlyCreated) {
-            this.keyVersion = keyVersion;
-            this.freshlyCreated = freshlyCreated;
+        for (int i = 0; i < Long.BYTES; ++i) {
+            value = (value << 8) | (source[offset + i] & 0xFFL);
         }
 
-        public byte[] key() {
-            return keyVersion.key();
-        }
+        return value;
+    }
 
-        public UUID version() {
-            return keyVersion.version();
+    private static long parseChannelId(String alias) {
+        try {
+            return Long.parseLong(alias.substring(KEY_PREFIX.length()).replace(HISTORY_SUFFIX, ""));
+        } catch (NumberFormatException malformed) {
+            return -1L;
         }
+    }
 
-        public boolean freshlyCreated() {
-            return freshlyCreated;
-        }
+    private static String currentAlias(long channelId) {
+        return KEY_PREFIX + channelId;
+    }
+
+    private static String historyAlias(long channelId) {
+        return KEY_PREFIX + channelId + HISTORY_SUFFIX;
     }
 
     /**
@@ -128,22 +130,22 @@ public class ChannelKeyRegistry {
      * history, so messages already sent with it stay readable.
      */
     public synchronized GenerationResult rotateChannelKey(long channelId) throws KeyStoreUnavailableException {
-	final byte[] key = new byte[KEY_LENGTH_BYTES];
-	random.nextBytes(key);
+        final byte[] key = new byte[KEY_LENGTH_BYTES];
+        random.nextBytes(key);
 
-	final GenerationResult created =
-		new GenerationResult(new KeyVersion(UUID.randomUUID(), key), true);
+        final GenerationResult created =
+                new GenerationResult(new KeyVersion(UUID.randomUUID(), key), true);
 
-	final KeyVersion previous = currentKeyVersion(channelId);
-	if (previous != null) {
-	    appendHistory(channelId, previous);
-	}
+        final KeyVersion previous = currentKeyVersion(channelId);
+        if (previous != null) {
+            appendHistory(channelId, previous);
+        }
 
-	persist(channelId, created.version(), created.key());
+        persist(channelId, created.version(), created.key());
 
-	Log.d(TAG, "Rotated the key of channel " + channelId);
+        Log.d(TAG, "Rotated the key of channel " + channelId);
 
-	return created;
+        return created;
     }
 
     /**
@@ -151,7 +153,7 @@ public class ChannelKeyRegistry {
      * is moved into the history so older messages stay readable.
      *
      * @return {@code false} when {@code key} is not a usable channel key or is already the current
-     *         one (nothing to do, and no reason to re-distribute it)
+     * one (nothing to do, and no reason to re-distribute it)
      */
     public synchronized boolean adoptChannelKey(long channelId, UUID version, byte[] key)
             throws KeyStoreUnavailableException {
@@ -179,14 +181,18 @@ public class ChannelKeyRegistry {
         return true;
     }
 
-    /** Current key of the channel, or {@code null} when this device has never opened it. */
+    /**
+     * Current key of the channel, or {@code null} when this device has never opened it.
+     */
     public synchronized byte[] currentKey(long channelId) {
         final KeyVersion current = currentKeyVersion(channelId);
 
         return current == null ? null : current.key();
     }
 
-    /** Version of {@link #currentKey(long)}, or {@code null} when the channel has no key. */
+    /**
+     * Version of {@link #currentKey(long)}, or {@code null} when the channel has no key.
+     */
     public synchronized UUID currentVersion(long channelId) {
         final KeyVersion current = currentKeyVersion(channelId);
 
@@ -211,7 +217,9 @@ public class ChannelKeyRegistry {
         return candidates;
     }
 
-    /** Forgets a channel's key and its history, e.g. after the channel was deleted. */
+    /**
+     * Forgets a channel's key and its history, e.g. after the channel was deleted.
+     */
     public synchronized void forget(long channelId) {
         blobs.remove(currentAlias(channelId));
         blobs.remove(historyAlias(channelId));
@@ -250,31 +258,6 @@ public class ChannelKeyRegistry {
         }
 
         return entries;
-    }
-
-    /** One channel's keys as they travel through a backup archive. */
-    public static final class ChannelKeyEntry {
-        private final long channelId;
-        private final List<KeyVersion> versions;
-
-        public ChannelKeyEntry(long channelId, List<KeyVersion> versions) {
-            this.channelId = channelId;
-            this.versions = new ArrayList<>(versions);
-        }
-
-        public long channelId() {
-            return channelId;
-        }
-
-        /** Current version first, then superseded ones newest first. */
-        public List<KeyVersion> versions() {
-            return new ArrayList<>(versions);
-        }
-
-        /** Appends a superseded version, used while reading a backup archive. */
-        void addVersion(KeyVersion version) {
-            versions.add(version);
-        }
     }
 
     /**
@@ -370,50 +353,81 @@ public class ChannelKeyRegistry {
         return history;
     }
 
-    private static KeyVersion toKeyVersion(byte[] source, int offset) {
-        final long mostSignificant = readLong(source, offset);
-        final long leastSignificant = readLong(source, offset + Long.BYTES);
+    /**
+     * A key plus the version it is known by.
+     */
+    public static final class KeyVersion {
+        private final UUID version;
+        private final byte[] key;
 
-        final byte[] key = new byte[KEY_LENGTH_BYTES];
-        System.arraycopy(source, offset + UUID_LENGTH_BYTES, key, 0, KEY_LENGTH_BYTES);
+        public KeyVersion(UUID version, byte[] key) {
+            this.version = version;
+            this.key = key;
+        }
 
-        return new KeyVersion(new UUID(mostSignificant, leastSignificant), key);
-    }
+        public UUID version() {
+            return version;
+        }
 
-    private static void writeUuid(UUID uuid, byte[] target, int offset) {
-        writeLong(uuid.getMostSignificantBits(), target, offset);
-        writeLong(uuid.getLeastSignificantBits(), target, offset + Long.BYTES);
-    }
-
-    private static void writeLong(long value, byte[] target, int offset) {
-        for (int i = 0; i < Long.BYTES; ++i) {
-            target[offset + i] = (byte) (value >>> (8 * (Long.BYTES - 1 - i)));
+        public byte[] key() {
+            return key;
         }
     }
 
-    private static long readLong(byte[] source, int offset) {
-        long value = 0;
+    /**
+     * Outcome of {@link #ensureChannelKey(long)}: the key to use and whether this device just
+     * invented it, which is exactly when it has to be distributed to the other members.
+     */
+    public static final class GenerationResult {
+        private final KeyVersion keyVersion;
+        private final boolean freshlyCreated;
 
-        for (int i = 0; i < Long.BYTES; ++i) {
-            value = (value << 8) | (source[offset + i] & 0xFFL);
+        GenerationResult(KeyVersion keyVersion, boolean freshlyCreated) {
+            this.keyVersion = keyVersion;
+            this.freshlyCreated = freshlyCreated;
         }
 
-        return value;
-    }
+        public byte[] key() {
+            return keyVersion.key();
+        }
 
-    private static long parseChannelId(String alias) {
-        try {
-            return Long.parseLong(alias.substring(KEY_PREFIX.length()).replace(HISTORY_SUFFIX, ""));
-        } catch (NumberFormatException malformed) {
-            return -1L;
+        public UUID version() {
+            return keyVersion.version();
+        }
+
+        public boolean freshlyCreated() {
+            return freshlyCreated;
         }
     }
 
-    private static String currentAlias(long channelId) {
-        return KEY_PREFIX + channelId;
-    }
+    /**
+     * One channel's keys as they travel through a backup archive.
+     */
+    public static final class ChannelKeyEntry {
+        private final long channelId;
+        private final List<KeyVersion> versions;
 
-    private static String historyAlias(long channelId) {
-        return KEY_PREFIX + channelId + HISTORY_SUFFIX;
+        public ChannelKeyEntry(long channelId, List<KeyVersion> versions) {
+            this.channelId = channelId;
+            this.versions = new ArrayList<>(versions);
+        }
+
+        public long channelId() {
+            return channelId;
+        }
+
+        /**
+         * Current version first, then superseded ones newest first.
+         */
+        public List<KeyVersion> versions() {
+            return new ArrayList<>(versions);
+        }
+
+        /**
+         * Appends a superseded version, used while reading a backup archive.
+         */
+        void addVersion(KeyVersion version) {
+            versions.add(version);
+        }
     }
 }

@@ -40,7 +40,9 @@ public class FakeKeyValueSink implements KeyValueSink {
         return new HashSet<>(slots.keySet());
     }
 
-    /** Every stored blob, for the "no plaintext in storage" assertions. */
+    /**
+     * Every stored blob, for the "no plaintext in storage" assertions.
+     */
     public Set<String> values() {
         return new HashSet<>(slots.values());
     }

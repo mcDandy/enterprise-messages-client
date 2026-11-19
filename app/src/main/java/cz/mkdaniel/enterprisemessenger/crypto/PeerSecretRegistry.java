@@ -17,13 +17,19 @@ import java.util.List;
  */
 public class PeerSecretRegistry {
 
-    /** Sink key prefix that identifies peer secrets, e.g. for a backup scan. */
+    /**
+     * Sink key prefix that identifies peer secrets, e.g. for a backup scan.
+     */
     public static final String KEY_PREFIX = "peer_";
 
     private final SecureBlobStore blobs;
 
     public PeerSecretRegistry(SecureBlobStore blobs) {
         this.blobs = blobs;
+    }
+
+    private static String alias(long peerId) {
+        return KEY_PREFIX + peerId;
     }
 
     /**
@@ -41,7 +47,7 @@ public class PeerSecretRegistry {
 
     /**
      * @return the shared secret, or {@code null} when none was ever derived for this peer (or the
-     *         sealing key no longer opens it)
+     * sealing key no longer opens it)
      */
     public byte[] secret(long peerId) {
         return blobs.load(alias(peerId));
@@ -55,7 +61,9 @@ public class PeerSecretRegistry {
         blobs.remove(alias(peerId));
     }
 
-    /** Peer ids this device holds a sealed secret for. */
+    /**
+     * Peer ids this device holds a sealed secret for.
+     */
     public List<Long> knownPeers() {
         final List<Long> peers = new ArrayList<>();
 
@@ -70,14 +78,12 @@ public class PeerSecretRegistry {
         return peers;
     }
 
-    /** Drops every peer secret: used on log-out, together with {@link SecureBlobStore#clearAll()}. */
+    /**
+     * Drops every peer secret: used on log-out, together with {@link SecureBlobStore#clearAll()}.
+     */
     public void forgetAll() {
         for (final String key : blobs.keysWithPrefix(KEY_PREFIX)) {
             blobs.remove(key);
         }
-    }
-
-    private static String alias(long peerId) {
-        return KEY_PREFIX + peerId;
     }
 }

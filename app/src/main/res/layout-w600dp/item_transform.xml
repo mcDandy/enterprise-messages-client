@@ -1,53 +1,53 @@
 <?xml version="1.0" encoding="utf-8"?>
 <com.google.android.material.card.MaterialCardView xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:app="http://schemas.android.com/apk/res-auto"
-    xmlns:tools="http://schemas.android.com/tools"
-    android:layout_width="match_parent"
-    android:layout_height="wrap_content"
-    android:layout_margin="8dp"
-    android:clickable="true"
-    android:focusable="true"
-    android:foreground="?attr/selectableItemBackground"
-    app:cardBackgroundColor="@color/surface_card"
-    app:cardCornerRadius="20dp"
-    app:cardElevation="3dp"
-    app:strokeColor="@color/outline_border"
-    app:strokeWidth="1dp">
+                                                   xmlns:app="http://schemas.android.com/apk/res-auto"
+                                                   xmlns:tools="http://schemas.android.com/tools"
+                                                   android:layout_width="match_parent"
+                                                   android:layout_height="wrap_content"
+                                                   android:layout_margin="8dp"
+                                                   android:clickable="true"
+                                                   android:focusable="true"
+                                                   android:foreground="?attr/selectableItemBackground"
+                                                   app:cardBackgroundColor="@color/surface_card"
+                                                   app:cardCornerRadius="20dp"
+                                                   app:cardElevation="3dp"
+                                                   app:strokeColor="@color/outline_border"
+                                                   app:strokeWidth="1dp">
 
     <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:gravity="center"
-        android:orientation="vertical"
-        android:padding="16dp">
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center"
+            android:orientation="vertical"
+            android:padding="16dp">
 
         <com.google.android.material.imageview.ShapeableImageView
-            android:id="@+id/image_view_item_transform"
-            android:layout_width="64dp"
-            android:layout_height="64dp"
-            android:contentDescription="@string/image_view_item_transform_content_description"
-            android:scaleType="centerCrop"
-            app:shapeAppearanceOverlay="@style/ShapeAppearance.App.CircleImage"
-            tools:src="@tools:sample/avatars" />
+                android:id="@+id/image_view_item_transform"
+                android:layout_width="64dp"
+                android:layout_height="64dp"
+                android:contentDescription="@string/image_view_item_transform_content_description"
+                android:scaleType="centerCrop"
+                app:shapeAppearanceOverlay="@style/ShapeAppearance.App.CircleImage"
+                tools:src="@tools:sample/avatars"/>
 
         <TextView
-            android:id="@+id/text_view_item_transform"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="10dp"
-            android:textColor="@color/text_primary"
-            android:textSize="16sp"
-            android:textStyle="bold"
-            tools:text="Enterprise Server" />
+                android:id="@+id/text_view_item_transform"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="10dp"
+                android:textColor="@color/text_primary"
+                android:textSize="16sp"
+                android:textStyle="bold"
+                tools:text="Enterprise Server"/>
 
         <TextView
-            android:id="@+id/text_server_subtitle"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="2dp"
-            android:text="@string/subtitle_server_item"
-            android:textColor="@color/text_secondary"
-            android:textSize="12sp" />
+                android:id="@+id/text_server_subtitle"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="2dp"
+                android:text="@string/subtitle_server_item"
+                android:textColor="@color/text_secondary"
+                android:textSize="12sp"/>
 
     </LinearLayout>
 

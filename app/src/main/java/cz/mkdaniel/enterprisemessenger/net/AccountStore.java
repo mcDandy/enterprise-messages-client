@@ -51,11 +51,17 @@ public class AccountStore {
      */
     private static final String KEY_USER_ID = "user_id";
 
-    /** Sealed slot of the access token. */
+    /**
+     * Sealed slot of the access token.
+     */
     private static final String SLOT_JWT_TOKEN = "jwt_token";
-    /** Sealed slot of the address that issued the token, so it is not offered to another server. */
+    /**
+     * Sealed slot of the address that issued the token, so it is not offered to another server.
+     */
     private static final String SLOT_TOKEN_ISSUER = "jwt_token_issuer";
-    /** Sealed slot of the token's expiry as an epoch-millisecond decimal. */
+    /**
+     * Sealed slot of the token's expiry as an epoch-millisecond decimal.
+     */
     private static final String SLOT_TOKEN_EXPIRES_AT = "jwt_token_expires_at";
 
     /**
@@ -63,7 +69,9 @@ public class AccountStore {
      * never read.
      */
     private static final String LEGACY_KEY_PASSWORD = "password";
-    /** Key of an earlier revision that held the JWT in plaintext. Deleted, never read. */
+    /**
+     * Key of an earlier revision that held the JWT in plaintext. Deleted, never read.
+     */
     private static final String LEGACY_KEY_JWT_TOKEN = "jwt_token";
 
     /**
@@ -90,6 +98,14 @@ public class AccountStore {
         this.blobs = blobs;
 
         purgeLegacyPlaintextSecrets();
+    }
+
+    private static byte[] bytesOf(String value) {
+        return (value == null ? "" : value).getBytes(StandardCharsets.UTF_8);
+    }
+
+    private static String stringOf(byte[] value) {
+        return value == null ? "" : new String(value, StandardCharsets.UTF_8);
     }
 
     /**
@@ -152,7 +168,9 @@ public class AccountStore {
         }
     }
 
-    /** Convenience for callers that do not know the expiry. */
+    /**
+     * Convenience for callers that do not know the expiry.
+     */
     public synchronized void saveJwtToken(String token, String tokenIssuer) {
         saveJwtToken(token, tokenIssuer, 0L);
     }
@@ -180,7 +198,9 @@ public class AccountStore {
         plain.putString(KEY_USER_ID, Long.toString(userId));
     }
 
-    /** Cached user id, or {@code -1L} when this installation has never fetched it. */
+    /**
+     * Cached user id, or {@code -1L} when this installation has never fetched it.
+     */
     public synchronized long getUserId() {
         final String cached = plain.getString(KEY_USER_ID);
 
@@ -199,7 +219,9 @@ public class AccountStore {
         return stringOf(blobs.load(SLOT_JWT_TOKEN));
     }
 
-    /** Address of the server that issued the stored token, or "" when it was never recorded. */
+    /**
+     * Address of the server that issued the stored token, or "" when it was never recorded.
+     */
     public synchronized String getTokenIssuer() {
         return stringOf(blobs.load(SLOT_TOKEN_ISSUER));
     }
@@ -266,13 +288,5 @@ public class AccountStore {
      */
     public synchronized void unbindAccount() {
         plain.remove(KEY_BOUND_ACCOUNT);
-    }
-
-    private static byte[] bytesOf(String value) {
-        return (value == null ? "" : value).getBytes(StandardCharsets.UTF_8);
-    }
-
-    private static String stringOf(byte[] value) {
-        return value == null ? "" : new String(value, StandardCharsets.UTF_8);
     }
 }

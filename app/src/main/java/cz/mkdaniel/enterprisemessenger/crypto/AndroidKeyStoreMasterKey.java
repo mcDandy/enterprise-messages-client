@@ -7,7 +7,6 @@ import android.util.Log;
 import java.io.IOException;
 import java.security.GeneralSecurityException;
 import java.security.KeyStore;
-
 import javax.crypto.KeyGenerator;
 import javax.crypto.SecretKey;
 
@@ -24,11 +23,11 @@ import javax.crypto.SecretKey;
  */
 public class AndroidKeyStoreMasterKey implements MasterKeyProvider {
 
-    private static final String TAG = "AndroidKeyStoreMasterKey";
-
-    /** Alias of the app's master key. Renaming it orphans every sealed blob the app has written. */
+    /**
+     * Alias of the app's master key. Renaming it orphans every sealed blob the app has written.
+     */
     public static final String MASTER_KEY_ALIAS = "EnterpriseMessenger_Master_Key";
-
+    private static final String TAG = "AndroidKeyStoreMasterKey";
     private static final String ANDROID_KEYSTORE = "AndroidKeyStore";
 
     @Override

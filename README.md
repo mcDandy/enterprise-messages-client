@@ -1,10 +1,12 @@
 # Enterprise Messages Client
 
-A secure end-to-end encrypted messaging Android client for connecting to a messaging server, managing accounts, joining rooms, and sending/receiving encrypted messages.
+A secure end-to-end encrypted messaging Android client for connecting to a messaging server, managing accounts, joining
+rooms, and sending/receiving encrypted messages.
 
 ## Overview
 
 This project is an Android application built with Java and Gradle. It provides a client-side interface for:
+
 - account registration and login
 - server configuration and connection management
 - room browsing and selection
@@ -12,7 +14,8 @@ This project is an Android application built with Java and Gradle. It provides a
 - secure cryptographic key initialization and message protection
 - Android notifications and navigation-based UI flow
 
-The app is organized as a standard Android project with a single `app` module and uses Jetpack Navigation, Material Components, RecyclerView, OkHttp, and AndroidX libraries.
+The app is organized as a standard Android project with a single `app` module and uses Jetpack Navigation, Material
+Components, RecyclerView, OkHttp, and AndroidX libraries.
 
 ## Features
 
@@ -98,7 +101,8 @@ The app follows a typical Android modular structure:
 - `notification`: Android notification setup and permission handling
 - `MainActivity`: application entry point, navigation setup, and app startup behavior
 
-The app initializes the local EC keypair during startup and configures notification permissions as part of the main activity lifecycle.
+The app initializes the local EC keypair during startup and configures notification permissions as part of the main
+activity lifecycle.
 
 ## Build and Run
 
@@ -125,7 +129,9 @@ Open the project in Android Studio and deploy the app to an emulator or connecte
 
 ## Security
 
-This project is designed around secure messaging and includes cryptographic key generation and handling on the client side. The client stores and manages account configuration locally and prepares encrypted messaging flows using EC-based key management.
+This project is designed around secure messaging and includes cryptographic key generation and handling on the client
+side. The client stores and manages account configuration locally and prepares encrypted messaging flows using EC-based
+key management.
 
 ## License
 
