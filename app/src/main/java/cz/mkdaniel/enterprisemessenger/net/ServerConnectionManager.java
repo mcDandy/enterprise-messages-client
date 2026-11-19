@@ -1824,10 +1824,10 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
                     wrappedPayload.getLong(); // skip server version MSB
                     wrappedPayload.getLong(); // skip server version LSB
 
-                    final var ciphertext = new byte[wrappedPayload.remaining()];
-                    wrappedPayload.get(ciphertext);
+                    final var ciphertextrcv = new byte[wrappedPayload.remaining()];
+                    wrappedPayload.get(ciphertextrcv);
 
-                    executor.execute(() -> adoptUnicastChannelKey(peerId, ciphertext));
+                    executor.execute(() -> adoptUnicastChannelKey(peerId, ciphertextrcv));
                 }
 
                 break;
