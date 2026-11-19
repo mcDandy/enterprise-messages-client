@@ -379,7 +379,6 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 
                     return;
                 }
-
                 final JSONObject body = new JSONObject();
                 body.put("name", trimmedName);
                 body.put("type", SERVER_TYPE_ORGANIZATION);
@@ -434,6 +433,9 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 
                     return;
                 }
+                if (!verifyServerAdmin(serverId, callback)) {
+                    return;
+                }
 
                 final JSONObject body = new JSONObject();
                 body.put("name", trimmedName);
@@ -461,6 +463,9 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
             if (ensureJwt().isEmpty()) {
                 postFailure(callback, "Not signed in");
 
+                return;
+            }
+            if (!verifyServerAdmin(serverId, callback)) {
                 return;
             }
 
@@ -512,6 +517,9 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
             if (ensureJwt().isEmpty()) {
                 postFailure(callback, "Not signed in");
 
+                return;
+            }
+            if (!verifyServerAdmin(serverId, callback)) {
                 return;
             }
 
@@ -727,6 +735,9 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 
                     return;
                 }
+                if (!verifyServerAdmin(serverId, callback)) {
+                    return;
+                }
 
                 final JSONObject body = new JSONObject();
                 body.put("name", trimmedName);
@@ -780,6 +791,9 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 
                     return;
                 }
+                if (!verifyChannelAdmin(channelId, callback)) {
+                    return;
+                }
 
                 final JSONObject body = new JSONObject();
                 body.put("name", trimmedName);
@@ -806,6 +820,9 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
             if (ensureJwt().isEmpty()) {
                 postFailure(callback, "Not signed in");
 
+                return;
+            }
+            if (!verifyChannelAdmin(channelId, callback)) {
                 return;
             }
 
@@ -844,6 +861,9 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
             if (ensureJwt().isEmpty()) {
                 postFailure(callback, "Not signed in");
 
+                return;
+            }
+            if (!verifyChannelAdmin(channelId, callback)) {
                 return;
             }
 
@@ -983,6 +1003,44 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
         }
 
         return false;
+    }
+
+    private <T> boolean verifyServerAdmin(final long serverId, final Callback<T> callback) {
+        if (serverId < 0) {
+            postFailure(callback, "Invalid server id");
+            return false;
+        }
+
+        final long myUserId = resolveUserId();
+        if (myUserId < 0) {
+            postFailure(callback, "Failed to verify your server role");
+            return false;
+        }
+
+        if (!isUserAdminOfServer(serverId, myUserId)) {
+            postFailure(callback, ERROR_PERMISSION_DENIED);
+            return false;
+        }
+
+        return true;
+    }
+
+    private <T> boolean verifyChannelAdmin(final long channelId, final Callback<T> callback) {
+        if (channelId < 0) {
+            postFailure(callback, "Invalid channel id");
+            return false;
+        }
+
+        final RestResponse channelResponse = executeGet(String.format(
+                Locale.US, "/api/channels/%d", channelId));
+        final JSONObject channel = channelResponse.asJson();
+        if (!channelResponse.isSuccessful() || channel == null) {
+            failRest(channelResponse, callback, "Checking the channel");
+            return false;
+        }
+
+        final long serverId = channel.optLong("serverId", -1L);
+        return verifyServerAdmin(serverId, callback);
     }
 
     public void setVisibleChannel(long channelId) {
@@ -1663,6 +1721,21 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
             Log.w(TAG, action + " rejected with 403 - the user is not an administrator, keeping the session");
             postFailure(callback, ERROR_PERMISSION_DENIED);
 
+            return;
+        }
+
+        if (response.statusCode() == 404) {
+            postFailure(callback, action + " failed: not found");
+            return;
+        }
+
+        if (response.statusCode() == 409) {
+            postFailure(callback, action + " failed: the resource already exists or conflicts");
+            return;
+        }
+
+        if (response.statusCode() == 400) {
+            postFailure(callback, action + " failed: invalid request");
             return;
         }
 
