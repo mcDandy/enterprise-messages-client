@@ -663,7 +663,7 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
                         }
                     }
 
-                    decrypted.add(new Message(messageId, text, sender, timestamp));
+                    decrypted.add(new Message(messageId, text, normalizeSenderName(sender), timestamp));
                 }
 
                 java.util.Collections.reverse(decrypted);
@@ -694,6 +694,19 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
         } catch (final Exception e) {
             return System.currentTimeMillis();
         }
+    }
+
+    private String normalizeSenderName(final String senderName) {
+        if (senderName == null) {
+            return "Server User";
+        }
+
+        final String username = new AccountStore(context).getUsername();
+        if (username != null && !username.isEmpty() && senderName.equals(username)) {
+            return "You";
+        }
+
+        return senderName;
     }
 
     private byte[] decryptChatPayloadForVersion(final long channelId, final byte[] ciphertext,
@@ -2024,7 +2037,11 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
                         }
                     }
 
-                    notifyMessageReceived(new Message(messageId, messageText, senderName, sentAt));
+                    notifyMessageReceived(new Message(
+                            messageId,
+                            messageText,
+                            normalizeSenderName(senderName),
+                            sentAt));
 
                     if (!isChannelVisible(visibleChannelId)) {
                         NotificationHelper.showChannelMessageNotification(context, visibleChannelId, null);
