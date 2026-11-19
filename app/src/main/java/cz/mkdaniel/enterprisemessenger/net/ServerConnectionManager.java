@@ -546,6 +546,118 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
     }
 
     /**
+     * Loads the latest 50 encrypted messages in a channel and decrypts them for the open chat.
+     * The REST response contains only ciphertext plus the key generation; the plaintext is never
+     * sent to or stored by the server.
+     */
+    public void fetchRecentMessages(final long channelId, final Callback<List<Message>> callback) {
+        executor.execute(() -> {
+            try {
+                if (ensureJwt().isEmpty()) {
+                    postFailure(callback, "Not signed in");
+                    return;
+                }
+
+                final RestResponse response = executeGet(String.format(
+                        Locale.US, "/api/channels/%d/messages/recent", channelId));
+                final JSONArray messages = response.asJsonArray();
+                if (!response.isSuccessful() || messages == null) {
+                    postFailure(callback, "Failed to fetch channel messages");
+                    return;
+                }
+
+                final List<Message> decrypted = new ArrayList<>();
+                for (int i = 0; i < messages.length(); i++) {
+                    final JSONObject item = messages.optJSONObject(i);
+                    if (item == null) {
+                        continue;
+                    }
+
+                    final byte[] ciphertext;
+                    try {
+                        ciphertext = Base64.decode(item.optString("ciphertext", ""), Base64.NO_WRAP);
+                    } catch (final Exception e) {
+                        continue;
+                    }
+                    if (ciphertext.length == 0) {
+                        continue;
+                    }
+
+                    final UUID keyVersion = parseUuid(item.optString("keyVersion", ""));
+                    byte[] plaintext = decryptChatPayloadForVersion(channelId, ciphertext, keyVersion);
+                    if (plaintext == null) {
+                        Log.w(TAG, "Could not decrypt history message " + item.optLong("id", -1L));
+                        continue;
+                    }
+
+                    final String fallbackId = String.valueOf(item.optLong("id", System.currentTimeMillis()));
+                    String messageId = fallbackId;
+                    String sender = "Server User";
+                    String text = new String(plaintext, StandardCharsets.UTF_8);
+                    long timestamp = parseOffsetDateTime(item.optString("sentAt", ""));
+
+                    if (text.startsWith("{")) {
+                        try {
+                            final JSONObject envelope = new JSONObject(text);
+                            messageId = envelope.optString("id", fallbackId);
+                            sender = envelope.optString("sender", sender);
+                            text = envelope.optString("text", text);
+                            timestamp = envelope.optLong("timestamp", timestamp);
+                        } catch (final Exception ignored) {
+                        }
+                    }
+
+                    decrypted.add(new Message(messageId, text, sender, timestamp));
+                }
+
+                // The API returns newest first for initial rendering.
+                java.util.Collections.reverse(decrypted);
+                mainHandler.post(() -> callback.onResult(decrypted));
+            } catch (final Exception e) {
+                postFailure(callback, e.getMessage());
+            }
+        });
+    }
+
+    private UUID parseUuid(final String value) {
+        if (value == null || value.isEmpty()) {
+            return null;
+        }
+        try {
+            return UUID.fromString(value);
+        } catch (final Exception e) {
+            return null;
+        }
+    }
+
+    private long parseOffsetDateTime(final String value) {
+        if (value == null || value.isEmpty()) {
+            return System.currentTimeMillis();
+        }
+        try {
+            return java.time.OffsetDateTime.parse(value).toInstant().toEpochMilli();
+        } catch (final Exception e) {
+            return System.currentTimeMillis();
+        }
+    }
+
+    private byte[] decryptChatPayloadForVersion(final long channelId, final byte[] ciphertext,
+                                                 final UUID keyVersion) {
+        if (keyVersion != null) {
+            for (final ChannelKeyRegistry.KeyVersion candidate : channelKeys.decryptCandidates(channelId)) {
+                if (candidate.version().equals(keyVersion)) {
+                    try {
+                        return cryptoManager.decryptPayload(ciphertext, candidate.key());
+                    } catch (final Exception ignored) {
+                        return null;
+                    }
+                }
+            }
+        }
+        return decryptChatPayload(ciphertext);
+    }
+
+    /**
      * Creates a channel in a virtual server ({@code POST /api/servers/{id}/channels}). The server
      * restricts it to the virtual server's administrators and rejects a duplicate name.
      */
@@ -1743,6 +1855,11 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 
                     final ByteBuffer chatPayload = ByteBuffer.wrap(payload);
                     final long packetChannelId = chatPayload.getInt() & 0xffff_ffffL;
+                    if (packetChannelId != activeChannelId && packetChannelId != visibleChannelId) {
+                        Log.d(TAG, "Ignoring CHAT_MESSAGE for channel " + packetChannelId
+                                + " while active=" + activeChannelId + ", visible=" + visibleChannelId);
+                        break;
+                    }
                     final byte[] ciphertext = new byte[chatPayload.remaining()];
                     chatPayload.get(ciphertext);
 

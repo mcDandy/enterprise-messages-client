@@ -168,6 +168,40 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
 
         connectionManager.connect();
         connectionManager.joinChannel(roomId);
+        connectionManager.fetchRecentMessages(
+                ServerConnectionManager.parseChannelId(roomId),
+                new ServerConnectionManager.Callback<>() {
+                    @Override
+                    public void onResult(List<Message> messages) {
+                        if (binding == null || adapter == null) return;
+                        List<Message> merged = new ArrayList<>(messages);
+                        for (Message liveMessage : adapter.getCurrentList()) {
+                            boolean alreadyPresent = false;
+                            for (Message message : merged) {
+                                if (message.getId().equals(liveMessage.getId())) {
+                                    alreadyPresent = true;
+                                    break;
+                                }
+                            }
+                            if (!alreadyPresent) {
+                                merged.add(liveMessage);
+                            }
+                        }
+                        merged.sort(java.util.Comparator.comparingLong(Message::getTimestamp));
+                        adapter.submitList(merged, () -> {
+                            if (binding != null && !merged.isEmpty()) {
+                                binding.recyclerviewMessages.scrollToPosition(merged.size() - 1);
+                            }
+                        });
+                    }
+
+                    @Override
+                    public void onFailure(String error) {
+                        if (isAdded()) {
+                            Toast.makeText(requireContext(), error, Toast.LENGTH_LONG).show();
+                        }
+                    }
+                });
     }
 
     @Override
