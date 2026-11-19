@@ -97,6 +97,9 @@
     <string name="action_rename">Rename</string>
     <string name="action_switch_server">Switch</string>
     <string name="action_add_member">Add member</string>
+    <string name="action_add_channel_member">Add channel member</string>
+    <string name="dialog_add_channel_member_title">Add member to channel</string>
+    <string name="channel_member_added">Channel member added</string>
     <string name="action_delete">Delete</string>
     <string name="action_cancel">Cancel</string>
     <string name="dialog_add_member_title">Add server member</string>

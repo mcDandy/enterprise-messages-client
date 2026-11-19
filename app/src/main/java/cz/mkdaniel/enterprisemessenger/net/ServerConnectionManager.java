@@ -662,6 +662,37 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
     }
 
     /**
+     * Adds a registered user to a channel. The server requires the signed-in user to be that
+     * channel's server administrator and adds both channel and server membership as needed.
+     */
+    public void addChannelMember(final long channelId, final long userId, final Callback<Void> callback) {
+        executor.execute(() -> {
+            if (ensureJwt().isEmpty()) {
+                postFailure(callback, "Not signed in");
+
+                return;
+            }
+
+            try {
+                final JSONObject body = new JSONObject();
+                body.put("userId", userId);
+
+                final RestResponse response = executePost(
+                        String.format(Locale.US, "/api/channels/%d/members", channelId), body);
+                if (!response.isSuccessful()) {
+                    failRest(response, callback, "Adding the channel member");
+
+                    return;
+                }
+
+                mainHandler.post(() -> callback.onResult(null));
+            } catch (final Exception e) {
+                postFailure(callback, "Could not add channel member: " + e.getMessage());
+            }
+        });
+    }
+
+    /**
      * Makes sure {@link #jwtToken} holds a token for the deployment address, restoring it from the
      * account store and otherwise signing in with the stored credentials. Call it at the top of
      * every background task: a screen can be opened before the startup {@link #connect()} has
@@ -1015,12 +1046,7 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 
             executor.execute(() -> {
                 if (!ensureJwt().isEmpty()) {
-                    final RestResponse response = executePost(String.format(Locale.US, "/api/channels/%d/members", id), new JSONObject());
-                    if (response.isSuccessful()) {
-                        Log.d(TAG, "Joined channel " + id + " via REST API");
-                    } else {
-                        Log.w(TAG, "REST join for channel " + id + " failed with status " + response.statusCode());
-                    }
+                    Log.d(TAG, "Selected channel " + id + "; membership is provided by the server");
                 }
                 establishChannelPeerKeys(id);
             });

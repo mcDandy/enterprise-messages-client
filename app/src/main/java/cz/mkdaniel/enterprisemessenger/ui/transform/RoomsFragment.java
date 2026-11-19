@@ -8,6 +8,7 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.TextView;
 import android.widget.Toast;
+import android.widget.EditText;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.fragment.app.Fragment;
@@ -117,17 +118,55 @@ public class RoomsFragment extends Fragment {
 
         final String renameLabel = getString(R.string.action_rename);
         final String deleteLabel = getString(R.string.action_delete);
+        final String addMemberLabel = getString(R.string.action_add_channel_member);
 
         new MaterialAlertDialogBuilder(requireContext())
                 .setTitle(room.getName())
-                .setItems(new String[]{renameLabel, deleteLabel}, (dialog, which) -> {
+                .setItems(new String[]{addMemberLabel, renameLabel, deleteLabel}, (dialog, which) -> {
                     if (which == 0) {
+                        showAddChannelMemberDialog(room);
+                    } else if (which == 1) {
                         showChannelNameDialog(R.string.dialog_edit_channel_title, R.string.hint_channel_name,
                                 R.string.action_save, room);
                     } else {
                         showDeleteConfirmationDialog(room);
                     }
                 })
+                .show();
+    }
+
+    private void showAddChannelMemberDialog(Room room) {
+        final EditText input = new EditText(requireContext());
+        input.setHint(R.string.hint_member_user_id);
+        input.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
+
+        new MaterialAlertDialogBuilder(requireContext())
+                .setTitle(R.string.dialog_add_channel_member_title)
+                .setView(input)
+                .setPositiveButton(R.string.action_add, (dialog, which) -> {
+                    final long userId;
+                    try {
+                        userId = Long.parseLong(input.getText().toString().trim());
+                    } catch (NumberFormatException exception) {
+                        toast(getString(R.string.error_invalid_member_user_id));
+                        return;
+                    }
+
+                    ServerConnectionManager.getInstance(requireContext()).addChannelMember(
+                            ServerConnectionManager.parseChannelId(room.getId()), userId,
+                            new ServerConnectionManager.Callback<>() {
+                                @Override
+                                public void onResult(Void result) {
+                                    toast(getString(R.string.channel_member_added));
+                                }
+
+                                @Override
+                                public void onFailure(String error) {
+                                    toast(error);
+                                }
+                            });
+                })
+                .setNegativeButton(R.string.action_cancel, (dialog, which) -> dialog.dismiss())
                 .show();
     }
 
