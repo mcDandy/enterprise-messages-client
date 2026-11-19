@@ -24,6 +24,9 @@
     <string name="action_go_to_register">Don\'t have an account? Register</string>
     <string name="action_go_to_login">Already have an account? Log in</string>
     <string name="action_logout">Log Out</string>
+    <string name="action_edit_display_name">Edit display name</string>
+    <string name="dialog_edit_display_name_title">Edit display name</string>
+    <string name="hint_display_name">Display name</string>
     <string name="text_logged_in_as">Logged in as: %1$s</string>
     <string name="text_not_logged_in">Not logged in</string>
 

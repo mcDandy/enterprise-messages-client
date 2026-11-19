@@ -158,6 +158,7 @@ public class SettingsFragment extends Fragment {
         binding.buttonRestoreKeys.setOnClickListener(v ->
                 openDocumentLauncher.launch(new String[]{BACKUP_MIME_TYPE, "application/octet-stream"}));
 
+        binding.buttonEditDisplayName.setOnClickListener(v -> showDisplayNameDialog());
         binding.buttonResetIdentity.setOnClickListener(v -> confirmIdentityReset());
     }
 
@@ -225,6 +226,37 @@ public class SettingsFragment extends Fragment {
      * Asks before the device's encryption identity is destroyed. The dialog names the account the
      * device is bound to, because those are the messages that stop being readable.
      */
+    private void showDisplayNameDialog() {
+        final AccountStore accountStore = new AccountStore(requireContext());
+        final EditText field = new EditText(requireContext());
+        field.setHint(R.string.hint_display_name);
+        field.setText(accountStore.getUsername());
+
+        new AlertDialog.Builder(requireContext())
+                .setTitle(R.string.dialog_edit_display_name_title)
+                .setView(field)
+                .setPositiveButton(android.R.string.ok, (dialog, which) -> {
+                    final String displayName = field.getText().toString().trim();
+                    ServerConnectionManager.getInstance(requireContext()).updateDisplayName(
+                            displayName,
+                            new ServerConnectionManager.Callback<>() {
+                                @Override
+                                public void onResult(Void result) {
+                                    binding.textLoggedUser.setText(getString(
+                                            R.string.text_logged_in_as, displayName));
+                                    toastText("Display name updated");
+                                }
+
+                                @Override
+                                public void onFailure(String error) {
+                                    toastText(error);
+                                }
+                            });
+                })
+                .setNegativeButton(R.string.action_cancel, null)
+                .show();
+    }
+
     private void confirmIdentityReset() {
         final String bound = new AccountStore(requireContext()).boundAccount();
 

@@ -51,7 +51,7 @@ import cz.mkdaniel.enterprisemessenger.ui.transform.ServerViewItem;
  *         - messages                    WebSocket /wss packets
  * </pre>
  * Flow: REST login/register -> WebSocket {@code /wss} with {@code Authorization: Bearer <jwt>} ->
- * join channel via REST {@code POST /api/channels/{id}/join} -> end-to-end encrypted {@code CHAT_MESSAGE}
+ * select a channel through {@link #joinChannel(String)} -> end-to-end encrypted {@code CHAT_MESSAGE}
  * packets.
  * <p>
  * Only the scheme and the {@code /wss} path are code constants; {@link #deployBaseUrl()} is the one
@@ -131,7 +131,6 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
      */
     private volatile byte[] activeChannelKey;
     private volatile long activeChannelId = -1L;
-    private final Set<Long> joinedChannelIds = new CopyOnWriteArraySet<>();
 
     private ServerConnectionManager(Context context) {
         this.context = context.getApplicationContext();
@@ -656,7 +655,6 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
                 this.activeChannelKey = null;
             }
 
-            joinedChannelIds.remove(channelId);
             channelKeys.forget(channelId);
 
             mainHandler.post(() -> callback.onResult(null));
@@ -690,6 +688,39 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
                 mainHandler.post(() -> callback.onResult(null));
             } catch (final Exception e) {
                 postFailure(callback, "Could not add channel member: " + e.getMessage());
+            }
+        });
+    }
+
+    /**
+     * Updates the display name of the signed-in account.
+     */
+    public void updateDisplayName(final String displayName, final Callback<Void> callback) {
+        final String trimmedName = displayName == null ? "" : displayName.trim();
+        if (trimmedName.isEmpty()) {
+            mainHandler.post(() -> callback.onFailure("Display name must not be empty"));
+            return;
+        }
+
+        executor.execute(() -> {
+            if (ensureJwt().isEmpty()) {
+                postFailure(callback, "Not signed in");
+                return;
+            }
+
+            try {
+                final JSONObject body = new JSONObject();
+                body.put("displayName", trimmedName);
+
+                final RestResponse response = executePut("/api/users/me/display-name", body);
+                if (!response.isSuccessful()) {
+                    failRest(response, callback, "Updating display name");
+                    return;
+                }
+
+                mainHandler.post(() -> callback.onResult(null));
+            } catch (final Exception e) {
+                postFailure(callback, "Could not update display name: " + e.getMessage());
             }
         });
     }
@@ -1051,20 +1082,26 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
                     Log.d(TAG, "Selected channel " + id + "; membership is provided by the server");
                 }
 
-                if (!joinedChannelIds.contains(id)) {
-                    final RestResponse joined = executePost(
-                            String.format(Locale.US, "/api/channels/%d/join", id),
-                            new JSONObject());
-                    if (!joined.isSuccessful()) {
-                        final String error = joined.statusCode() == 403
-                                ? "You do not have permission to send messages in this channel"
-                                : "Could not join channel " + id;
-                        Log.w(TAG, error + " (HTTP " + joined.statusCode() + ")");
-                        notifyError(error);
-                        return;
+                final RestResponse membership = executeGet(
+                        String.format(Locale.US, "/api/channels/%d/members", id));
+                final JSONArray members = membership.asJsonArray();
+                if (!membership.isSuccessful() || members == null) {
+                    notifyError("Could not verify channel membership");
+                    return;
+                }
+
+                final long myUserId = resolveUserId();
+                boolean isMember = false;
+                for (int i = 0; i < members.length(); i++) {
+                    final JSONObject member = members.optJSONObject(i);
+                    if (member != null && member.optLong("userId", -1L) == myUserId) {
+                        isMember = true;
+                        break;
                     }
-                    joinedChannelIds.add(id);
-                    Log.d(TAG, "Joined channel " + id + " via REST");
+                }
+                if (!isMember) {
+                    notifyError("You do not have permission to send messages in this channel");
+                    return;
                 }
 
                 establishChannelPeerKeys(id);
@@ -1615,8 +1652,6 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
         this.jwtTokenIssuer = "";
         this.activeChannelKey = null;
         this.activeChannelId = -1L;
-        joinedChannelIds.clear();
-
         webSocketClient.disconnect();
     }
 
@@ -1803,9 +1838,6 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
                     break;
             }
 
-            final var acknowledgement = new Packet(Packet.TYPE_ACK, new byte[0]);
-
-            webSocketClient.sendPacketAsync(acknowledgement);
         } catch (final Exception exception) {
             Log.e(TAG, exception.toString());
         }

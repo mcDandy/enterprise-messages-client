@@ -57,6 +57,14 @@
                         tools:text="Logged in as: User"/>
 
                 <com.google.android.material.button.MaterialButton
+                        android:id="@+id/button_edit_display_name"
+                        style="@style/Widget.App.MaterialButton"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="18dp"
+                        android:text="@string/action_edit_display_name"/>
+
+                <com.google.android.material.button.MaterialButton
                         android:id="@+id/button_logout"
                         style="@style/Widget.App.MaterialButton"
                         android:layout_width="match_parent"
