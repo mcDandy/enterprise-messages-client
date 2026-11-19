@@ -7,6 +7,7 @@ import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.EditText;
 import android.widget.ImageView;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -143,9 +144,10 @@ public class TransformFragment extends Fragment {
         final String switchLabel = getString(R.string.action_switch_server);
         final String renameLabel = getString(R.string.action_rename);
         final String deleteLabel = getString(R.string.action_delete);
+        final String addMemberLabel = getString(R.string.action_add_member);
 
         final String[] options = item.isAdmin()
-                ? new String[]{switchLabel, renameLabel, deleteLabel}
+                ? new String[]{switchLabel, addMemberLabel, renameLabel, deleteLabel}
                 : new String[]{switchLabel};
 
         new MaterialAlertDialogBuilder(requireContext())
@@ -155,6 +157,8 @@ public class TransformFragment extends Fragment {
 
                     if (chosen.equals(switchLabel)) {
                         openServer(item);
+                    } else if (chosen.equals(addMemberLabel)) {
+                        showAddMemberDialog(item);
                     } else if (chosen.equals(renameLabel)) {
                         showServerNameDialog(R.string.dialog_edit_server_title, R.string.hint_server_name,
                                 R.string.action_save, item);
@@ -162,6 +166,43 @@ public class TransformFragment extends Fragment {
                         showDeleteConfirmationDialog(item);
                     }
                 })
+                .show();
+    }
+
+    private void showAddMemberDialog(ServerViewItem item) {
+        final EditText input = new EditText(requireContext());
+        input.setHint(R.string.hint_member_user_id);
+        input.setInputType(android.text.InputType.TYPE_CLASS_NUMBER);
+
+        new MaterialAlertDialogBuilder(requireContext())
+                .setTitle(R.string.dialog_add_member_title)
+                .setView(input)
+                .setPositiveButton(R.string.action_add, (dialog, which) -> {
+                    final String text = input.getText().toString().trim();
+                    final long userId;
+                    try {
+                        userId = Long.parseLong(text);
+                    } catch (NumberFormatException exception) {
+                        Toast.makeText(requireContext(), R.string.error_invalid_member_user_id,
+                                Toast.LENGTH_LONG).show();
+                        return;
+                    }
+
+                    ServerConnectionManager.getInstance(requireContext()).addServerMember(
+                            item.getServerId(), userId, new ServerConnectionManager.Callback<>() {
+                                @Override
+                                public void onResult(Void result) {
+                                    Toast.makeText(requireContext(), R.string.member_added,
+                                            Toast.LENGTH_SHORT).show();
+                                }
+
+                                @Override
+                                public void onFailure(String error) {
+                                    Toast.makeText(requireContext(), error, Toast.LENGTH_LONG).show();
+                                }
+                            });
+                })
+                .setNegativeButton(R.string.action_cancel, (dialog, which) -> dialog.dismiss())
                 .show();
     }
 

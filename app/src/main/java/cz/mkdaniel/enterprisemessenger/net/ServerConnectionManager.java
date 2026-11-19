@@ -467,6 +467,38 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
     }
 
     /**
+     * Adds a registered user to a virtual server as a regular member.
+     * The server requires {@code ADMINISTRATOR} for this operation and reports 403 otherwise.
+     */
+    public void addServerMember(final long serverId, final long userId, final Callback<Void> callback) {
+        executor.execute(() -> {
+            if (ensureJwt().isEmpty()) {
+                postFailure(callback, "Not signed in");
+
+                return;
+            }
+
+            try {
+                final JSONObject body = new JSONObject();
+                body.put("userId", userId);
+                body.put("role", "MEMBER");
+
+                final RestResponse response = executePost(
+                        String.format(Locale.US, "/api/servers/%d/members", serverId), body);
+                if (!response.isSuccessful()) {
+                    failRest(response, callback, "Adding the server member");
+
+                    return;
+                }
+
+                mainHandler.post(() -> callback.onResult(null));
+            } catch (final Exception e) {
+                postFailure(callback, "Could not add server member: " + e.getMessage());
+            }
+        });
+    }
+
+    /**
      * Lists the channels of a virtual server the user is a member of
      * ({@code GET /api/servers/{id}/channels/my}); every room carries the channel key the members
      * agree on, see {@link ChannelKeyRegistry}.

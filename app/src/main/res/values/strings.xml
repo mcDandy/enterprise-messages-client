@@ -96,8 +96,13 @@
     <string name="action_save">Save</string>
     <string name="action_rename">Rename</string>
     <string name="action_switch_server">Switch</string>
+    <string name="action_add_member">Add member</string>
     <string name="action_delete">Delete</string>
     <string name="action_cancel">Cancel</string>
+    <string name="dialog_add_member_title">Add server member</string>
+    <string name="hint_member_user_id">User ID</string>
+    <string name="error_invalid_member_user_id">Enter a valid numeric user ID</string>
+    <string name="member_added">Member added</string>
     <string name="content_description_add_server">Add a virtual server</string>
     <string name="content_description_add_channel">Add a channel</string>
 
