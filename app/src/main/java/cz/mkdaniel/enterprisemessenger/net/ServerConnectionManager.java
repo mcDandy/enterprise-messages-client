@@ -546,11 +546,11 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
     }
 
     /**
-     * Loads the latest 50 encrypted messages in a channel and decrypts them for the open chat.
-     * The REST response contains only ciphertext plus the key generation; the plaintext is never
-     * sent to or stored by the server.
+     * Loads one older page of channel history. The REST endpoint paginates newest-first, so the
+     * returned messages are reversed before they are delivered to the chat adapter.
      */
-    public void fetchRecentMessages(final long channelId, final Callback<List<Message>> callback) {
+    public void fetchMessagePage(final long channelId, final int page, final int size,
+                                 final Callback<List<Message>> callback) {
         executor.execute(() -> {
             try {
                 if (ensureJwt().isEmpty()) {
@@ -558,11 +558,19 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
                     return;
                 }
 
-                final RestResponse response = executeGet(String.format(
-                        Locale.US, "/api/channels/%d/messages/recent", channelId));
-                final JSONArray messages = response.asJsonArray();
-                if (!response.isSuccessful() || messages == null) {
-                    postFailure(callback, "Failed to fetch channel messages");
+                final String endpoint = String.format(Locale.US,
+                        "/api/channels/%d/messages?page=%d&size=%d&sort=sentAt,desc&sort=id,desc",
+                        channelId, page, size);
+                final RestResponse response = executeGet(endpoint);
+                final JSONObject result = response.asJson();
+                if (!response.isSuccessful() || result == null) {
+                    postFailure(callback, "Failed to fetch older messages");
+                    return;
+                }
+
+                final JSONArray messages = result.optJSONArray("content");
+                if (messages == null) {
+                    postFailure(callback, "Failed to fetch older messages");
                     return;
                 }
 
@@ -584,13 +592,14 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
                     }
 
                     final UUID keyVersion = parseUuid(item.optString("keyVersion", ""));
-                    byte[] plaintext = decryptChatPayloadForVersion(channelId, ciphertext, keyVersion);
+                    final byte[] plaintext =
+                            decryptChatPayloadForVersion(channelId, ciphertext, keyVersion);
                     if (plaintext == null) {
-                        Log.w(TAG, "Could not decrypt history message " + item.optLong("id", -1L));
                         continue;
                     }
 
-                    final String fallbackId = String.valueOf(item.optLong("id", System.currentTimeMillis()));
+                    final String fallbackId =
+                            String.valueOf(item.optLong("id", System.currentTimeMillis()));
                     String messageId = fallbackId;
                     String sender = "Server User";
                     String text = new String(plaintext, StandardCharsets.UTF_8);
@@ -610,7 +619,6 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
                     decrypted.add(new Message(messageId, text, sender, timestamp));
                 }
 
-                // The API returns newest first for initial rendering.
                 java.util.Collections.reverse(decrypted);
                 mainHandler.post(() -> callback.onResult(decrypted));
             } catch (final Exception e) {

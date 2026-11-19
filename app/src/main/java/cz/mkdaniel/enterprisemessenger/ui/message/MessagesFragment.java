@@ -76,6 +76,10 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
     private long serverId;
     private String roomId;
     private String roomName;
+    private LinearLayoutManager messageLayoutManager;
+    private int historyPage = 1;
+    private boolean loadingOlderMessages;
+    private boolean noMoreOlderMessages;
     /**
      * Until when an error we were told stands in for the generic "cannot be reached" toast. A server
      * that closes our session is reachable, and repeating the network message over the real reason
@@ -108,11 +112,25 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
                 + ", room=" + roomName + " (" + roomId + ")");
 
         // --- RecyclerView setup ---
-        LinearLayoutManager layoutManager = new LinearLayoutManager(requireContext());
+        messageLayoutManager = new LinearLayoutManager(requireContext());
         adapter = new MessageAdapter();
 
-        binding.recyclerviewMessages.setLayoutManager(layoutManager);
+        binding.recyclerviewMessages.setLayoutManager(messageLayoutManager);
         binding.recyclerviewMessages.setAdapter(adapter);
+        binding.recyclerviewMessages.addOnScrollListener(new RecyclerView.OnScrollListener() {
+            @Override
+            public void onScrolled(@NonNull RecyclerView recyclerView, int dx, int dy) {
+                if (dy >= 0 || loadingOlderMessages || noMoreOlderMessages
+                        || messageLayoutManager == null || adapter == null) {
+                    return;
+                }
+
+                int firstVisible = messageLayoutManager.findFirstVisibleItemPosition();
+                if (firstVisible <= 2) {
+                    loadOlderMessages();
+                }
+            }
+        });
 
         // --- Server Connection setup ---
         connectionManager = ServerConnectionManager.getInstance(requireContext());
@@ -168,40 +186,10 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
 
         connectionManager.connect();
         connectionManager.joinChannel(roomId);
-        connectionManager.fetchRecentMessages(
-                ServerConnectionManager.parseChannelId(roomId),
-                new ServerConnectionManager.Callback<>() {
-                    @Override
-                    public void onResult(List<Message> messages) {
-                        if (binding == null || adapter == null) return;
-                        List<Message> merged = new ArrayList<>(messages);
-                        for (Message liveMessage : adapter.getCurrentList()) {
-                            boolean alreadyPresent = false;
-                            for (Message message : merged) {
-                                if (message.getId().equals(liveMessage.getId())) {
-                                    alreadyPresent = true;
-                                    break;
-                                }
-                            }
-                            if (!alreadyPresent) {
-                                merged.add(liveMessage);
-                            }
-                        }
-                        merged.sort(java.util.Comparator.comparingLong(Message::getTimestamp));
-                        adapter.submitList(merged, () -> {
-                            if (binding != null && !merged.isEmpty()) {
-                                binding.recyclerviewMessages.scrollToPosition(merged.size() - 1);
-                            }
-                        });
-                    }
-
-                    @Override
-                    public void onFailure(String error) {
-                        if (isAdded()) {
-                            Toast.makeText(requireContext(), error, Toast.LENGTH_LONG).show();
-                        }
-                    }
-                });
+        historyPage = 1;
+        loadingOlderMessages = false;
+        noMoreOlderMessages = false;
+        loadMessagePage(0, false);
     }
 
     @Override
@@ -230,6 +218,88 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
         } else {
             binding.cardInputContainer.setStrokeColor(Color.RED);
         }
+    }
+
+    private void loadOlderMessages() {
+        if (connectionManager == null || loadingOlderMessages || noMoreOlderMessages) {
+            return;
+        }
+
+        loadMessagePage(historyPage, true);
+    }
+
+    private void loadMessagePage(int page, boolean loadingOlder) {
+        if (connectionManager == null) {
+            return;
+        }
+
+        if (loadingOlder) {
+            loadingOlderMessages = true;
+        }
+        final int previousCount = adapter == null ? 0 : adapter.getCurrentList().size();
+        final int firstVisible = messageLayoutManager == null
+                ? 0 : messageLayoutManager.findFirstVisibleItemPosition();
+
+        connectionManager.fetchMessagePage(
+                ServerConnectionManager.parseChannelId(roomId),
+                page,
+                50,
+                new ServerConnectionManager.Callback<>() {
+                    @Override
+                    public void onResult(List<Message> pageMessages) {
+                        if (loadingOlder) {
+                            loadingOlderMessages = false;
+                            historyPage++;
+                        }
+                        if (binding == null || adapter == null) return;
+
+                        if (pageMessages.isEmpty()) {
+                            noMoreOlderMessages = true;
+                            return;
+                        }
+
+                        final List<Message> merged = new ArrayList<>(pageMessages);
+                        for (Message liveMessage : adapter.getCurrentList()) {
+                            boolean alreadyPresent = false;
+                            for (Message message : merged) {
+                                if (message.getId().equals(liveMessage.getId())) {
+                                    alreadyPresent = true;
+                                    break;
+                                }
+                            }
+                            if (!alreadyPresent) {
+                                merged.add(liveMessage);
+                            }
+                        }
+                        merged.sort(java.util.Comparator.comparingLong(Message::getTimestamp));
+
+                        adapter.submitList(merged, () -> {
+                            if (binding != null && messageLayoutManager != null) {
+                                if (loadingOlder) {
+                                    int addedCount = merged.size() - previousCount;
+                                    messageLayoutManager.scrollToPosition(
+                                            Math.max(0, firstVisible + addedCount));
+                                } else if (!merged.isEmpty()) {
+                                    binding.recyclerviewMessages.scrollToPosition(merged.size() - 1);
+                                }
+                            }
+                        });
+
+                        if (pageMessages.size() < 50) {
+                            noMoreOlderMessages = true;
+                        }
+                    }
+
+                    @Override
+                    public void onFailure(String error) {
+                        if (loadingOlder) {
+                            loadingOlderMessages = false;
+                        }
+                        if (isAdded()) {
+                            Toast.makeText(requireContext(), error, Toast.LENGTH_LONG).show();
+                        }
+                    }
+                });
     }
 
     private void sendMessageFromInput(EditText inputField) {
