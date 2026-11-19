@@ -6,6 +6,7 @@ import static org.junit.Assert.assertNotNull;
 
 import org.junit.Test;
 
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 
 /**
@@ -79,13 +80,30 @@ public class PacketCodecTest {
 
     @Test
     public void acknowledgementPacketRoundTripsAndHasReadableTypeName() throws Exception {
-        final byte[] frame = new Packet(Packet.TYPE_ACK,
-                new byte[]{Packet.TYPE_CHAT_MESSAGE}).serialize();
+        final byte[] frame = new Packet(Packet.TYPE_ACK, new byte[0]).serialize();
 
         final Packet decoded = Packet.readFromByteArray(frame);
 
         assertEquals(Packet.TYPE_ACK, decoded.getType());
-        assertArrayEquals(new byte[]{Packet.TYPE_CHAT_MESSAGE}, decoded.getPayload());
+        assertEquals(0, decoded.getPayload().length);
         assertEquals("ACK", Packet.typeName(decoded.getType()));
+    }
+
+    @Test
+    public void chatMessagePayloadStartsWithUnsignedChannelId() throws Exception {
+        final byte[] ciphertext = {(byte) 0xDE, (byte) 0xAD, (byte) 0xBE, (byte) 0xEF};
+        final int channelId = 0x0001_2345;
+        final ByteBuffer payload = ByteBuffer.allocate(Integer.BYTES + ciphertext.length);
+        payload.putInt(channelId);
+        payload.put(ciphertext);
+
+        final Packet decoded = Packet.readFromByteArray(
+                new Packet(Packet.TYPE_CHAT_MESSAGE, payload.array()).serialize());
+
+        assertEquals(Packet.TYPE_CHAT_MESSAGE, decoded.getType());
+        final ByteBuffer decodedPayload = ByteBuffer.wrap(decoded.getPayload());
+        assertEquals(channelId, decodedPayload.getInt());
+        assertArrayEquals(ciphertext, java.util.Arrays.copyOfRange(
+                decoded.getPayload(), Integer.BYTES, decoded.getPayload().length));
     }
 }

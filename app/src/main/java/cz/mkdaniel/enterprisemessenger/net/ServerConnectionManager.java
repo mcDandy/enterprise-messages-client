@@ -1577,7 +1577,16 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 	    this.activeChannelKey = key;
 
 	    final var payloadBytes = cryptoManager.encryptPayload(envelope.toString().getBytes(StandardCharsets.UTF_8), key);
-	    final var messagePacket = new Packet(Packet.TYPE_CHAT_MESSAGE, payloadBytes);
+	    if (activeChannelId < 0 || activeChannelId > 0xffff_ffffL) {
+		notifyError("Invalid channel selected");
+		return;
+	    }
+
+	    final var messagePayload = ByteBuffer.allocate(Integer.BYTES + payloadBytes.length);
+	    messagePayload.putInt((int) activeChannelId);
+	    messagePayload.put(payloadBytes);
+
+	    final var messagePacket = new Packet(Packet.TYPE_CHAT_MESSAGE, messagePayload.array());
 	    webSocketClient.sendPacketAsync(messagePacket);
 
 	    Log.d(TAG, "Sent CHAT_MESSAGE to channel " + activeChannelId + " (" + payloadBytes.length + " bytes)");
@@ -1786,7 +1795,7 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 		break;
 	}
 
-	final var acknowledgement = new Packet(Packet.TYPE_ACK, new byte[]{type});
+	final var acknowledgement = new Packet(Packet.TYPE_ACK, new byte[0]);
 
 	webSocketClient.sendPacketAsync(acknowledgement);
 	}
