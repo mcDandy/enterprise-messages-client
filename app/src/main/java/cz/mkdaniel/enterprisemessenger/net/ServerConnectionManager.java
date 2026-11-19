@@ -320,9 +320,10 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
                     return;
                 }
 
-                final JSONArray serversArray = executeGet("/api/servers").asJsonArray();
-                if (serversArray == null) {
-                    postFailure(callback, "Failed to fetch virtual servers from the server");
+                final RestResponse serversResponse = executeGet("/api/servers");
+                final JSONArray serversArray = serversResponse.asJsonArray();
+                if (!serversResponse.isSuccessful() || serversArray == null) {
+                    failRest(serversResponse, callback, "Fetching virtual servers");
 
                     return;
                 }
@@ -364,6 +365,10 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
         if (trimmedName.isEmpty()) {
             mainHandler.post(() -> callback.onFailure("Enter a server name"));
 
+            return;
+        }
+        if (trimmedName.length() > 100) {
+            mainHandler.post(() -> callback.onFailure("Server name can contain at most 100 characters"));
             return;
         }
 
@@ -417,6 +422,10 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 
             return;
         }
+        if (trimmedName.length() > 100) {
+            mainHandler.post(() -> callback.onFailure("Server name can contain at most 100 characters"));
+            return;
+        }
 
         executor.execute(() -> {
             try {
@@ -455,11 +464,35 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
                 return;
             }
 
+            final RestResponse channelsResponse = executeGet(String.format(
+                    Locale.US, "/api/servers/%d/channels/my", serverId));
             final RestResponse response = executeDelete(String.format(Locale.US, "/api/servers/%d", serverId));
             if (!response.isSuccessful()) {
                 failRest(response, callback, "Deleting the server");
 
                 return;
+            }
+
+            // The server deleted its channel set; remove only the matching local key material.
+            final JSONArray channels = channelsResponse.asJsonArray();
+            if (channelsResponse.isSuccessful() && channels != null) {
+                for (int i = 0; i < channels.length(); i++) {
+                    final JSONObject channel = channels.optJSONObject(i);
+                    if (channel == null) {
+                        continue;
+                    }
+                    final long channelId = channel.optLong("id", -1L);
+                    if (channelId >= 0) {
+                        if (channelId == activeChannelId) {
+                            activeChannelId = -1L;
+                            activeChannelKey = null;
+                        }
+                        if (channelId == visibleChannelId) {
+                            visibleChannelId = -1L;
+                        }
+                        channelKeys.forget(channelId);
+                    }
+                }
             }
 
             mainHandler.post(() -> callback.onResult(null));
@@ -471,6 +504,10 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
      * The server requires {@code ADMINISTRATOR} for this operation and reports 403 otherwise.
      */
     public void addServerMember(final long serverId, final long userId, final Callback<Void> callback) {
+        if (serverId < 0 || userId <= 0) {
+            mainHandler.post(() -> callback.onFailure("Invalid server or user id"));
+            return;
+        }
         executor.execute(() -> {
             if (ensureJwt().isEmpty()) {
                 postFailure(callback, "Not signed in");
@@ -512,9 +549,11 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
                     return;
                 }
 
-                final JSONArray channelsArray = executeGet(String.format(Locale.US, "/api/servers/%d/channels/my", serverId)).asJsonArray();
-                if (channelsArray == null) {
-                    postFailure(callback, "Failed to fetch channels from server");
+                final RestResponse channelsResponse = executeGet(String.format(
+                        Locale.US, "/api/servers/%d/channels/my", serverId));
+                final JSONArray channelsArray = channelsResponse.asJsonArray();
+                if (!channelsResponse.isSuccessful() || channelsArray == null) {
+                    failRest(channelsResponse, callback, "Fetching channels");
 
                     return;
                 }
@@ -564,7 +603,7 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
                 final RestResponse response = executeGet(endpoint);
                 final JSONObject result = response.asJson();
                 if (!response.isSuccessful() || result == null) {
-                    postFailure(callback, "Failed to fetch older messages");
+                    failRest(response, callback, "Fetching messages");
                     return;
                 }
 
@@ -676,6 +715,10 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 
             return;
         }
+        if (trimmedName.length() > 100) {
+            mainHandler.post(() -> callback.onFailure("Channel name can contain at most 100 characters"));
+            return;
+        }
 
         executor.execute(() -> {
             try {
@@ -723,6 +766,10 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
         if (trimmedName.isEmpty()) {
             mainHandler.post(() -> callback.onFailure("Enter a channel name"));
 
+            return;
+        }
+        if (trimmedName.length() > 100) {
+            mainHandler.post(() -> callback.onFailure("Channel name can contain at most 100 characters"));
             return;
         }
 
@@ -774,6 +821,9 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
                 this.activeChannelId = -1L;
                 this.activeChannelKey = null;
             }
+            if (channelId == visibleChannelId) {
+                visibleChannelId = -1L;
+            }
 
             channelKeys.forget(channelId);
 
@@ -786,6 +836,10 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
      * channel's server administrator and adds both channel and server membership as needed.
      */
     public void addChannelMember(final long channelId, final long userId, final Callback<Void> callback) {
+        if (channelId < 0 || userId <= 0) {
+            mainHandler.post(() -> callback.onFailure("Invalid channel or user id"));
+            return;
+        }
         executor.execute(() -> {
             if (ensureJwt().isEmpty()) {
                 postFailure(callback, "Not signed in");
@@ -912,8 +966,10 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
      * allowed for any authenticated user, so a plain member can learn that he is one.
      */
     private boolean isUserAdminOfServer(final long serverId, final long myUserId) {
-        final JSONArray members = executeGet(String.format(Locale.US, "/api/servers/%d/members", serverId)).asJsonArray();
-        if (members == null) {
+        final RestResponse response = executeGet(String.format(
+                Locale.US, "/api/servers/%d/members", serverId));
+        final JSONArray members = response.asJsonArray();
+        if (!response.isSuccessful() || members == null) {
             return false;
         }
 
@@ -1385,11 +1441,14 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
             if (peerSecret == null) {
                 // The server's offline queue replays queued unicasts after a restart, when the secret has
                 // to be re-derived from the sender's public key first.
-                final JSONObject senderKeyResponse =
-                        executeGet(String.format(Locale.US, "/api/users/%d/key", senderUserId)).asJson();
-                final byte[] senderKey = senderKeyResponse == null
+                final RestResponse senderKeyResponse = executeGet(
+                        String.format(Locale.US, "/api/users/%d/key", senderUserId));
+                final JSONObject senderKeyJson = senderKeyResponse.isSuccessful()
+                        ? senderKeyResponse.asJson()
+                        : null;
+                final byte[] senderKey = senderKeyJson == null
                         ? null
-                        : CryptoManager.decodePeerKey(senderKeyResponse.optString("publicKey", ""));
+                        : CryptoManager.decodePeerKey(senderKeyJson.optString("publicKey", ""));
 
                 if (senderKey == null) {
                     Log.w(TAG, "No shared ECDH secret with peer " + senderUserId + " yet, dropping rotated key");
@@ -1457,10 +1516,12 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
         final List<JSONObject> members = new ArrayList<>();
 
         try {
-            final JSONArray peers = executeGet(String.format(Locale.US, "/api/channels/%d/keys", channelId))
-                    .asJsonArray();
+            final RestResponse response = executeGet(String.format(
+                    Locale.US, "/api/channels/%d/keys", channelId));
+            final JSONArray peers = response.asJsonArray();
 
-            if (peers == null) {
+            if (!response.isSuccessful() || peers == null) {
+                Log.w(TAG, "Could not fetch channel keys: HTTP " + response.statusCode());
                 return members;
             }
 
