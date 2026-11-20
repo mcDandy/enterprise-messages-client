@@ -133,4 +133,8 @@
     <string name="server_ip">172.18.0.1</string>
     <string name="default_server_name">Default Server</string>
     <integer name="server_port">8443</integer>
+    <string name="error_local_network_denied">The server lives on this network, so the app needs Local network
+        access. Allow it in Settings &#8250; Apps &#8250; Enterprise messenger &#8250; Permissions &#8250; Nearby
+        devices; without it every request to the server times out.
+    </string>
 </resources>

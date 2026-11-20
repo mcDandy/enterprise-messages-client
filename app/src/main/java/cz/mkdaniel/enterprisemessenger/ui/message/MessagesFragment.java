@@ -1,11 +1,7 @@
 package cz.mkdaniel.enterprisemessenger.ui.message;
 
-import android.Manifest;
-import android.annotation.SuppressLint;
-import android.content.pm.PackageManager;
 import android.content.res.ColorStateList;
 import android.graphics.Color;
-import android.os.Build;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.LayoutInflater;
@@ -35,6 +31,7 @@ import cz.mkdaniel.enterprisemessenger.R;
 import cz.mkdaniel.enterprisemessenger.databinding.FragmentMessagesBinding;
 import cz.mkdaniel.enterprisemessenger.databinding.ItemMessageReceivedBinding;
 import cz.mkdaniel.enterprisemessenger.databinding.ItemMessageSentBinding;
+import cz.mkdaniel.enterprisemessenger.net.LocalNetworkPermission;
 import cz.mkdaniel.enterprisemessenger.net.ServerConnectionManager;
 import cz.mkdaniel.enterprisemessenger.notification.NotificationHelper;
 
@@ -48,10 +45,6 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
 
     private static final String TAG = "MessagesFragment";
 
-    /**
-     * Android 17 (API 37) is where the Local Network Permission became mandatory for all apps.
-     */
-    private static final int LOCAL_NETWORK_PERMISSION_API = 37;
     /**
      * How long an explicit reason may cover a connection drop that follows it.
      */
@@ -136,13 +129,16 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
         connectionManager = ServerConnectionManager.getInstance(requireContext());
         connectionManager.addListener(this);
 
-        // Local network traffic is dropped by the platform without ACCESS_LOCAL_NETWORK (targetSdk 37),
-        // so ask for it before dialling a private address such as 192.168.x.x.
-        if (hasLocalNetworkPermission()) {
+        // Local traffic is dropped by the platform until ACCESS_LOCAL_NETWORK is held (targetSdk 37),
+        // so the permission is asked for before dialling - but only when the deployment really is a
+        // private address such as 192.168.x.x. A server on the public internet needs nothing beyond
+        // INTERNET, and asking anyway would charge the user a decision he never had to make.
+        if (LocalNetworkPermission.mayConnect(requireContext(), ServerConnectionManager.WS_HOST)) {
             startConnection();
         } else {
-            Log.w(TAG, "ACCESS_LOCAL_NETWORK not granted yet, requesting it before connecting");
-            requestLocalNetworkPermission();
+            Log.w(TAG, "Server " + ServerConnectionManager.WS_HOST + " is local and ACCESS_LOCAL_NETWORK "
+                    + "is not held yet, requesting it before connecting");
+            LocalNetworkPermission.requestUsing(localNetworkPermissionLauncher);
         }
 
         // Set initial underline state based on connection
@@ -158,21 +154,6 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
             sendMessageFromInput(inputField);
             return true;
         });
-    }
-
-    @SuppressLint("InlinedApi") // String constants are inlined at compile time, safe on older releases.
-    private void requestLocalNetworkPermission() {
-        localNetworkPermissionLauncher.launch(Manifest.permission.ACCESS_LOCAL_NETWORK);
-    }
-
-    @SuppressLint("InlinedApi")
-    private boolean hasLocalNetworkPermission() {
-        if (Build.VERSION.SDK_INT < LOCAL_NETWORK_PERMISSION_API) {
-            // Below API 37 local network access is implicitly granted by INTERNET.
-            return true;
-        }
-        return requireContext().checkSelfPermission(Manifest.permission.ACCESS_LOCAL_NETWORK)
-                == PackageManager.PERMISSION_GRANTED;
     }
 
     /**

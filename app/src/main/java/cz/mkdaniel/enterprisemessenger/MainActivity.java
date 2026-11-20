@@ -1,5 +1,6 @@
 package cz.mkdaniel.enterprisemessenger;
 
+import android.content.pm.PackageManager;
 import android.os.Bundle;
 import android.view.MenuItem;
 import android.view.Menu;
@@ -18,6 +19,7 @@ import androidx.appcompat.app.AppCompatActivity;
 import cz.mkdaniel.enterprisemessenger.crypto.CryptoManager;
 import cz.mkdaniel.enterprisemessenger.databinding.ActivityMainBinding;
 import cz.mkdaniel.enterprisemessenger.net.AccountStore;
+import cz.mkdaniel.enterprisemessenger.net.LocalNetworkPermission;
 import cz.mkdaniel.enterprisemessenger.net.ServerConnectionManager;
 import cz.mkdaniel.enterprisemessenger.notification.NotificationHelper;
 
@@ -144,6 +146,8 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
+        LocalNetworkPermission.checkAndRequest(this, ServerConnectionManager.WS_HOST);
+
         if (!accountStore.isLoggedIn()) {
             navController.navigate(R.id.nav_login);
         } else {
@@ -151,6 +155,24 @@ public class MainActivity extends AppCompatActivity {
             // @string/server_ip, and what the user picks in the UI are virtual servers behind it.
             conn.connect();
         }
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions,
+                                          @NonNull int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+
+        if (requestCode != LocalNetworkPermission.PERMISSION_REQUEST_CODE) {
+            return;
+        }
+
+        if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+            ServerConnectionManager.getInstance(this).connect();
+
+            return;
+        }
+
+        Toast.makeText(this, R.string.error_local_network_denied, Toast.LENGTH_LONG).show();
     }
 
     @Override
