@@ -75,6 +75,7 @@ public class AccountStoreTest {
     public void clearSessionDropsBothStores() {
         store.saveSession("alice", TOKEN, ISSUER, 0L);
         store.saveUserId(17L);
+        store.saveProfileDetails("Alice A", "2026-11-20T15:23:27.526124Z");
 
         store.clearSession();
 
@@ -82,6 +83,8 @@ public class AccountStoreTest {
         assertEquals("", store.getUsername());
         assertEquals("", store.getJwtToken());
         assertEquals(-1L, store.getUserId());
+        assertEquals("the display name belongs to the session", "", store.getDisplayName());
+        assertEquals("the registration date belongs to the session", "", store.getRegisteredAt());
     }
 
     @Test
@@ -91,6 +94,29 @@ public class AccountStoreTest {
         store.saveUserId(4242L);
 
         assertEquals(4242L, store.getUserId());
+    }
+
+    @Test
+    public void profileDetailsRoundTrip() {
+        assertEquals("an account that was never read has no display name", "", store.getDisplayName());
+        assertEquals("an account that was never read has no registration date", "",
+                store.getRegisteredAt());
+
+        store.saveProfileDetails("Alice A", "2026-11-20T15:23:27.526124Z");
+
+        assertEquals("Alice A", store.getDisplayName());
+        assertEquals("2026-11-20T15:23:27.526124Z", store.getRegisteredAt());
+    }
+
+    @Test
+    public void absentProfileDetailsStoreEmptyRatherThanNull() {
+        // GET /api/users/me answers JSON null for an account that never set a display name; the store
+        // must not turn that into the string "null" nor leave a stale value from a previous account.
+        store.saveProfileDetails("Alice A", "2026-11-20T15:23:27.526124Z");
+        store.saveProfileDetails(null, null);
+
+        assertEquals("", store.getDisplayName());
+        assertEquals("", store.getRegisteredAt());
     }
 
     @Test

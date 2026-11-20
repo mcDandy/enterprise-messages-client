@@ -297,6 +297,79 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
     }
 
     /**
+     * What {@code GET /api/users/me} says about the signed-in account: the identity the About-you
+     * card shows. Immutable, and every field is what the server reported - nothing here is guessed.
+     * <p>
+     * {@code userId} is the numeric id used to recognise "me" in member lists; {@code username} is the
+     * handle the account signs in with; {@code displayName} is the name it chose to be shown under and
+     * is {@code ""} when unset; {@code registeredAt} is the server's ISO-8601 registration instant and
+     * is {@code ""} when absent.
+     */
+    public static final class Profile {
+        public final long userId;
+        public final String username;
+        public final String displayName;
+        public final String registeredAt;
+
+        Profile(long userId, String username, String displayName, String registeredAt) {
+            this.userId = userId;
+            this.username = username == null ? "" : username;
+            this.displayName = displayName == null ? "" : displayName;
+            this.registeredAt = registeredAt == null ? "" : registeredAt;
+        }
+
+        /**
+         * The name to show a human: the chosen display name, falling back to the login handle for an
+         * account that never set one. The card uses this rather than picking between the two itself.
+         */
+        public String preferredName() {
+            return displayName.isEmpty() ? username : displayName;
+        }
+    }
+
+    /**
+     * Reads the signed-in account's profile ({@code GET /api/users/me}) and caches what it learns in
+     * {@link AccountStore}, so the About-you card can render from the cache on the next launch and
+     * still show something while this request is in flight or the network is away.
+     * <p>
+     * Unlike {@link #fetchUserId}, which only needs the id, this keeps the display name and the
+     * registration instant the server already returns and that were previously discarded.
+     */
+    public void fetchProfile(final Callback<Profile> callback) {
+        executor.execute(() -> {
+            if (ensureJwt().isEmpty()) {
+                postFailure(callback, "Not signed in");
+
+                return;
+            }
+
+            final AccountStore accountStore = new AccountStore(context);
+            final String username = accountStore.getUsername();
+            final JSONObject me = makeGETRequest("/api/users/me");
+
+            if (me == null) {
+                postFailure(callback, "Could not read your account from the server");
+
+                return;
+            }
+
+            // The server sends JSON null for an account with no display name, and optString maps a
+            // missing key to the default but a present null to "null", hence the explicit check.
+            final long userId = me.optLong("id", -1L);
+            final String displayName = me.isNull("displayName") ? "" : me.optString("displayName", "");
+            final String registeredAt = me.isNull("createdAt") ? "" : me.optString("createdAt", "");
+            final Profile profile = new Profile(userId, username, displayName, registeredAt);
+
+            if (userId > 0) {
+                accountStore.saveUserId(userId);
+            }
+            accountStore.saveProfileDetails(displayName, registeredAt);
+
+            mainHandler.post(() -> callback.onResult(profile));
+        });
+    }
+
+    /**
      * Lists the virtual servers the user is a member of ({@code GET /api/servers}) together with
      * whether he administers each of them, which is what the UI gates its mutations on.
      * <p>

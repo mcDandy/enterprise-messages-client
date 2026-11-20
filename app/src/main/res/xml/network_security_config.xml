@@ -10,10 +10,11 @@
         so cleartext is never required.
 
         Debug builds additionally accept user-installed CAs via <debug-overrides> below, which the
-        platform applies only when android:debuggable="true". That is enough to develop against the
-        self-signed certificate produced by the server's scripts/ensure-dev-cert.sh. For a release
-        build, either use a certificate from a real CA or bundle the deployment's certificate.pem
-        here as a pinned trust anchor.
+        Debug builds additionally accept the development certificate that the server exports
+        (scripts/start-and-export-cert.ps1 writes app/src/main/res/raw/devserver.crt) plus any
+        user-installed CA, via <debug-overrides> below. The platform applies those overrides only
+        when android:debuggable="true", so a release build keeps trusting system CAs alone and can
+        never be pointed at a dev server or intercepted by a proxy.
     -->
     <base-config cleartextTrafficPermitted="false">
         <trust-anchors>
@@ -22,9 +23,9 @@
     </base-config>
     <debug-overrides>
         <trust-anchors>
-            <certificates src="@raw/devserver"/>
             <certificates src="system"/>
             <certificates src="user"/>
+            <certificates src="@raw/devserver"/>
         </trust-anchors>
     </debug-overrides>
 </network-security-config>

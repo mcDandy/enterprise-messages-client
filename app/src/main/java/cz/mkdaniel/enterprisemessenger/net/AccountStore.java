@@ -52,6 +52,22 @@ public class AccountStore {
     private static final String KEY_USER_ID = "user_id";
 
     /**
+     * The name the account chose to be shown under, as opposed to {@link #KEY_USERNAME}, which is the
+     * handle it signs in with. Optional: an account that never set one has no display name and the UI
+     * falls back to the username.
+     * <p>
+     * Not a secret and not sealed - it is shown to other members of every server the user belongs to,
+     * so it carries no less exposure than the username already sitting beside it.
+     */
+    private static final String KEY_DISPLAY_NAME = "display_name";
+
+    /**
+     * When the account was registered, as the ISO-8601 string the server reported. Cached so the
+     * About-you card can render a date offline instead of going blank until the next read.
+     */
+    private static final String KEY_REGISTERED_AT = "registered_at";
+
+    /**
      * Sealed slot of the access token.
      */
     private static final String SLOT_JWT_TOKEN = "jwt_token";
@@ -182,6 +198,8 @@ public class AccountStore {
     public synchronized void clearSession() {
         plain.remove(KEY_USERNAME);
         plain.remove(KEY_USER_ID);
+        plain.remove(KEY_DISPLAY_NAME);
+        plain.remove(KEY_REGISTERED_AT);
         plain.remove(KEY_LOGGED_IN);
 
         blobs.remove(SLOT_JWT_TOKEN);
@@ -196,6 +214,34 @@ public class AccountStore {
      */
     public synchronized void saveUserId(long userId) {
         plain.putString(KEY_USER_ID, Long.toString(userId));
+    }
+
+    /**
+     * Caches the display name and registration instant from {@code GET /api/users/me}. Both are
+     * optional on the server, so an absent value is stored as empty rather than removed: the About-you
+     * card distinguishes "known to be unset" from "never read", and renders a fallback either way.
+     */
+    public synchronized void saveProfileDetails(String displayName, String registeredAt) {
+        plain.putString(KEY_DISPLAY_NAME, displayName == null ? "" : displayName);
+        plain.putString(KEY_REGISTERED_AT, registeredAt == null ? "" : registeredAt);
+    }
+
+    /**
+     * Cached display name, or {@code ""} when the account has never set one or it was never read.
+     */
+    public synchronized String getDisplayName() {
+        final String displayName = plain.getString(KEY_DISPLAY_NAME);
+
+        return displayName == null ? "" : displayName;
+    }
+
+    /**
+     * Cached registration instant as the server's ISO-8601 string, or {@code ""} when unknown.
+     */
+    public synchronized String getRegisteredAt() {
+        final String registeredAt = plain.getString(KEY_REGISTERED_AT);
+
+        return registeredAt == null ? "" : registeredAt;
     }
 
     /**

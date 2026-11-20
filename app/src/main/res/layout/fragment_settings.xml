@@ -56,6 +56,49 @@
                         android:textSize="15sp"
                         tools:text="Logged in as: User"/>
 
+                <!-- About you. The display name and the registration date come from GET /api/users/me
+                     and are cached, so the block renders from the cache on launch and is refreshed
+                     when the read returns; a row with nothing to show stays gone rather than showing
+                     a placeholder. The id is selectable because an administrator has to be able to hand
+                     it to somebody who then adds them to a server. -->
+                <TextView
+                        android:id="@+id/text_display_name"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="14dp"
+                        android:textColor="@color/text_primary"
+                        android:textSize="17sp"
+                        android:textStyle="bold"
+                        tools:text="Danda"/>
+
+                <TextView
+                        android:id="@+id/text_username"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="2dp"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="14sp"
+                        tools:text="tls.probe"/>
+
+                <TextView
+                        android:id="@+id/text_user_id"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:textColor="@color/text_secondary"
+                        android:textIsSelectable="true"
+                        android:textSize="14sp"
+                        tools:text="Your ID: 2"/>
+
+                <TextView
+                        android:id="@+id/text_registered_at"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="2dp"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="14sp"
+                        tools:text="Registered 20 Nov 2026"/>
+
                 <com.google.android.material.button.MaterialButton
                         android:id="@+id/button_edit_display_name"
                         style="@style/Widget.App.MaterialButton"

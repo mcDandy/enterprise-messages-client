@@ -25,6 +25,9 @@ import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
+import java.time.DateTimeException;
+import java.time.format.DateTimeFormatter;
+import java.time.format.FormatStyle;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -135,8 +138,15 @@ public class SettingsFragment extends Fragment {
         AccountStore accountStore = new AccountStore(requireContext());
         if (accountStore.isLoggedIn()) {
             binding.textLoggedUser.setText(getString(R.string.text_logged_in_as, accountStore.getUsername()));
+
+            // Filled from the cache first so the card shows something at once, then refreshed from the
+            // server. A failed read leaves the cached values up rather than blanking them.
+            renderProfile(accountStore.getDisplayName(), accountStore.getUsername(),
+                    accountStore.getUserId(), accountStore.getRegisteredAt());
+            refreshProfile();
         } else {
             binding.textLoggedUser.setText(R.string.text_not_logged_in);
+            hideProfile();
         }
 
         binding.buttonLogout.setOnClickListener(v -> {
@@ -160,6 +170,102 @@ public class SettingsFragment extends Fragment {
 
         binding.buttonEditDisplayName.setOnClickListener(v -> showDisplayNameDialog());
         binding.buttonResetIdentity.setOnClickListener(v -> confirmIdentityReset());
+    }
+
+    /**
+     * Asks the server for the signed-in account's profile and repaints the card with it. Failure is
+     * silent by design: the cached values are already on screen, and a toast here would blame the user
+     * for a network they cannot fix from this screen.
+     */
+    private void refreshProfile() {
+        ServerConnectionManager.getInstance(requireContext()).fetchProfile(
+                new ServerConnectionManager.Callback<>() {
+                    @Override
+                    public void onResult(ServerConnectionManager.Profile profile) {
+                        if (!isAdded() || binding == null) {
+                            return;
+                        }
+
+                        renderProfile(profile.displayName, profile.username,
+                                profile.userId, profile.registeredAt);
+                    }
+
+                    @Override
+                    public void onFailure(String error) {
+                        // The cached values stay up; there is nothing the user can do from here.
+                    }
+                });
+    }
+
+    /**
+     * Paints the About-you block. A row with no value is hidden rather than showing a placeholder, so
+     * an account that has never set a display name simply shows its handle as the heading.
+     *
+     * @param registeredAt the server's ISO-8601 instant, or "" when unknown
+     */
+    private void renderProfile(String displayName, String username, long userId, String registeredAt) {
+        if (binding == null) {
+            return;
+        }
+
+        // The handle is the fallback heading, so it earns its own line only when it differs from the
+        // display name; otherwise the card would print the same word twice.
+        final boolean showUsernameLine = !username.isEmpty() && !username.equals(displayName);
+
+        binding.textDisplayName.setText(displayName.isEmpty() ? username : displayName);
+        binding.textDisplayName.setVisibility(username.isEmpty() && displayName.isEmpty()
+                ? View.GONE
+                : View.VISIBLE);
+
+        binding.textUsername.setText(getString(R.string.label_username, username));
+        binding.textUsername.setVisibility(showUsernameLine ? View.VISIBLE : View.GONE);
+
+        if (userId > 0) {
+            binding.textUserId.setText(getString(R.string.label_user_id, userId));
+            binding.textUserId.setVisibility(View.VISIBLE);
+        } else {
+            binding.textUserId.setVisibility(View.GONE);
+        }
+
+        final String registeredOn = formatRegistrationDate(registeredAt);
+        if (registeredOn == null) {
+            binding.textRegisteredAt.setVisibility(View.GONE);
+        } else {
+            binding.textRegisteredAt.setText(getString(R.string.label_registered_at, registeredOn));
+            binding.textRegisteredAt.setVisibility(View.VISIBLE);
+        }
+    }
+
+    private void hideProfile() {
+        if (binding == null) {
+            return;
+        }
+
+        binding.textDisplayName.setVisibility(View.GONE);
+        binding.textUsername.setVisibility(View.GONE);
+        binding.textUserId.setVisibility(View.GONE);
+        binding.textRegisteredAt.setVisibility(View.GONE);
+    }
+
+    /**
+     * Turns the server's ISO-8601 instant into a date in the phone's zone and locale. Returns null for
+     * a blank or unparseable value, which hides the row: an approximate or invented date would be worse
+     * than none on a screen that otherwise reports exactly what the server says.
+     */
+    private String formatRegistrationDate(String registeredAt) {
+        if (registeredAt == null || registeredAt.isEmpty()) {
+            return null;
+        }
+
+        try {
+            return DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM)
+                    .withLocale(getResources().getConfiguration().getLocales().get(0))
+                    .format(java.time.OffsetDateTime.parse(registeredAt)
+                            .atZoneSameInstant(java.time.ZoneId.systemDefault()));
+        } catch (DateTimeException unparsable) {
+            // Covers DateTimeParseException, which extends it.
+            return null;
+        }
     }
 
     /**
@@ -223,14 +329,19 @@ public class SettingsFragment extends Fragment {
     }
 
     /**
-     * Asks before the device's encryption identity is destroyed. The dialog names the account the
-     * device is bound to, because those are the messages that stop being readable.
+     * Asks for the name other members see. Prefills with the current display name rather than the login
+     * handle: they are different identities, and editing one must not offer the other as its starting
+     * value. An account that has never set a display name falls back to the handle as the suggestion.
      */
     private void showDisplayNameDialog() {
         final AccountStore accountStore = new AccountStore(requireContext());
         final EditText field = new EditText(requireContext());
         field.setHint(R.string.hint_display_name);
-        field.setText(accountStore.getUsername());
+
+        final String currentDisplayName = accountStore.getDisplayName();
+        field.setText(currentDisplayName.isEmpty()
+                ? accountStore.getUsername()
+                : currentDisplayName);
 
         new AlertDialog.Builder(requireContext())
                 .setTitle(R.string.dialog_edit_display_name_title)
@@ -242,8 +353,10 @@ public class SettingsFragment extends Fragment {
                             new ServerConnectionManager.Callback<>() {
                                 @Override
                                 public void onResult(Void result) {
-                                    binding.textLoggedUser.setText(getString(
-                                            R.string.text_logged_in_as, displayName));
+                                    // text_logged_user keeps reporting the login handle; only the
+                                    // profile rows describe the display name. Re-read rather than patch
+                                    // locally so the card cannot drift from what the server stored.
+                                    refreshProfile();
                                     toastText("Display name updated");
                                 }
 
