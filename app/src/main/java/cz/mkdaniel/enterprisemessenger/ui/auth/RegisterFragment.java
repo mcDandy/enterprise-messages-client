@@ -16,6 +16,7 @@ import cz.mkdaniel.enterprisemessenger.R;
 import cz.mkdaniel.enterprisemessenger.crypto.CryptoManager;
 import cz.mkdaniel.enterprisemessenger.databinding.FragmentRegisterBinding;
 import cz.mkdaniel.enterprisemessenger.net.AccountStore;
+import cz.mkdaniel.enterprisemessenger.net.LocalNetworkPermission;
 import cz.mkdaniel.enterprisemessenger.net.ServerConnectionManager;
 
 public class RegisterFragment extends Fragment {
@@ -52,6 +53,12 @@ public class RegisterFragment extends Fragment {
 
         if (!password.equals(confirmPassword)) {
             showError(getString(R.string.error_password_mismatch));
+            return;
+        }
+
+        if (!LocalNetworkPermission.mayConnect(requireContext(), ServerConnectionManager.WS_HOST)) {
+            LocalNetworkPermission.checkAndRequest(requireActivity(), ServerConnectionManager.WS_HOST);
+            showError(getString(R.string.error_local_network_denied));
             return;
         }
 

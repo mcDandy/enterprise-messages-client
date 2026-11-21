@@ -15,6 +15,7 @@ import androidx.navigation.fragment.NavHostFragment;
 import cz.mkdaniel.enterprisemessenger.R;
 import cz.mkdaniel.enterprisemessenger.databinding.FragmentLoginBinding;
 import cz.mkdaniel.enterprisemessenger.net.AccountStore;
+import cz.mkdaniel.enterprisemessenger.net.LocalNetworkPermission;
 import cz.mkdaniel.enterprisemessenger.net.ServerConnectionManager;
 
 public class LoginFragment extends Fragment {
@@ -45,6 +46,12 @@ public class LoginFragment extends Fragment {
 
         if (TextUtils.isEmpty(username) || TextUtils.isEmpty(password)) {
             showError(getString(R.string.error_empty_fields));
+            return;
+        }
+
+        if (!LocalNetworkPermission.mayConnect(requireContext(), ServerConnectionManager.WS_HOST)) {
+            LocalNetworkPermission.checkAndRequest(requireActivity(), ServerConnectionManager.WS_HOST);
+            showError(getString(R.string.error_local_network_denied));
             return;
         }
 
