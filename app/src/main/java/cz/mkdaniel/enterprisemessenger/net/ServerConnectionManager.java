@@ -1886,9 +1886,9 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
                     serverMsg = resObj.optString("message", resObj.optString("error", ""));
                 }
 
-                Log.w(TAG, "Registration failed with HTTP " + statusCode + (serverMsg.isEmpty() ? "" : ": " + serverMsg));
+                Log.w(TAG, "Registration failed with HTTP " + statusCode + ", body: " + resStr + (serverMsg.isEmpty() ? "" : ": " + serverMsg));
 
-                boolean isAlreadyExists = statusCode == 409 || statusCode == 400 ||
+                boolean isAlreadyExists = statusCode == 409 ||
                         serverMsg.toLowerCase(Locale.ROOT).contains("exist") ||
                         serverMsg.toLowerCase(Locale.ROOT).contains("taken") ||
                         serverMsg.toLowerCase(Locale.ROOT).contains("already");
@@ -1907,7 +1907,7 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
                 } else if (isAlreadyExists) {
                     lastRegisterError = "Username already exists. Please check your password or log in.";
                 } else {
-                    lastRegisterError = "Registration failed (HTTP " + statusCode + ")";
+                    lastRegisterError = "Registration failed (HTTP " + statusCode + (resStr.isEmpty() ? "" : ": " + resStr) + ")";
                 }
             }
         } catch (Exception e) {
