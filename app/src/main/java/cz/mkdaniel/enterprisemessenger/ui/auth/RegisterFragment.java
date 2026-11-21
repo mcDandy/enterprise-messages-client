@@ -66,6 +66,10 @@ public class RegisterFragment extends Fragment {
         // the first account's channel keys stayed sealed on it. Channel ids are global, so the two
         // accounts would then be able to open each other's channels - registration stops here.
         final AccountStore accountStore = new AccountStore(requireContext());
+        if (accountStore.boundAccount().isEmpty()) {
+            CryptoManager.getInstance(requireContext()).deleteIdentityKey();
+        }
+
         if (!accountStore.isBoundTo(username)) {
             showError(getString(R.string.error_device_bound_for_register, accountStore.boundAccount()));
             return;
