@@ -1457,7 +1457,7 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
      * The client needs the channel id (for notifications) and the channel key (for end-to-end
      * encryption). The key is this device's own random key for that channel; if the channel has
      * never been opened before, the key is created now and handed to the other members over their
-     * ECDH secrets, see {@link #establishChannelPeerKeys(long)}.
+     * ECDH secrets, see {@link #establishChannelPeerKeys}.
      */
     public void joinChannel(final String channelId) {
         final long id = parseChannelId(channelId);
@@ -1504,7 +1504,7 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
                     return;
                 }
 
-                establishChannelPeerKeys(id);
+                establishChannelPeerKeys(id, key.freshlyCreated());
             });
         } catch (final Exception exception) {
             // No usable KeyStore means no channel key can be persisted, so chat cannot be secured here.
@@ -1523,13 +1523,10 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
      * with "No shared ECDH secret with peer N yet" - so this has to run before the first rotated
      * message of a channel arrives. Peers whose secret is already sealed are skipped.
      * <p>
-     * The key is offered on <i>every</i> join, not only when this device invented it: a member that
-     * joined later has no way to learn who among the others already holds a key, and re-offering is
-     * free, because a receiver that already holds exactly that key treats the unicast as a no-op.
-     * Two members that both generated a key converge after one round of re-distribution, the last
-     * delivery winning for everybody.
+     * The key is offered when the channel key is freshly created or when a new peer appears,
+     * avoiding redundant network unicasts on every join / room open.
      */
-    private void establishChannelPeerKeys(final long channelId) {
+    private void establishChannelPeerKeys(final long channelId, final boolean freshlyCreated) {
         try {
             final var peers = executeGet(String.format(Locale.US, "/api/channels/%d/keys", channelId));
             if (!peers.isSuccessful()) {
@@ -1555,7 +1552,8 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
                     continue;
                 }
 
-                if (!peerSecrets.knows(peerId)) {
+                final boolean isNewPeer = !peerSecrets.knows(peerId);
+                if (isNewPeer) {
                     final byte[] decodedPeerKey = CryptoManager.decodePeerKey(peerPublicKey);
                     if (decodedPeerKey == null) {
                         continue;
@@ -1566,7 +1564,9 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
                     Log.d(TAG, "Established an ECDH secret with peer " + peerId);
                 }
 
-                unicastsChannelKeyTo(channelId, peerId);
+                if (freshlyCreated || isNewPeer) {
+                    unicastsChannelKeyTo(channelId, peerId);
+                }
             }
         } catch (final Exception exception) {
             Log.w(TAG, "Failed to establish peer keys for channel " + channelId, exception);
