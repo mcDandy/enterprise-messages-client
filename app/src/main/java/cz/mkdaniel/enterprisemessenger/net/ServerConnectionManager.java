@@ -616,6 +616,86 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
         });
     }
 
+    public void fetchServerMembers(final long serverId, final Callback<JSONArray> callback) {
+        if (serverId < 0) {
+            postFailure(callback, "Invalid server id");
+            return;
+        }
+        executor.execute(() -> {
+            if (ensureJwt().isEmpty()) {
+                postFailure(callback, "Not signed in");
+                return;
+            }
+            final RestResponse response = executeGet(String.format(Locale.US, "/api/servers/%d/members", serverId));
+            final JSONArray array = response.asJsonArray();
+            if (!response.isSuccessful() || array == null) {
+                failRest(response, callback, "Fetching server members");
+                return;
+            }
+            mainHandler.post(() -> callback.onResult(array));
+        });
+    }
+
+    public void removeServerMember(final long serverId, final long userId, final Callback<Void> callback) {
+        if (serverId < 0 || userId <= 0) {
+            postFailure(callback, "Invalid server or user id");
+            return;
+        }
+        executor.execute(() -> {
+            if (ensureJwt().isEmpty()) {
+                postFailure(callback, "Not signed in");
+                return;
+            }
+            if (!verifyServerAdmin(serverId, callback)) {
+                return;
+            }
+            final RestResponse response = executeDelete(String.format(Locale.US, "/api/servers/%d/members/%d", serverId, userId));
+            if (!response.isSuccessful()) {
+                failRest(response, callback, "Removing server member");
+                return;
+            }
+            mainHandler.post(() -> callback.onResult(null));
+        });
+    }
+
+    public void banUser(final long userId, final Callback<Void> callback) {
+        if (userId <= 0) {
+            postFailure(callback, "Invalid user id");
+            return;
+        }
+        executor.execute(() -> {
+            if (ensureJwt().isEmpty()) {
+                postFailure(callback, "Not signed in");
+                return;
+            }
+            final RestResponse response = executePost(String.format(Locale.US, "/api/admin/users/%d/ban", userId), null);
+            if (!response.isSuccessful()) {
+                failRest(response, callback, "Banning user");
+                return;
+            }
+            mainHandler.post(() -> callback.onResult(null));
+        });
+    }
+
+    public void unbanUser(final long userId, final Callback<Void> callback) {
+        if (userId <= 0) {
+            postFailure(callback, "Invalid user id");
+            return;
+        }
+        executor.execute(() -> {
+            if (ensureJwt().isEmpty()) {
+                postFailure(callback, "Not signed in");
+                return;
+            }
+            final RestResponse response = executePost(String.format(Locale.US, "/api/admin/users/%d/unban", userId), null);
+            if (!response.isSuccessful()) {
+                failRest(response, callback, "Unbanning user");
+                return;
+            }
+            mainHandler.post(() -> callback.onResult(null));
+        });
+    }
+
     /**
      * Lists the channels of a virtual server the user is a member of
      * ({@code GET /api/servers/{id}/channels/my}); every room carries the channel key the members

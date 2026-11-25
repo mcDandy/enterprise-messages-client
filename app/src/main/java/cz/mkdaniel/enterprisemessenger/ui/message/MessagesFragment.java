@@ -80,6 +80,66 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
      * connected cannot silence a later, genuinely unexplained drop.
      */
     private long dropWasExplainedUntil = 0L;
+    private final android.os.Handler pollHandler = new android.os.Handler(android.os.Looper.getMainLooper());
+    private final Runnable pollRunnable = new Runnable() {
+        @Override
+        public void run() {
+            pollLatestMessages();
+            pollHandler.postDelayed(this, 3_000L);
+        }
+    };
+
+    private void pollLatestMessages() {
+        if (connectionManager == null || roomId == null || roomId.isEmpty()) {
+            return;
+        }
+        connectionManager.fetchMessagePage(
+                ServerConnectionManager.parseChannelId(roomId),
+                0,
+                50,
+                new ServerConnectionManager.Callback<>() {
+                    @Override
+                    public void onResult(List<Message> pageMessages) {
+                        if (binding == null || adapter == null || pageMessages.isEmpty()) {
+                            return;
+                        }
+
+                        final List<Message> merged = new ArrayList<>(pageMessages);
+                        for (Message liveMessage : adapter.getCurrentList()) {
+                            boolean alreadyPresent = false;
+                            for (Message message : merged) {
+                                if (message.getId().equals(liveMessage.getId())) {
+                                    alreadyPresent = true;
+                                    break;
+                                }
+                            }
+                            if (!alreadyPresent) {
+                                merged.add(liveMessage);
+                            }
+                        }
+                        merged.sort(java.util.Comparator.comparingLong(Message::getTimestamp));
+
+                        boolean isAtBottom = false;
+                        if (messageLayoutManager != null) {
+                            int lastVisible = messageLayoutManager.findLastVisibleItemPosition();
+                            int totalItemCount = adapter.getItemCount();
+                            isAtBottom = lastVisible >= totalItemCount - 3;
+                        }
+
+                        final boolean autoScroll = isAtBottom;
+                        adapter.submitList(merged, () -> {
+                            if (binding != null && messageLayoutManager != null && autoScroll && !merged.isEmpty()) {
+                                binding.recyclerviewMessages.scrollToPosition(merged.size() - 1);
+                            }
+                        });
+                    }
+
+                    @Override
+                    public void onFailure(String error) {
+                        Log.d(TAG, "Poll failed: " + error);
+                    }
+                });
+    }
 
     @Override
     public View onCreateView(@NonNull LayoutInflater inflater,
@@ -182,11 +242,13 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
             connectionManager.setVisibleChannel(channelId);
         }
         NotificationHelper.cancelNotificationForChannel(requireContext(), channelId);
+        pollHandler.postDelayed(pollRunnable, 3_000L);
     }
 
     @Override
     public void onPause() {
         super.onPause();
+        pollHandler.removeCallbacks(pollRunnable);
         if (connectionManager != null) {
             connectionManager.setVisibleChannel(-1L);
         }
@@ -362,6 +424,7 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
     @Override
     public void onDestroyView() {
         super.onDestroyView();
+        pollHandler.removeCallbacks(pollRunnable);
         if (connectionManager != null) {
             connectionManager.removeListener(this);
         }

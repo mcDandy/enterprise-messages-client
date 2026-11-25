@@ -131,9 +131,18 @@
     <string name="subtitle_server_item">Workspace</string>
     <string name="channel_hash">#</string>
 
+    <string name="action_admin_panel">Admin Panel</string>
+    <string name="dialog_admin_panel_title">Server Admin Panel: %1$s</string>
+    <string name="action_ban_user">Ban User</string>
+    <string name="action_unban_user">Unban User</string>
+    <string name="action_remove_member">Remove from Server</string>
+    <string name="member_banned">User banned</string>
+    <string name="member_unbanned">User unbanned</string>
+    <string name="member_removed">Member removed from server</string>
+
     <!-- Server Connection Configuration: the single point of truth for the address of the one
          physical server. Nothing else may carry a host name. -->
-    <string name="server_ip">172.18.0.1</string>
+    <string name="server_ip">192.168.1.115</string>
     <string name="default_server_name">Default Server</string>
     <integer name="server_port">8443</integer>
     <string name="error_local_network_denied">The server lives on this network, so the app needs Local network

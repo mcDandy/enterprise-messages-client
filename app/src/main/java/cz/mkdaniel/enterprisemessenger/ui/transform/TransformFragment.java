@@ -28,6 +28,8 @@ import cz.mkdaniel.enterprisemessenger.databinding.ItemTransformBinding;
 import cz.mkdaniel.enterprisemessenger.net.ServerConnectionManager;
 import cz.mkdaniel.enterprisemessenger.notification.NotificationHelper;
 import cz.mkdaniel.enterprisemessenger.ui.server.ServerNameDialogFragment;
+import org.json.JSONArray;
+import org.json.JSONObject;
 
 /**
  * Shows the <b>virtual</b> servers the signed-in user belongs to. They come from the one physical
@@ -146,9 +148,10 @@ public class TransformFragment extends Fragment {
         final String renameLabel = getString(R.string.action_rename);
         final String deleteLabel = getString(R.string.action_delete);
         final String addMemberLabel = getString(R.string.action_add_member);
+        final String adminPanelLabel = getString(R.string.action_admin_panel);
 
         final String[] options = item.isAdmin()
-                ? new String[]{switchLabel, addMemberLabel, renameLabel, deleteLabel}
+                ? new String[]{switchLabel, addMemberLabel, adminPanelLabel, renameLabel, deleteLabel}
                 : new String[]{switchLabel};
 
         new MaterialAlertDialogBuilder(requireContext())
@@ -160,6 +163,8 @@ public class TransformFragment extends Fragment {
                         openServer(item);
                     } else if (chosen.equals(addMemberLabel)) {
                         showAddMemberDialog(item);
+                    } else if (chosen.equals(adminPanelLabel)) {
+                        showAdminPanelDialog(item);
                     } else if (chosen.equals(renameLabel)) {
                         showServerNameDialog(R.string.dialog_edit_server_title, R.string.hint_server_name,
                                 R.string.action_save, item);
@@ -167,6 +172,105 @@ public class TransformFragment extends Fragment {
                         showDeleteConfirmationDialog(item);
                     }
                 })
+                .show();
+    }
+
+    private void showAdminPanelDialog(ServerViewItem item) {
+        ServerConnectionManager.getInstance(requireContext()).fetchServerMembers(
+                item.getServerId(), new ServerConnectionManager.Callback<>() {
+                    @Override
+                    public void onResult(JSONArray members) {
+                        if (!isAdded() || getContext() == null) return;
+                        if (members == null || members.length() == 0) {
+                            Toast.makeText(requireContext(), "No members found", Toast.LENGTH_SHORT).show();
+                            return;
+                        }
+
+                        final String[] memberDisplayNames = new String[members.length()];
+                        final long[] memberUserIds = new long[members.length()];
+
+                        for (int i = 0; i < members.length(); i++) {
+                            JSONObject m = members.optJSONObject(i);
+                            long userId = m != null ? m.optLong("userId", -1L) : -1L;
+                            String role = m != null ? m.optString("role", "MEMBER") : "MEMBER";
+                            memberUserIds[i] = userId;
+                            memberDisplayNames[i] = "User ID: " + userId + " (" + role + ")";
+                        }
+
+                        new MaterialAlertDialogBuilder(requireContext())
+                                .setTitle(getString(R.string.dialog_admin_panel_title, item.getText()))
+                                .setItems(memberDisplayNames, (dialog, which) -> {
+                                    long targetUserId = memberUserIds[which];
+                                    showMemberActionDialog(item, targetUserId);
+                                })
+                                .setNegativeButton(R.string.action_cancel, (dialog, which) -> dialog.dismiss())
+                                .show();
+                    }
+
+                    @Override
+                    public void onFailure(String error) {
+                        if (isAdded()) {
+                            Toast.makeText(requireContext(), error, Toast.LENGTH_LONG).show();
+                        }
+                    }
+                });
+    }
+
+    private void showMemberActionDialog(ServerViewItem item, long targetUserId) {
+        final String removeLabel = getString(R.string.action_remove_member);
+        final String banLabel = getString(R.string.action_ban_user);
+        final String unbanLabel = getString(R.string.action_unban_user);
+
+        final String[] actions = new String[]{removeLabel, banLabel, unbanLabel};
+
+        new MaterialAlertDialogBuilder(requireContext())
+                .setTitle("Manage User " + targetUserId)
+                .setItems(actions, (dialog, which) -> {
+                    if (which == 0) {
+                        // Remove from server
+                        ServerConnectionManager.getInstance(requireContext()).removeServerMember(
+                                item.getServerId(), targetUserId, new ServerConnectionManager.Callback<>() {
+                                    @Override
+                                    public void onResult(Void result) {
+                                        Toast.makeText(requireContext(), R.string.member_removed, Toast.LENGTH_SHORT).show();
+                                    }
+
+                                    @Override
+                                    public void onFailure(String error) {
+                                        Toast.makeText(requireContext(), error, Toast.LENGTH_LONG).show();
+                                    }
+                                });
+                    } else if (which == 1) {
+                        // Ban user globally
+                        ServerConnectionManager.getInstance(requireContext()).banUser(
+                                targetUserId, new ServerConnectionManager.Callback<>() {
+                                    @Override
+                                    public void onResult(Void result) {
+                                        Toast.makeText(requireContext(), R.string.member_banned, Toast.LENGTH_SHORT).show();
+                                    }
+
+                                    @Override
+                                    public void onFailure(String error) {
+                                        Toast.makeText(requireContext(), error, Toast.LENGTH_LONG).show();
+                                    }
+                                });
+                    } else if (which == 2) {
+                        // Unban user globally
+                        ServerConnectionManager.getInstance(requireContext()).unbanUser(
+                                targetUserId, new ServerConnectionManager.Callback<>() {
+                                    @Override
+                                    public void onResult(Void result) {
+                                        Toast.makeText(requireContext(), R.string.member_unbanned, Toast.LENGTH_SHORT).show();
+                                    }
+
+                                    @Override
+                                    public void onFailure(String error) {
+                                        Toast.makeText(requireContext(), error, Toast.LENGTH_LONG).show();
+                                    }
+                                });
+                    }
+                })
+                .setNegativeButton(R.string.action_cancel, (dialog, which) -> dialog.dismiss())
                 .show();
     }
 
