@@ -2111,8 +2111,9 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
      */
     @Override
     public void onPacketReceived(final Packet packet) {
+        final byte type = packet.getType();
+        boolean acknowledgementDeferred = false;
         try {
-            final var type = packet.getType();
             final var wrappedPayload = ByteBuffer.wrap(packet.getPayload());
 
             Log.d(TAG, "Incoming packet type: 0x" + Integer.toHexString(type) + ", payload size: " + packet.getPayload().length);
@@ -2201,7 +2202,14 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
                     // The server's version identifies a row of its own channel_key table and says nothing
                     // about the key we are about to invent, so it is logged and ignored; the version that
                     // travels to the other members is ours, inside the encrypted envelope.
-                    executor.execute(() -> rotateAndDistributeChannelKey(channelId));
+                    executor.execute(() -> {
+                        try {
+                            rotateAndDistributeChannelKey(channelId);
+                        } finally {
+                            sendAcknowledgement();
+                        }
+                    });
+                    acknowledgementDeferred = true;
                 }
 
                 break;
@@ -2224,7 +2232,14 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
                     final var ciphertextrcv = new byte[wrappedPayload.remaining()];
                     wrappedPayload.get(ciphertextrcv);
 
-                    executor.execute(() -> adoptUnicastChannelKey(peerId, ciphertextrcv));
+                    executor.execute(() -> {
+                        try {
+                            adoptUnicastChannelKey(peerId, ciphertextrcv);
+                        } finally {
+                            sendAcknowledgement();
+                        }
+                    });
+                    acknowledgementDeferred = true;
                 }
 
                 break;
@@ -2237,7 +2252,21 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 
         } catch (final Exception exception) {
             Log.e(TAG, exception.toString());
+        } finally {
+            if (!acknowledgementDeferred && isQueuedDeliveryPacket(type)) {
+                sendAcknowledgement();
+            }
         }
+    }
+
+    private boolean isQueuedDeliveryPacket(final byte type) {
+        return type == Packet.TYPE_CHAT_MESSAGE
+                || type == Packet.TYPE_KEY_ROTATION
+                || type == Packet.TYPE_UNICAST_ROTATED_KEY;
+    }
+
+    private void sendAcknowledgement() {
+        webSocketClient.sendPacketAsync(new Packet(Packet.TYPE_ACK, new byte[0]));
     }
 
     @Override
