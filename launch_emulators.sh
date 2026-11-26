@@ -5,11 +5,22 @@
 echo "starting automatic emulator testing for Android"
 
 # setup ANDROID_HOME
-#export ANDROID_HOME="~/Android/Sdk"
-# setup ANDROID_SDK_ROOT
+#export ANDROID_HOME="~/Android/Sdk" # setup ANDROID_SDK_ROOT
 #export ANDROID_SDK_ROOT=$ANDROID_HOME
 # setup adb path
 #~/Library/Android/sdk/platform-tools:~/Library/Android/sdk/cmdline-tools/latest/bin:
+echo "setup ENV"
+export ANDROID_HOME=./Android/Sdk
+export ANDROID_SDK_ROOT=$ANDROID_HOME
+
+echo "setup tool aliases"
+android="./Library/Android/sdk/cmdline-tools/latest/bin/android"
+adb="./Android/Sdk/platform-tools/adb"
+
+echo "verify tools"
+$android --version
+$adb --version
+
 echo "preparing gradlew"
 chmod 0766 gradlew
 
@@ -26,10 +37,10 @@ fi
 
 #if [[ $1 == "emus" ]];
 #then
-    echo "starting 2 emulators"
+echo "starting 2 emulators"
 
-    android emulator start small_phone
-    android emulator start medium_phone
+$android emulator start small_phone
+$android emulator start medium_phone
 #fi
 
 if [[ $1 == "gradleInstall" ]];
@@ -37,7 +48,7 @@ then
     echo "building, installing, and testing the appliction code"
 
     ./gradlew installDebug
-    #./gradlew installDebugAndroidTest
+    ./gradlew installDebugAndroidTest
 fi
 
 if [[ $1 == "androidTests" ]];
@@ -47,22 +58,45 @@ then
     ./gradlew connectedDebugAndroidTest
 fi
 
+if [[ $1 == "goal:test:multi" ]];
+then
+    echo "launching multi-emulator tests"
+
+    #$adb -s emulator-5554 shell am instrument -w -e class cz.mkdaniel.enterprisemessenger.ExampleInstrumentedTest#twoEmulatorMessageFlow -e role sender -e runId run-001 -e username sender_test -e password test-password -e serverName "E2E Test Server" -e channelName "e2e-test" your.test.package/androidx.test.runner.AndroidJUnitRunner
+
+    #$adb -s emulator-5556 shell am instrument -w -e class cz.mkdaniel.enterprisemessenger.ExampleInstrumentedTest#twoEmulatorMessageFlow -e role receiver -e runId run-001 -e username receiver_test -e password test-password -e serverName "E2E Test Server" -e channelName "e2e-test" your.test.package/androidx.test.runner.AndroidJUnitRunner
+
+    ./gradlew installDebugAndroidTest
+
+    $adb -s emulator-5554 shell am instrument -w \
+	-e class cz.mkdaniel.enterprisemessenger.ExampleInstrumentedTest#twoEmulatorMessageFlow \
+	-e role sender -e runId run-001 \
+	cz.mkdaniel.enterprisemessenger.test/androidx.test.runner.AndroidJUnitRunner
+    $adb -s emulator-5556 shell am instrument -w \
+	-e class cz.mkdaniel.enterprisemessenger.ExampleInstrumentedTest#twoEmulatorMessageFlow \
+	-e role receiver -e runId run-001 \
+	cz.mkdaniel.enterprisemessenger.test/androidx.test.runner.AndroidJUnitRunner
+fi
+
 if [[ $1 == "logcats" ]];
 then
     TERM_EMU=$2
 
     echo "starting logcats with xterm as background jobs"
 
-    $TERM_EMU -e bash -c 'adb -s emulator-5554 logcat *:S WebSocketClient:* CryptoManager:* ServerConnectionManager:* -T 1' &
-    $TERM_EMU -e bash -c 'adb -s emulator-5556 logcat *:S WebSocketClient:* CryptoManager:* ServerConnectionManager:* -T 1' &
+    $TERM_EMU -e bash -c "$adb -s emulator-5554 logcat *:S WebSocketClient:* CryptoManager:* ServerConnectionManager:* -T 1" &
+    $TERM_EMU -e bash -c "$adb -s emulator-5556 logcat *:S WebSocketClient:* CryptoManager:* ServerConnectionManager:* -T 1" &
 fi
 
 echo "reverting gradlew"
 chmod 0666 gradlew
 
-echo "attempting to close 2 emulators"
+if [[ $2 == "destroyEmus" ]];
+then
+    echo "attempting to close 2 emulators"
 
-android emulator stop small_phone
-android emulator stop medium_phone
+    $android emulator stop small_phone
+    $android emulator stop medium_phone
+fi
 
 echo "done, exiting"
