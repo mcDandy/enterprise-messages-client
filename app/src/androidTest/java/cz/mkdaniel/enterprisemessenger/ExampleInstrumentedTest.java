@@ -65,11 +65,28 @@ public class ExampleInstrumentedTest {
 	onView(withId(R.id.edittext_password)).perform(typeText(PASSWORD), closeSoftKeyboard());
 	onView(withId(R.id.button_login)).perform(click());
 	onView(withId(R.id.image_view_item_transform)).check(matches(isDisplayed()));
+    }
+
+    @Test
+    public void select_random_message_server_success() {
 	// select one message server
 	onView(withId(R.id.image_view_item_transform)).perform(click());
 	// select one message channel
 	// post message: Test message
     }
+
+    // test select random channel
+    // test send test message
+    // test other client receive sent text message
+    // test rename server
+    // test delete server
+    // test switch server
+    // test create test message server
+    // test create test channel
+    // test add member to channel
+    // test verify that peer joined
+    // test change name
+    // test logout
 
     //@Test
     public void register_success() {
