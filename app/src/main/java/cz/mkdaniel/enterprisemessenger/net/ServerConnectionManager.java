@@ -774,6 +774,12 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
                     return;
                 }
 
+                final long currentUserId = resolveUserId();
+                if (currentUserId < 0) {
+                    postFailure(callback, "Could not identify your account while loading messages");
+                    return;
+                }
+
                 final List<Message> decrypted = new ArrayList<>();
                 for (int i = 0; i < messages.length(); i++) {
                     final JSONObject item = messages.optJSONObject(i);
@@ -801,7 +807,8 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
                     final String fallbackId =
                             String.valueOf(item.optLong("id", System.currentTimeMillis()));
                     final String text = new String(plaintext, StandardCharsets.UTF_8);
-                    final String sender = "Server User";
+                    final String sender = item.optLong("senderId", -1L) == currentUserId
+                            ? "You" : "Server User";
                     final String messageId = fallbackId;
                     long timestamp = parseOffsetDateTime(item.optString("sentAt", ""));
 
