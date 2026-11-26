@@ -365,11 +365,8 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
             }
         });
 
-        // Encrypt with the active channel key and transmit over WebSocket. The server broadcasts
-        // the ciphertext back to the whole channel including us; onMessageReceived below drops
-        // that echo because the id inside the envelope matches the bubble added above.
-        String username = new cz.mkdaniel.enterprisemessenger.net.AccountStore(requireContext()).getUsername();
-        connectionManager.sendChatMessage(messageId, text, username == null || username.isEmpty() ? "You" : username);
+        // The server queues the encrypted message for other channel members, not back to the sender.
+        connectionManager.sendChatMessage(text);
 
         inputField.setText("");
     }
@@ -394,7 +391,6 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
     @Override
     public void onMessageReceived(Message message) {
         if (!isAdded()) return;
-        // The server broadcasts to the whole channel including the sender - skip our own echo
         for (Message existing : adapter.getCurrentList()) {
             if (existing.getId().equals(message.getId())) {
                 return;
