@@ -873,7 +873,8 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
                     }
                 }
             }
-            Log.w(TAG, "decryptChatPayloadForVersion: Key version " + keyVersion + " not found in candidates for channel " + channelId);
+            Log.w(TAG, "decryptChatPayloadForVersion: Key version " + keyVersion + " not found in candidates for channel " + channelId + ". Triggering peer key re-establishment.");
+            executor.execute(() -> establishChannelPeerKeys(channelId, true));
         }
         return decryptChatPayload(channelId, ciphertext);
     }
@@ -1564,9 +1565,8 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
                     Log.d(TAG, "Established an ECDH secret with peer " + peerId);
                 }
 
-                if (freshlyCreated || isNewPeer) {
-                    unicastsChannelKeyTo(channelId, peerId);
-                }
+                // Always offer our key on join/peer check as designed (re-offering is a no-op for receivers who already have it)
+                unicastsChannelKeyTo(channelId, peerId);
             }
         } catch (final Exception exception) {
             Log.w(TAG, "Failed to establish peer keys for channel " + channelId, exception);
