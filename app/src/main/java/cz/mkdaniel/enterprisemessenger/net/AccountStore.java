@@ -68,6 +68,14 @@ public class AccountStore {
     private static final String KEY_REGISTERED_AT = "registered_at";
 
     /**
+     * Prefix of the per-channel read cursor, e.g. {@code read_42}. Not secret: it is the position the
+     * server already knows this member has read. It is kept so a receipt is sent only when the channel
+     * really gained a message - reporting a position the server already holds makes it answer with an
+     * error packet, which the user would see as a spurious failure.
+     */
+    private static final String KEY_READ_CURSOR_PREFIX = "read_";
+
+    /**
      * Sealed slot of the access token.
      */
     private static final String SLOT_JWT_TOKEN = "jwt_token";
@@ -259,6 +267,32 @@ public class AccountStore {
         } catch (NumberFormatException unparseable) {
             return -1L;
         }
+    }
+
+    /**
+     * Last message id this member reported as read in {@code channelId}, or {@code -1L} when the
+     * channel has never been read on this installation.
+     */
+    public synchronized long getLastReadMessageId(final long channelId) {
+        final String cached = plain.getString(KEY_READ_CURSOR_PREFIX + channelId);
+
+        if (cached == null) {
+            return -1L;
+        }
+
+        try {
+            return Long.parseLong(cached);
+        } catch (NumberFormatException unparseable) {
+            return -1L;
+        }
+    }
+
+    /**
+     * Remembers that a receipt up to {@code messageId} reached the server for {@code channelId}, so
+     * the same position is never reported twice.
+     */
+    public synchronized void saveLastReadMessageId(final long channelId, final long messageId) {
+        plain.putString(KEY_READ_CURSOR_PREFIX + channelId, Long.toString(messageId));
     }
 
     public synchronized String getJwtToken() {

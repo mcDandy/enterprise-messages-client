@@ -13,6 +13,7 @@ import org.json.JSONArray;
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
@@ -898,7 +899,13 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
                     }
                 }
             }
-            Log.w(TAG, "decryptChatPayloadForVersion: Key version " + keyVersion + " not found in candidates for channel " + channelId);
+            // Expected on every history message, so it is not a warning: the version the server
+            // reports is the uuid of its own channel_key row, which describes a different rotation
+            // than the key this device holds - that one's uuid only travels inside the encrypted
+            // envelope. The candidate sweep below is what actually opens the payload.
+            Log.v(TAG, "decryptChatPayloadForVersion: server version " + keyVersion
+                    + " is not one of this device's key versions for channel " + channelId
+                    + ", sweeping candidates instead");
         }
         return decryptChatPayload(channelId, ciphertext);
     }
@@ -2230,10 +2237,13 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
      * @return the plaintext envelope, or {@code null} when no known key opens the payload
      */
     private byte[] decryptChatPayload(final long channelId, final byte[] ciphertext) {
-        final java.util.List<byte[]> candidates = new ArrayList<>();
+        // Keyed by key material, so a key reachable through several of the ids below is still tried
+        // once. ByteBuffer hashes and compares the bytes it wraps without copying them, which keeps
+        // this linear now that a channel can carry a long key history.
+        final LinkedHashMap<ByteBuffer, byte[]> candidates = new LinkedHashMap<>();
 
         if (activeChannelKey != null) {
-            candidates.add(activeChannelKey);
+            candidates.put(ByteBuffer.wrap(activeChannelKey), activeChannelKey);
         }
 
         for (final long chId : new long[]{channelId, activeChannelId, visibleChannelId}) {
@@ -2242,16 +2252,7 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
             }
 
             for (final ChannelKeyRegistry.KeyVersion version : channelKeys.decryptCandidates(chId)) {
-                boolean alreadyPresent = false;
-                for (byte[] existing : candidates) {
-                    if (java.util.Arrays.equals(existing, version.key())) {
-                        alreadyPresent = true;
-                        break;
-                    }
-                }
-                if (!alreadyPresent) {
-                    candidates.add(version.key());
-                }
+                candidates.putIfAbsent(ByteBuffer.wrap(version.key()), version.key());
             }
         }
 
@@ -2260,29 +2261,22 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
         for (final long chId : new long[]{channelId, activeChannelId, visibleChannelId}) {
             final byte[] legacyKey = legacyReadKey(chId);
             if (legacyKey != null) {
-                boolean alreadyPresent = false;
-                for (byte[] existing : candidates) {
-                    if (java.util.Arrays.equals(existing, legacyKey)) {
-                        alreadyPresent = true;
-                        break;
-                    }
-                }
-                if (!alreadyPresent) {
-                    candidates.add(legacyKey);
-                }
+                candidates.putIfAbsent(ByteBuffer.wrap(legacyKey), legacyKey);
             }
         }
 
         int index = 0;
-        for (final byte[] key : candidates) {
+        for (final byte[] key : candidates.values()) {
             try {
-                byte[] plaintext = cryptoManager.decryptPayload(ciphertext, key);
-                Log.d(TAG, "decryptChatPayload: Successfully decrypted message for channel " + channelId + " using candidate key #" + index);
+                final byte[] plaintext = cryptoManager.decryptPayload(ciphertext, key);
+                Log.d(TAG, "decryptChatPayload: opened a payload of channel " + channelId
+                        + " with candidate key #" + index + " of " + candidates.size());
                 return plaintext;
             } catch (final Exception e) {
-                Log.d(TAG, "decryptChatPayload: candidate key #" + index + " failed: " + e.getMessage());
+                // Missing on all but the right key is the normal case once a channel has a history,
+                // so a miss is not worth a line: one unreadable message used to print hundreds.
+                index++;
             }
-            index++;
         }
 
         Log.w(TAG, "decryptChatPayload: Failed to decrypt message for channel " + channelId + " with " + candidates.size() + " candidate keys");

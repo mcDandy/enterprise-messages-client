@@ -33,11 +33,16 @@ public class ChannelKeyRegistry {
      */
     public static final String HISTORY_SUFFIX = "_hist";
     /**
-     * How many superseded keys per channel stay readable. Rotation is rare (only when a member
-     * joins the channel fresh or re-keys it), so eight versions cover a long history of them while
-     * bounding both the sealed blob and the number of GCM attempts per incoming message.
+     * How many superseded keys per channel stay readable. Every membership change re-keys the
+     * channel, so this is the number of joins and leaves a member can go through and still read the
+     * whole history; 256 covers years of them.
+     * <p>
+     * The bound is not free: the sealed blob reaches {@code 256 * 48 = 12 KiB} per channel, and a
+     * payload this device holds no key for makes the reader walk every candidate once before giving
+     * up. A message the device can actually read stops at the first or second candidate, so only
+     * foreign or corrupted payloads pay for the full list.
      */
-    static final int MAX_HISTORY = 8;
+    static final int MAX_HISTORY = 256;
     private static final String TAG = "ChannelKeyRegistry";
     private static final int KEY_LENGTH_BYTES = 32;
     private static final int UUID_LENGTH_BYTES = 16;
