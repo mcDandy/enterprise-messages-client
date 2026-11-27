@@ -87,6 +87,12 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
      */
     private long dropWasExplainedUntil = 0L;
     private final android.os.Handler pollHandler = new android.os.Handler(android.os.Looper.getMainLooper());
+    /**
+     * Set once the server says this device is no longer a member of the channel on screen. It stops
+     * the poll and locks the input, and it is what {@code onResume()} clears so returning to the
+     * screen after an administrator adds the user back recovers without restarting the app.
+     */
+    private boolean removedFromChannel = false;
     private final Runnable pollRunnable = new Runnable() {
         /**
          * Runs the scheduled message polling task.
@@ -94,10 +100,67 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
          */
         @Override
         public void run() {
+            if (removedFromChannel) {
+                // Nothing to poll: the channel is closed to us and the server would refuse every
+                // request. The tick is not rescheduled - handleRemovedFromChannel stopped it.
+                return;
+            }
             pollLatestMessages();
+            // The server never announces a removal, so asking is the only signal. Once per tick
+            // keeps that to one small request per three seconds while this screen is open.
+            verifyChannelMembership();
             pollHandler.postDelayed(this, 3_000L);
         }
     };
+
+    /**
+     * Asks whether this device is still a member of the channel on screen, and locks the screen down
+     * when the answer is no.
+     */
+    private void verifyChannelMembership() {
+        if (connectionManager == null || roomId == null || roomId.isEmpty()) {
+            return;
+        }
+        connectionManager.verifyStillMemberOfChannel(
+                ServerConnectionManager.parseChannelId(roomId),
+                new ServerConnectionManager.Callback<>() {
+                    @Override
+                    public void onResult(Void result) {
+                        // Still a member, or the server could not be asked. Either way the input
+                        // stays as it is; the next tick asks again.
+                    }
+
+                    @Override
+                    public void onFailure(String error) {
+                        handleRemovedFromChannel(error);
+                    }
+                });
+    }
+
+    /**
+     * Reacts to the server no longer listing this device in the channel: the history stays readable,
+     * but nothing more can be sent, so the input is locked and the poll stops.
+     * <p>
+     * The screen is deliberately not popped. The user is looking at a conversation that has just
+     * become read-only under him, and yanking the screen away loses the context of why his message
+     * stopped going through.
+     *
+     * @param error the reason to show the user
+     */
+    private void handleRemovedFromChannel(String error) {
+        if (!isAdded() || removedFromChannel) {
+            return;
+        }
+        removedFromChannel = true;
+        pollHandler.removeCallbacks(pollRunnable);
+
+        if (binding != null) {
+            binding.edittextMessageInput.setEnabled(false);
+            binding.buttonSendMessage.setEnabled(false);
+            updateInputUnderline(false);
+        }
+        Toast.makeText(requireContext(), error, Toast.LENGTH_LONG).show();
+    }
 
     /**
      * Fetches and displays the latest messages for the visible channel.
@@ -275,6 +338,14 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
     public void onResume() {
         super.onResume();
         long channelId = ServerConnectionManager.parseChannelId(roomId);
+        // Returning to the screen re-arms the poll and the input. An administrator can add the user
+        // back to a channel he was removed from, and the next tick then lets him write again - no
+        // restart, because the lock is only this flag plus the two disabled views.
+        removedFromChannel = false;
+        if (binding != null) {
+            binding.edittextMessageInput.setEnabled(true);
+            binding.buttonSendMessage.setEnabled(true);
+        }
         // The channel on screen is the one whose messages are read, so it must not notify, and the
         // notification it left behind while the user was elsewhere is now obsolete
         if (connectionManager != null) {

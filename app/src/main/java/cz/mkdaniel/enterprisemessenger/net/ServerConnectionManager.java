@@ -163,24 +163,87 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
      */
     private volatile long highestKnownMessageId = -1L;
     /**
-     * Furthest message each <i>other</i> member of the channel has had their client acknowledge,
-     * keyed by user id. The server broadcasts one member's cursors to every online member of the
+     * Each channel's peer delivery state: how far its other members have acknowledged, and how many
+     * of them there are. The server broadcasts one member's cursors to every online member of the
      * channel, and the {@code userId} in the frame names the member the cursors belong to, not the
      * recipient - so a frame about anyone but this device is a delivery confirmation for messages
      * this device sent.
      * <p>
-     * Only the maximum across members is kept, because the UI has one delivered state rather than
-     * one per member. This device's own id is never stored here: acknowledging a message the
-     * device itself wrote would mark it delivered the instant it was sent.
+     * Keyed by channel id rather than held as one global pair, because both ways this state went
+     * stale are per channel: a member removed from a channel kept counting as a recipient of that
+     * channel's messages, and opening a second channel inherited the first one's cursors. A single
+     * shared map could only ever be merged into, so a departed member lingered in it and the total
+     * stayed at the old channel's size.
      */
-    private final Map<Long, Long> peerDeliveredCursors = new ConcurrentHashMap<>();
+    private final Map<Long, ChannelDeliveryState> deliveryByChannel = new ConcurrentHashMap<>();
+
     /**
-     * How many other members the channel had when the cursors were last listed. The server only
-     * reports a member's cursor when it moves, so a peer who has acknowledged nothing is absent
-     * from every frame and from the snapshot; this is what tells the UI a count of two out of an
-     * unknown total is really two out of five.
+     * One channel's peer delivery state: how far each of its other members has acknowledged, and
+     * how many other members it has.
+     * <p>
+     * The count is not derivable from the cursors. The server only reports a member's cursor when
+     * it moves, so a peer who has acknowledged nothing is absent from every frame and from the
+     * listing's cursor values; without a total the UI cannot tell two recipients out of two from two
+     * out of twenty, and a bubble would reach full opacity in a channel of twenty.
      */
-    private volatile int peerCount = 0;
+    static final class ChannelDeliveryState {
+        /**
+         * Each other member's user id mapped to the highest message id their client has
+         * acknowledged. This device's own id is never stored: acknowledging a message the device
+         * itself wrote would mark it delivered the instant it was sent.
+         */
+        final Map<Long, Long> cursors = new ConcurrentHashMap<>();
+
+        volatile int peerCount = 0;
+
+        /**
+         * Raises {@code userId}'s cursor to {@code lastDelivered}, never lowering it.
+         *
+         * @return {@code true} when the cursor actually moved, so the caller knows a repaint is due
+         */
+        boolean raiseCursor(final long userId, final long lastDelivered) {
+            // Atomic throughout, because frames arrive on the socket thread while a member listing
+            // lands on the executor. putIfAbsent claims the first cursor and compare-and-set raises
+            // it, so a concurrent frame either wins the slot or is recognised as stale rather than
+            // being lost between a read and a write.
+            final Long before = cursors.putIfAbsent(userId, lastDelivered);
+            if (before == null) {
+                return true;
+            }
+            if (before >= lastDelivered) {
+                // A duplicate, or a stale frame that arrived out of order across a reconnect. A
+                // cursor already shown as delivered must not be lowered by an older frame.
+                return false;
+            }
+
+            // Otherwise this frame raised the cursor and the repaint is its to schedule.
+            return cursors.replace(userId, before, lastDelivered);
+        }
+
+        /**
+         * Replaces the whole state with one fresh member listing, dropping anyone no longer in the
+         * channel. A merge would keep a removed member as a phantom recipient forever.
+         *
+         * @param cursors the listed cursors, this device's own row already excluded
+         * @param peerCount how many other members the listing contains
+         */
+        void replaceWith(final Map<Long, Long> cursors, final int peerCount) {
+            this.cursors.clear();
+            this.cursors.putAll(cursors);
+            this.peerCount = peerCount;
+        }
+
+        Map<Long, Long> cursorsSnapshot() {
+            return new HashMap<>(cursors);
+        }
+    }
+
+    /**
+     * Returns the delivery state of {@code channelId}, creating an empty one on first use.
+     */
+    private ChannelDeliveryState deliveryState(final long channelId) {
+        return deliveryByChannel.computeIfAbsent(channelId, id -> new ChannelDeliveryState());
+    }
 
     /**
      * A sent message still waiting for its server id, with the instant it was sent so a stale one
@@ -2142,24 +2205,7 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
                 // permanently unreadable here.
                 publishIdentityKeyIfStale();
 
-                final RestResponse membership = executeGet(
-                        String.format(Locale.US, "/api/channels/%d/members", id));
-                final JSONArray members = membership.asJsonArray();
-                if (!membership.isSuccessful() || members == null) {
-                    notifyError("Could not verify channel membership");
-                    return;
-                }
-
-                final long myUserId = resolveUserId();
-                boolean isMember = false;
-                for (int i = 0; i < members.length(); i++) {
-                    final JSONObject member = members.optJSONObject(i);
-                    if (member != null && member.optLong("userId", -1L) == myUserId) {
-                        isMember = true;
-                        break;
-                    }
-                }
-                if (!isMember) {
+                if (!isChannelMember(id)) {
                     notifyError("You do not have permission to send messages in this channel");
                     return;
                 }
@@ -2172,6 +2218,122 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
             Log.e(TAG, "No channel key available for channel " + id, exception);
             notifyError("Encryption keys are unavailable - open a channel after restarting the app");
         }
+    }
+
+    /**
+     * Whether this device's account still appears in the server's member list of
+     * {@code channelId} ({@code GET /api/channels/{id}/members}).
+     * <p>
+     * Background thread only - it is a REST call. An unreachable server or an unreadable reply comes
+     * back as {@code false} from the listing itself, so callers that must not act on a network hiccup
+     * use {@link #verifyStillMemberOfChannel}, which distinguishes "the listing failed" from "the
+     * listing says you are gone".
+     *
+     * @param channelId the channel to check
+     * @return {@code true} when this device is listed as a member
+     */
+    private boolean isChannelMember(final long channelId) {
+        final RestResponse membership = executeGet(
+                String.format(Locale.US, "/api/channels/%d/members", channelId));
+        final JSONArray members = membership.asJsonArray();
+        if (!membership.isSuccessful() || members == null) {
+            return false;
+        }
+
+        final long myUserId = resolveUserId();
+        if (myUserId < 0) {
+            return false;
+        }
+
+        for (int i = 0; i < members.length(); i++) {
+            final JSONObject member = members.optJSONObject(i);
+            if (member != null && member.optLong("userId", -1L) == myUserId) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Re-checks that this device is still a member of {@code channelId}, and reacts when it is not.
+     * <p>
+     * The server has no frame that announces a removal: {@code CHANNEL_MEMBER_INFO} carries delivery
+     * cursors and names a member, not a membership change. So the only client-side signal is asking.
+     * {@code MessagesFragment} asks on each poll tick while the chat is open, which notices a removal
+     * within one tick (three seconds) without a request per keystroke.
+     * <p>
+     * On removal this device stops treating the channel as its own - the selected and on-screen ids
+     * are released and the channel's delivery cursors are dropped, so a member who left cannot keep
+     * counting as a recipient. The channel <b>key</b> is deliberately kept: the history must stay
+     * readable, and an administrator can add the user back at any time. That is the same reasoning
+     * {@link ChannelKeyRegistry} keeps a bounded key history rather than dropping a superseded key.
+     * <p>
+     * A listing that merely failed is reported as success. An unreachable server must not grey out an
+     * input the user can still legitimately use, and the next tick asks again.
+     *
+     * @param channelId the channel the user is looking at
+     * @param callback answered on the main thread: success while still a member (or while the server
+     *                 could not be asked), failure once the listing no longer lists this device
+     */
+    public void verifyStillMemberOfChannel(final long channelId, final Callback<Void> callback) {
+        if (channelId < 0) {
+            return;
+        }
+        executor.execute(() -> {
+            try {
+                if (ensureJwt().isEmpty()) {
+                    return;
+                }
+
+                final RestResponse membership = executeGet(
+                        String.format(Locale.US, "/api/channels/%d/members", channelId));
+                final JSONArray members = membership.asJsonArray();
+                if (!membership.isSuccessful() || members == null) {
+                    // Unknown, not "removed". Silence keeps a network hiccup from locking the input.
+                    Log.d(TAG, "Could not re-check membership of channel " + channelId
+                            + " (HTTP " + membership.statusCode() + "); assuming it is unchanged");
+                    mainHandler.post(() -> callback.onResult(null));
+
+                    return;
+                }
+
+                final long myUserId = resolveUserId();
+                boolean stillMember = false;
+                if (myUserId > 0) {
+                    for (int i = 0; i < members.length(); i++) {
+                        final JSONObject member = members.optJSONObject(i);
+                        if (member != null && member.optLong("userId", -1L) == myUserId) {
+                            stillMember = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (stillMember) {
+                    mainHandler.post(() -> callback.onResult(null));
+
+                    return;
+                }
+
+                Log.i(TAG, "This device is no longer a member of channel " + channelId);
+
+                if (channelId == activeChannelId) {
+                    this.activeChannelId = -1L;
+                }
+                if (channelId == visibleChannelId) {
+                    visibleChannelId = -1L;
+                }
+                clearDeliveryState(channelId);
+
+                mainHandler.post(() -> callback.onFailure(
+                        "You are no longer a member of this channel"));
+            } catch (final Exception e) {
+                Log.w(TAG, "Membership re-check for channel " + channelId
+                        + " failed: " + e.getMessage());
+                mainHandler.post(() -> callback.onResult(null));
+            }
+        });
     }
 
     /**
@@ -3143,6 +3305,11 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
     private void clearHistoryCaches() {
         historyPlaintext.evictAll();
         historyUndecryptableAtEpoch.evictAll();
+
+        // The delivery cursors belong to channels that no longer exist or to an account that is no
+        // longer signed in, and nothing will ever move them again. Every caller of this method
+        // (deleting a channel, deleting a server, ending the session) is exactly such a case.
+        clearAllDeliveryStates();
     }
 
     /**
@@ -3353,7 +3520,7 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
                             assignServerIds(lastDelivered);
                         }
                     } else if (channelId == visibleChannelId) {
-                        recordPeerDelivery(userId, lastDelivered);
+                        recordPeerDelivery(channelId, userId, lastDelivered);
                     }
 
                     mainHandler.post(() -> {
@@ -3585,36 +3752,46 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
     }
 
     /**
-     * Records that {@code userId}'s client has acknowledged everything up to {@code lastDelivered},
-     * and tells the UI so messages at or below it can be marked delivered.
+     * Records that {@code userId}'s client, in {@code channelId}, has acknowledged everything up to
+     * {@code lastDelivered}, and tells the UI so messages at or below it can be marked delivered.
      * <p>
      * Monotonic per member: the server's own update is monotonic, but frames can arrive out of
      * order across a reconnect, and a stale frame must not un-deliver a message already shown as
      * delivered.
      *
+     * @param channelId the channel the cursor belongs to
      * @param userId the identifier of the user
      * @param lastDelivered the highest message ID delivered to the peer
      */
-    private void recordPeerDelivery(final long userId, final long lastDelivered) {
-        final long previous = peerDeliveredCursors.merge(userId, lastDelivered, Math::max);
-        if (previous >= lastDelivered) {
+    private void recordPeerDelivery(final long channelId, final long userId, final long lastDelivered) {
+        if (channelId < 0) {
             return;
         }
-        mainHandler.post(this::notifyPeerDelivery);
+        if (!deliveryState(channelId).raiseCursor(userId, lastDelivered)) {
+            return;
+        }
+        mainHandler.post(() -> notifyPeerDelivery(channelId));
     }
 
     /**
-     * Publishes the whole peer cursor map, so the UI can count how many recipients acknowledged
-     * any given message. The map is sent rather than a single high-water mark because the number
-     * of recipients is what the UI shows: one member having read up to 90 and five members having
-     * read up to 90 are different states.
+     * Publishes {@code channelId}'s peer cursor map, so the UI can count how many recipients
+     * acknowledged any given message. The map is sent rather than a single high-water mark because
+     * the number of recipients is what the UI shows: one member having read up to 90 and five
+     * members having read up to 90 are different states.
+     * <p>
+     * Only the channel on screen is ever published, which is the contract the UI already has: it
+     * paints one channel's bubbles and has no use for another channel's cursors.
      */
-    private void notifyPeerDelivery() {
-        if (listeners.isEmpty()) {
+    private void notifyPeerDelivery(final long channelId) {
+        if (listeners.isEmpty() || channelId != visibleChannelId) {
             return;
         }
-        final Map<Long, Long> snapshot = new HashMap<>(peerDeliveredCursors);
-        final int peers = peerCount;
+        final ChannelDeliveryState state = deliveryByChannel.get(channelId);
+        if (state == null) {
+            return;
+        }
+        final Map<Long, Long> snapshot = state.cursorsSnapshot();
+        final int peers = state.peerCount;
         mainHandler.post(() -> {
             for (ConnectionListener l : listeners) {
                 l.onPeerDeliveryProgress(snapshot, peers);
@@ -3623,10 +3800,31 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
     }
 
     /**
+     * Drops one channel's delivery state: its cursors and its member count. Called when a channel
+     * is deleted, when this device is removed from it, and when the rooms list reopens it, so a
+     * member who left between two visits cannot linger as a phantom recipient.
+     */
+    private void clearDeliveryState(final long channelId) {
+        deliveryByChannel.remove(channelId);
+    }
+
+    /**
+     * Drops every channel's delivery state. The session is ending or every channel of a server is
+     * gone, so no cursor of either will ever be updated again.
+     */
+    private void clearAllDeliveryStates() {
+        deliveryByChannel.clear();
+    }
+
+    /**
      * Loads each member's delivered cursor once ({@code GET /api/channels/{id}/members}) so
      * messages already delivered before this device opened the channel are marked as such rather
      * than waiting for a frame that will not come. Live updates arrive afterwards over
      * {@code CHANNEL_MEMBER_INFO}.
+     * <p>
+     * The listing <b>replaces</b> what this channel's state held rather than merging into it. A
+     * merge is what made a removed member permanent: his cursor stayed in the map, kept counting as
+     * a recipient, and the total stayed at the size the channel had before he left.
      *
      * @param channelId the identifier of the channel
      */
@@ -3648,7 +3846,7 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
                 Log.d(TAG, "Could not load member delivery cursors for channel " + channelId);
                 return;
             }
-            int peers = 0;
+            final Map<Long, Long> listedCursors = new HashMap<>();
             for (int i = 0; i < members.length(); i++) {
                 final JSONObject member = members.optJSONObject(i);
                 if (member == null) {
@@ -3658,14 +3856,13 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
                 if (memberId < 0 || memberId == myUserId) {
                     continue;
                 }
-                peers++;
-                recordPeerDelivery(memberId, member.optLong("lastDeliveredMessageId", 0L));
+                listedCursors.put(memberId, member.optLong("lastDeliveredMessageId", 0L));
             }
             // This listing is the only place the channel's size is knowable: a member who has
             // acknowledged nothing has no cursor to broadcast, so without a total the UI cannot
             // tell one recipient out of two from one recipient out of twenty.
-            peerCount = peers;
-            mainHandler.post(this::notifyPeerDelivery);
+            deliveryState(channelId).replaceWith(listedCursors, listedCursors.size());
+            mainHandler.post(() -> notifyPeerDelivery(channelId));
         });
     }
 
