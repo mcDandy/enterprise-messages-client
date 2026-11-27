@@ -320,19 +320,34 @@ public class CryptoManager {
      */
     public byte[] decryptPayload(byte[] encryptedBytes, byte[] aesKeyBytes) throws GeneralSecurityException {
         if (encryptedBytes == null || encryptedBytes.length <= IV_LENGTH_BYTES) {
+            Log.e(TAG, "decryptPayload: Invalid encrypted payload length: " + (encryptedBytes == null ? "null" : encryptedBytes.length));
             throw new IllegalArgumentException("Invalid encrypted payload length");
         }
         if (aesKeyBytes == null || aesKeyBytes.length == 0) {
+            Log.e(TAG, "decryptPayload: Empty or null AES key provided");
             throw new IllegalArgumentException("An empty key cannot open a payload");
         }
 
-        final Cipher cipher = Cipher.getInstance(AES_GCM_TRANSFORM);
-        cipher.init(Cipher.DECRYPT_MODE, new SecretKeySpec(aesKeyBytes, "AES"),
-                new GCMParameterSpec(TAG_LENGTH_BITS, encryptedBytes, 0, IV_LENGTH_BYTES));
+        try {
+            final Cipher cipher = Cipher.getInstance(AES_GCM_TRANSFORM);
+            cipher.init(Cipher.DECRYPT_MODE, new SecretKeySpec(aesKeyBytes, "AES"),
+                    new GCMParameterSpec(TAG_LENGTH_BITS, encryptedBytes, 0, IV_LENGTH_BYTES));
 
-        // A wrong candidate key surfaces as AEADBadTagException, which callers that try several keys
-        // catch and treat as "this is not the key for this message".
-        return cipher.doFinal(encryptedBytes, IV_LENGTH_BYTES, encryptedBytes.length - IV_LENGTH_BYTES);
+            // A wrong candidate key surfaces as AEADBadTagException, which callers that try several keys
+            // catch and treat as "this is not the key for this message".
+            byte[] decrypted = cipher.doFinal(encryptedBytes, IV_LENGTH_BYTES, encryptedBytes.length - IV_LENGTH_BYTES);
+            Log.d(TAG, "decryptPayload: Successfully decrypted payload of " + decrypted.length + " bytes");
+            return decrypted;
+        } catch (javax.crypto.AEADBadTagException badTag) {
+            Log.w(TAG, "decryptPayload: AEADBadTagException (wrong candidate key or corrupted ciphertext)");
+            throw badTag;
+        } catch (GeneralSecurityException gse) {
+            Log.w(TAG, "decryptPayload: GeneralSecurityException: " + gse.getMessage());
+            throw gse;
+        } catch (Exception e) {
+            Log.e(TAG, "decryptPayload: Unexpected decryption error: " + e.getMessage(), e);
+            throw new GeneralSecurityException("Decryption failed", e);
+        }
     }
 
     /**
@@ -341,7 +356,12 @@ public class CryptoManager {
      */
     public byte[] encryptPayload(final byte[] plainBytes, final byte[] aesKeyBytes) throws GeneralSecurityException {
         if (aesKeyBytes == null || aesKeyBytes.length == 0) {
+            Log.e(TAG, "encryptPayload: Empty or null AES key provided");
             throw new IllegalArgumentException("An empty key cannot seal a payload");
+        }
+        if (plainBytes == null) {
+            Log.e(TAG, "encryptPayload: Plainbytes is null");
+            throw new IllegalArgumentException("Cannot encrypt null bytes");
         }
 
         final byte[] iv = new byte[IV_LENGTH_BYTES];
@@ -357,6 +377,7 @@ public class CryptoManager {
         System.arraycopy(iv, 0, result, 0, IV_LENGTH_BYTES);
         System.arraycopy(cipherText, 0, result, IV_LENGTH_BYTES, cipherText.length);
 
+        Log.d(TAG, "encryptPayload: Successfully encrypted " + plainBytes.length + " bytes into " + result.length + " bytes ciphertext");
         return result;
     }
 
