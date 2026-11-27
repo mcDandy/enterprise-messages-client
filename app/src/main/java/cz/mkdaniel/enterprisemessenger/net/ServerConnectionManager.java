@@ -286,6 +286,14 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
         this.httpClient = createOkHttpClient();
     }
 
+    /**
+     * Normalizes the HTTP URL.
+     *
+     * @param rawIp the server address or URL; null or empty input is rejected
+     * @return the normalize HTTP URL result
+     * @throws IllegalArgumentException if an argument is invalid.
+     * @throws IllegalStateException if the current state does not allow this operation.
+     */
     public static String normalizeHttpUrl(String rawIp) {
         // No implicit fallback to another host: an empty address is a caller error, and silently
         // dialling @string/server_ip instead would send the JWT to a server the user never picked.
@@ -309,6 +317,12 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
         }
     }
 
+    /**
+     * Normalizes the WebSocket URL.
+     *
+     * @param rawIp the server address or URL; null or empty input is rejected
+     * @return the normalize WebSocket URL result
+     */
     public static String normalizeWsUrl(String rawIp) {
         String httpUrl = normalizeHttpUrl(rawIp);
         String wsUrl = httpUrl.replaceFirst("^https://", "wss://").replaceFirst("^http://", "ws://");
@@ -326,6 +340,9 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
      * It survives as a read-only candidate so messages written by an older build stay readable after
      * the update. It is never used to encrypt anything: doing so would put the message back within
      * reach of the server and of every stranger who can enumerate channel ids.
+     *
+     * @param channelId the identifier of the channel
+     * @return the legacy read key data
      */
     private static byte[] legacyReadKey(long channelId) {
         if (channelId < 0) {
@@ -344,6 +361,9 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 
     /**
      * Room ids are server channel ids ("42"); legacy placeholder ids ("r1") map to their digits.
+     *
+     * @param roomId a server channel identifier or a legacy placeholder containing its digits
+     * @return the parsed channel identifier, or {@code -1} if the input is null or has no digits
      */
     public static long parseChannelId(String roomId) {
         if (roomId == null) return -1L;
@@ -362,6 +382,11 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
      * thread, so a fragment can call it straight from a click listener.
      */
 
+    /**
+     * Creates the ok HTTP client.
+     *
+     * @return the create ok HTTP client result
+     */
     private static OkHttpClient createOkHttpClient() {
         return new OkHttpClient();
     }
@@ -369,6 +394,8 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
     /**
      * Reads the deployment address from {@code @string/server_ip} and {@code @integer/server_port},
      * the only place it is configured. Called before the first URL is built.
+     *
+     * @param context the Android context used to access application resources and services
      */
     private static void applyDeploymentDefault(Context context) {
         final Context appContext = context.getApplicationContext();
@@ -376,6 +403,12 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
         WS_PORT = appContext.getResources().getInteger(cz.mkdaniel.enterprisemessenger.R.integer.server_port);
     }
 
+    /**
+     * Returns the instance.
+     *
+     * @param context the Android context used to access application resources and services
+     * @return the instance value
+     */
     public static ServerConnectionManager getInstance(Context context) {
         if (instance == null) {
             synchronized (ServerConnectionManager.class) {
@@ -388,6 +421,11 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
         return instance;
     }
 
+    /**
+     * Returns the last register error.
+     *
+     * @return the last register error value
+     */
     public String getLastRegisterError() {
         return lastRegisterError;
     }
@@ -395,6 +433,8 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
     /**
      * Reads the numeric id the server assigned to the signed-in account and caches it in
      * {@link AccountStore}. Everything that has to recognise "me" inside a member list uses it.
+     *
+     * @param callback the callback that receives the operation result
      */
     public void fetchUserId(final Callback<Long> callback) {
         executor.execute(() -> {
@@ -440,6 +480,8 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
         /**
          * The name to show a human: the chosen display name, falling back to the login handle for an
          * account that never set one. The card uses this rather than picking between the two itself.
+         *
+         * @return the preferred name result
          */
         public String preferredName() {
             return displayName.isEmpty() ? username : displayName;
@@ -453,6 +495,8 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
      * <p>
      * Unlike {@link #fetchUserId}, which only needs the id, this keeps the display name and the
      * registration instant the server already returns and that were previously discarded.
+     *
+     * @param callback the callback that receives the operation result
      */
     public void fetchProfile(final Callback<Profile> callback) {
         executor.execute(() -> {
@@ -495,6 +539,8 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
      * The admin-ness comes from each server's member list, mirroring the server-side check; the
      * fan-out is deliberately sequential because it already runs inside the one background task and
      * the list holds a handful of entries.
+     *
+     * @param callback the callback that receives the operation result
      */
     public void fetchServers(final Callback<List<ServerViewItem>> callback) {
         executor.execute(() -> {
@@ -551,6 +597,9 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
     /**
      * Creates a virtual server ({@code POST /api/servers}). Any authenticated user may do it and
      * becomes its {@code ADMINISTRATOR}, which is why the returned item says {@code isAdmin = true}.
+     *
+     * @param name the name to use
+     * @param callback the callback that receives the operation result
      */
     public void createServer(final String name, final Callback<ServerViewItem> callback) {
         final String trimmedName = name == null ? "" : name.trim();
@@ -605,6 +654,10 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
     /**
      * Renames a virtual server ({@code PUT /api/servers/{id}}). Server-administrator only, so a
      * member reaches the {@code onFailure} branch with a permission message instead of being logged out.
+     *
+     * @param serverId the identifier of the server
+     * @param name the name to use
+     * @param callback the callback that receives the operation result
      */
     public void renameServer(final long serverId, final String name, final Callback<Void> callback) {
         final String trimmedName = name == null ? "" : name.trim();
@@ -649,6 +702,9 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
     /**
      * Deletes a virtual server ({@code DELETE /api/servers/{id}}), which the server answers 204 with
      * no body - hence the success check looks at the status alone.
+     *
+     * @param serverId the identifier of the server
+     * @param callback the callback that receives the operation result
      */
     public void deleteServer(final long serverId, final Callback<Void> callback) {
         executor.execute(() -> {
@@ -702,6 +758,10 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
     /**
      * Adds a registered user to a virtual server as a regular member.
      * The server requires {@code ADMINISTRATOR} for this operation and reports 403 otherwise.
+     *
+     * @param serverId the identifier of the server
+     * @param userId the identifier of the user
+     * @param callback the callback that receives the operation result
      */
     public void addServerMember(final long serverId, final long userId, final Callback<Void> callback) {
         if (serverId < 0 || userId <= 0) {
@@ -738,6 +798,12 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
         });
     }
 
+    /**
+     * Fetches the server members.
+     *
+     * @param serverId the identifier of the server
+     * @param callback the callback that receives the operation result
+     */
     public void fetchServerMembers(final long serverId, final Callback<JSONArray> callback) {
         if (serverId < 0) {
             postFailure(callback, "Invalid server id");
@@ -762,6 +828,9 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
      * Lists the members of one channel ({@code GET /api/channels/{id}/members}). Used by the channel
      * menu to offer a member for removal; the ids are what
      * {@link #removeChannelMember(long, long, Callback)} needs.
+     *
+     * @param channelId the identifier of the channel
+     * @param callback the callback that receives the operation result
      */
     public void fetchChannelMembers(final long channelId, final Callback<JSONArray> callback) {
         if (channelId < 0) {
@@ -783,6 +852,13 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
         });
     }
 
+    /**
+     * Removes the server member.
+     *
+     * @param serverId the identifier of the server
+     * @param userId the identifier of the user
+     * @param callback the callback that receives the operation result
+     */
     public void removeServerMember(final long serverId, final long userId, final Callback<Void> callback) {
         if (serverId < 0 || userId <= 0) {
             postFailure(callback, "Invalid server or user id");
@@ -805,6 +881,12 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
         });
     }
 
+    /**
+     * Bans the user.
+     *
+     * @param userId the identifier of the user
+     * @param callback the callback that receives the operation result
+     */
     public void banUser(final long userId, final Callback<Void> callback) {
         if (userId <= 0) {
             postFailure(callback, "Invalid user id");
@@ -824,6 +906,12 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
         });
     }
 
+    /**
+     * Removes the ban for user.
+     *
+     * @param userId the identifier of the user
+     * @param callback the callback that receives the operation result
+     */
     public void unbanUser(final long userId, final Callback<Void> callback) {
         if (userId <= 0) {
             postFailure(callback, "Invalid user id");
@@ -847,6 +935,9 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
      * Lists the channels of a virtual server the user is a member of
      * ({@code GET /api/servers/{id}/channels/my}); every room carries the channel key the members
      * agree on, see {@link ChannelKeyRegistry}.
+     *
+     * @param serverId the identifier of the server
+     * @param callback the callback that receives the operation result
      */
     public void fetchChannels(final long serverId, Callback<List<Room>> callback) {
         executor.execute(() -> {
@@ -895,6 +986,11 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
     /**
      * Loads one older page of channel history. The REST endpoint paginates newest-first, so the
      * returned messages are reversed before they are delivered to the chat adapter.
+     *
+     * @param channelId the identifier of the channel
+     * @param page the zero-based page number to retrieve
+     * @param size the maximum number of items on the page
+     * @param callback the callback that receives the operation result
      */
     public void fetchMessagePage(final long channelId, final int page, final int size,
                                  final Callback<List<Message>> callback) {
@@ -1049,6 +1145,12 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
         });
     }
 
+    /**
+     * Parses the UUID.
+     *
+     * @param value the value to process
+     * @return the parse UUID result
+     */
     private UUID parseUuid(final String value) {
         if (value == null || value.isEmpty()) {
             return null;
@@ -1060,6 +1162,12 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
         }
     }
 
+    /**
+     * Parses the offset date time.
+     *
+     * @param value the value to process
+     * @return the parse offset date time result
+     */
     private long parseOffsetDateTime(final String value) {
         if (value == null || value.isEmpty()) {
             return System.currentTimeMillis();
@@ -1071,6 +1179,12 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
         }
     }
 
+    /**
+     * Normalizes the sender name.
+     *
+     * @param senderName the sender name supplied with the message
+     * @return the normalize sender name result
+     */
     private String normalizeSenderName(final String senderName) {
         if (senderName == null) {
             return "Server User";
@@ -1084,6 +1198,14 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
         return senderName;
     }
 
+    /**
+     * Decrypts the chat payload for version.
+     *
+     * @param channelId the identifier of the channel
+     * @param ciphertext the encrypted data to process
+     * @param serverKeyVersion the key version reported by the server
+     * @return the decrypt chat payload for version data
+     */
     private byte[] decryptChatPayloadForVersion(final long channelId, final byte[] ciphertext,
                                                  final UUID serverKeyVersion) {
         if (serverKeyVersion != null) {
@@ -1121,6 +1243,10 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
     /**
      * Creates a channel in a virtual server ({@code POST /api/servers/{id}/channels}). The server
      * restricts it to the virtual server's administrators and rejects a duplicate name.
+     *
+     * @param serverId the identifier of the server
+     * @param name the name to use
+     * @param callback the callback that receives the operation result
      */
     public void createChannel(final long serverId, final String name, final Callback<Room> callback) {
         final String trimmedName = name == null ? "" : name.trim();
@@ -1177,6 +1303,10 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
     /**
      * Renames a channel ({@code PUT /api/channels/{id}}); the server accepts it from the virtual
      * server's administrator only.
+     *
+     * @param channelId the identifier of the channel
+     * @param name the name to use
+     * @param callback the callback that receives the operation result
      */
     public void renameChannel(final long channelId, final String name, final Callback<Void> callback) {
         final String trimmedName = name == null ? "" : name.trim();
@@ -1220,6 +1350,9 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 
     /**
      * Deletes a channel ({@code DELETE /api/channels/{id}}), answered with 204 and no body.
+     *
+     * @param channelId the identifier of the channel
+     * @param callback the callback that receives the operation result
      */
     public void deleteChannel(final long channelId, final Callback<Void> callback) {
         executor.execute(() -> {
@@ -1257,6 +1390,10 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
     /**
      * Adds a registered user to a channel. The server requires the signed-in user to be that
      * channel's server administrator and adds both channel and server membership as needed.
+     *
+     * @param channelId the identifier of the channel
+     * @param userId the identifier of the user
+     * @param callback the callback that receives the operation result
      */
     public void addChannelMember(final long channelId, final long userId, final Callback<Void> callback) {
         if (channelId < 0 || userId <= 0) {
@@ -1365,6 +1502,13 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
         });
     }
 
+    /**
+     * Removes the channel member.
+     *
+     * @param channelId the identifier of the channel
+     * @param userId the identifier of the user
+     * @param callback the callback that receives the operation result
+     */
     public void removeChannelMember(final long channelId, final long userId, final Callback<Void> callback) {
         if (channelId < 0 || userId <= 0) {
             mainHandler.post(() -> callback.onFailure("Invalid channel or user id"));
@@ -1469,6 +1613,9 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
      * device's key for {@code channelId}. It runs only after the server accepted the envelopes, so a
      * refused request cannot leave this device sealing messages with a key that exists nowhere else.
      * The superseded key moves into the registry's history and stays readable.
+     *
+     * @param channelId the identifier of the channel
+     * @param key the encryption key to use
      */
     private void adoptDistributedKey(final long channelId, final ChannelKeyRegistry.KeyVersion key) {
         try {
@@ -1485,6 +1632,9 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 
     /**
      * Updates the display name of the signed-in account.
+     *
+     * @param displayName the display name to set
+     * @param callback the callback that receives the operation result
      */
     public void updateDisplayName(final String displayName, final Callback<Void> callback) {
         final String trimmedName = displayName == null ? "" : displayName.trim();
@@ -1581,6 +1731,10 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
      * Mirrors the server's {@code isUserAdmin}: the user administers a virtual server when that
      * server's member list contains his id with the {@code ADMINISTRATOR} role. Reading the list is
      * allowed for any authenticated user, so a plain member can learn that he is one.
+     *
+     * @param serverId the identifier of the server
+     * @param myUserId the signed-in user ID
+     * @return user admin of server.
      */
     private boolean isUserAdminOfServer(final long serverId, final long myUserId) {
         final RestResponse response = executeGet(String.format(
@@ -1602,6 +1756,13 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
         return false;
     }
 
+    /**
+     * Verifies the server admin.
+     *
+     * @param serverId the identifier of the server
+     * @param callback the callback that receives the operation result
+     * @return whether the verify server admin condition holds
+     */
     private <T> boolean verifyServerAdmin(final long serverId, final Callback<T> callback) {
         if (serverId < 0) {
             postFailure(callback, "Invalid server id");
@@ -1622,6 +1783,13 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
         return true;
     }
 
+    /**
+     * Verifies the channel admin.
+     *
+     * @param channelId the identifier of the channel
+     * @param callback the callback that receives the operation result
+     * @return whether the verify channel admin condition holds
+     */
     private <T> boolean verifyChannelAdmin(final long channelId, final Callback<T> callback) {
         if (channelId < 0) {
             postFailure(callback, "Invalid channel id");
@@ -1640,6 +1808,11 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
         return verifyServerAdmin(serverId, callback);
     }
 
+    /**
+     * Sets the visible channel.
+     *
+     * @param channelId the identifier of the channel
+     */
     public void setVisibleChannel(long channelId) {
         visibleChannelId = channelId;
     }
@@ -1650,18 +1823,39 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
      * state {@code MessagesFragment} leaves behind in {@code onPause()}, and it is exactly when a
      * message of any channel deserves a notification.
      */
+    /**
+     * Returns whether channel visible.
+     *
+     * @param channelId the identifier of the channel
+     * @return channel visible.
+     */
     public boolean isChannelVisible(long channelId) {
         return channelId >= 0 && channelId == visibleChannelId;
     }
 
+    /**
+     * Adds the listener.
+     *
+     * @param listener the listener to add or remove
+     */
     public void addListener(ConnectionListener listener) {
         listeners.add(listener);
     }
 
+    /**
+     * Removes the listener.
+     *
+     * @param listener the listener to add or remove
+     */
     public void removeListener(ConnectionListener listener) {
         listeners.remove(listener);
     }
 
+    /**
+     * Returns whether connected.
+     *
+     * @return connected.
+     */
     public boolean isConnected() {
         return webSocketClient.isConnected();
     }
@@ -1670,11 +1864,19 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
      * Normalized {@code https://host:port} base URL of the one physical server, built from
      * {@code @string/server_ip} and {@code @integer/server_port}. Every REST call goes here; the
      * address is not a parameter of anything and cannot be pointed elsewhere at runtime.
+     *
+     * @return the deploy base URL result
      */
     public String deployBaseUrl() {
         return currentServerHTTPIp;
     }
 
+    /**
+     * Handles the auth error.
+     *
+     * @param statusCode the HTTP or WebSocket status code
+     * @param message the message to process
+     */
     public void handleAuthError(int statusCode, String message) {
         Log.w(TAG, "Authentication error (" + statusCode + "): " + message + ". Clearing session and disconnecting.");
         this.jwtToken = "";
@@ -1714,6 +1916,12 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
         executor.execute(() -> fetchJwtTokenAndConnect(httpUrl, wsUrl));
     }
 
+    /**
+     * Fetches the JWT token and connect.
+     *
+     * @param httpUrl the normalized HTTP server URL
+     * @param wsUrl the WebSocket URL to connect to
+     */
     private void fetchJwtTokenAndConnect(String httpUrl, String wsUrl) {
         try {
             AccountStore accountStore = new AccountStore(context);
@@ -1778,6 +1986,10 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
      * a token this app accepts is the one built in through {@code @string/server_ip}.
      *
      * <p>Must be called off the main thread.
+     *
+     * @param username the account username
+     * @param password the account password
+     * @return the login result
      */
     public String login(String username, String password) {
         lastLoginRejected = false;
@@ -1832,6 +2044,8 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
      * fatal here; the caller keeps the old token and the next 401 ends the session properly.
      *
      * <p>Must be called off the main thread.
+     *
+     * @return the refresh token result
      */
     public String refreshToken() {
         final AccountStore accountStore = new AccountStore(context);
@@ -1896,6 +2110,8 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
      * adds or removes a member. Opening a channel deliberately does <b>not</b> invent a key, because
      * a locally invented key reaches nobody and every message sealed with it would stay unreadable
      * for the rest of the channel.
+     *
+     * @param channelId the identifier of the channel
      */
     public void joinChannel(final String channelId) {
         final long id = parseChannelId(channelId);
@@ -1968,6 +2184,8 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
      * This method deliberately hands out no channel key of its own: the server has no handler for an
      * inbound {@code TYPE_UNICAST_ROTATED_KEY} and drops it, so keys travel only inside the REST
      * envelopes of a membership change.
+     *
+     * @param channelId the identifier of the channel
      */
     private void establishChannelPeerKeys(final long channelId) {
         try {
@@ -2023,6 +2241,10 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
      * device's key, it already was, or the envelope is too malformed for any retry to open it.
      * {@code false} when only a transient reason stopped it, in which case the caller withholds the
      * acknowledgement so that the server keeps the envelope queued instead of deleting the key.
+     *
+     * @param senderUserId the ID of the user who sent the message
+     * @param serverKeyVersion the key version reported by the server
+     * @param cipher_text the encrypted message text
      */
     private boolean adoptUnicastChannelKey(final long senderUserId, final UUID serverKeyVersion,
                                            final byte[] cipher_text) {
@@ -2146,6 +2368,9 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
      * Silence is not free: the server sends only the head, so an envelope that never opens would
      * stall every message queued behind it. After a few attempts in one session it is acknowledged
      * and dropped, which costs the key of one rotation and keeps the channel usable.
+     *
+     * @param senderUserId the ID of the user who sent the message
+     * @param envelope the sealed key envelope to process
      */
     private void answerKeyEnvelopeFailure(final long senderUserId, final byte[] envelope) {
         final String fingerprint = envelopeFingerprint(envelope);
@@ -2170,6 +2395,9 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
     /**
      * Short label identifying one key envelope, used only to count its deliveries. A digest of the
      * ciphertext is safe to log and tells two envelopes apart without saying anything about the key.
+     *
+     * @param envelope the sealed key envelope to process
+     * @return the envelope fingerprint result
      */
     private static String envelopeFingerprint(final byte[] envelope) {
         try {
@@ -2189,6 +2417,9 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
     /**
      * Handles a {@link KeyRecoveryMessage} that arrived live. Must run off the WebSocket thread: an
      * answer needs the requester's public key, which is a REST call.
+     *
+     * @param channelId the identifier of the channel
+     * @param text the text to process or send
      */
     private void handleKeyRecoveryMessage(final long channelId, final String text) {
         final KeyRecoveryMessage.Request request = KeyRecoveryMessage.parseRequest(text);
@@ -2205,6 +2436,9 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
      * Answers a member's request for keys this device holds. The answer is sealed with the ECDH secret
      * shared with the requester rather than with the channel key, so a member who joins later and is
      * not meant to read that history cannot pick the keys up off the channel.
+     *
+     * @param channelId the identifier of the channel
+     * @param request the key-recovery request to encode or process
      */
     private void answerKeyRecoveryRequest(final long channelId, final KeyRecoveryMessage.Request request) {
         final long myUserId = new AccountStore(context).getUserId();
@@ -2264,6 +2498,9 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
      * Adopts the keys an offer carries, if it is addressed to this device and opens with the secret it
      * shares with the member who sent it. Recovered keys become readable without becoming the current
      * one, so history opens again while new messages keep going out under the shared key.
+     *
+     * @param channelId the identifier of the channel
+     * @param text the text to process or send
      */
     private void applyKeyRecoveryOffer(final long channelId, final String text) {
         final KeyRecoveryMessage.Offer offer = KeyRecoveryMessage.parseOffer(text);
@@ -2312,6 +2549,9 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
      * Asks the other members of {@code channelId} for the keys behind the server's key rows this device
      * could not open. Rate-limited and capped per session: the request is an ordinary message the
      * server stores in the channel, so repeating it forever would fill the channel with handshake.
+     *
+     * @param channelId the identifier of the channel
+     * @param rows the key-version rows to process
      */
     private void requestMissingKeys(final long channelId, final List<UUID> rows) {
         final long now = System.currentTimeMillis();
@@ -2422,6 +2662,8 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
      * from the server's current copy instead of trusting the cache.
      *
      * @return the shared secret, or {@code null} when the peer has no usable public key on the server
+     *
+     * @param peerId the identifier of the peer
      */
     private byte[] refreshPeerSecret(final long peerId) {
         final RestResponse keyResponse = executeGet(
@@ -2451,6 +2693,9 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 
     /**
      * Derives and seals the ECDH secret with {@code peerId} unless it is sealed already.
+     *
+     * @param peerId the identifier of the peer
+     * @param peerPublicKey the peer public key used to derive a shared secret
      */
     private void ensurePeerSecret(final long peerId, final String peerPublicKey) {
         if (peerSecrets.knows(peerId)) {
@@ -2471,6 +2716,11 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
         }
     }
 
+    /**
+     * Returns the active channel identifier.
+     *
+     * @return the active channel identifier value
+     */
     public long getActiveChannelId() {
         return activeChannelId;
     }
@@ -2479,6 +2729,11 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
      * Runs one authenticated REST call against {@link #deployBaseUrl()} on the calling (background)
      * thread. An unreachable server comes back as status {@code 0}, which is deliberately not
      * treated as an auth problem so a network hiccup cannot clear the session.
+     *
+     * @param method the HTTP method
+     * @param endpoint the REST endpoint
+     * @param body the request body
+     * @return the execute request result
      */
     private RestResponse executeRequest(final String method, final String endpoint, final JSONObject body) {
         final RequestBody requestBody = body == null ? null
@@ -2507,14 +2762,34 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
         }
     }
 
+    /**
+     * Executes the get.
+     *
+     * @param endpoint the REST endpoint
+     * @return the execute get result
+     */
     private RestResponse executeGet(final String endpoint) {
         return executeRequest("GET", endpoint, null);
     }
 
+    /**
+     * Executes the post.
+     *
+     * @param endpoint the REST endpoint
+     * @param body the request body
+     * @return the execute post result
+     */
     private RestResponse executePost(final String endpoint, final JSONObject body) {
         return executeRequest("POST", endpoint, body);
     }
 
+    /**
+     * Executes the post array.
+     *
+     * @param endpoint the REST endpoint
+     * @param body the request body
+     * @return the execute post array result
+     */
     private RestResponse executePostArray(final String endpoint, final JSONArray body) {
         final RequestBody requestBody = body == null ? null
                 : RequestBody.create(body.toString(), MediaType.parse("application/json; charset=utf-8"));
@@ -2542,10 +2817,23 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
         }
     }
 
+    /**
+     * Executes the put.
+     *
+     * @param endpoint the REST endpoint
+     * @param body the request body
+     * @return the execute put result
+     */
     private RestResponse executePut(final String endpoint, final JSONObject body) {
         return executeRequest("PUT", endpoint, body);
     }
 
+    /**
+     * Executes the delete.
+     *
+     * @param endpoint the REST endpoint
+     * @return the execute delete result
+     */
     private RestResponse executeDelete(final String endpoint) {
         return executeRequest("DELETE", endpoint, null);
     }
@@ -2554,6 +2842,9 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
      * GET returning a JSON object, where 401/403 really does mean "this session is not accepted".
      * Only the endpoint that describes the signed-in account itself uses it; the CRUD endpoints go
      * through {@link #executeGet(String)} so that a 403 stays a permission problem.
+     *
+     * @param endpoint the REST endpoint
+     * @return the make get request result
      */
     private JSONObject makeGETRequest(final String endpoint) {
         final RestResponse response = executeGet(endpoint);
@@ -2572,6 +2863,9 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
     /**
      * Delivers a failure on the main thread; a request that fails without a message (an unreachable
      * server, for instance) still needs to say something to the caller.
+     *
+     * @param callback the callback that receives the operation result
+     * @param error the error message to report
      */
     private <T> void postFailure(final Callback<T> callback, final String error) {
         final String message = error == null || error.isEmpty() ? "The server request failed" : error;
@@ -2588,6 +2882,9 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
      * and the user merely gets a permission message.
      *
      * @param action what was being attempted, e.g. "Renaming the server"
+     *
+     * @param response the REST response to interpret
+     * @param callback the callback that receives the operation result
      */
     private <T> void failRest(final RestResponse response, final Callback<T> callback, final String action) {
         if (response.statusCode() == 401) {
@@ -2627,6 +2924,11 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
      * JWT token, or "" on any failure. Like {@link #login(String, String)} it takes no address.
      *
      * <p>Must be called off the main thread.
+     *
+     * @param username the account username
+     * @param password the account password
+     * @param publicKey the public identity key
+     * @return the register result
      */
     public String register(String username, String password, String publicKey) {
         lastRegisterError = "";
@@ -2717,6 +3019,8 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
      * The payload is the AES-GCM ciphertext ({@code [12-byte IV][ciphertext+tag]}) of the raw
      * UTF-8 message text. The server treats it as opaque bytes and queues it verbatim for other
      * channel members.
+     *
+     * @param text the text to process or send
      */
     public void sendChatMessage(String text) {
         try {
@@ -2759,6 +3063,11 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
      * <p>
      * The key-recovery handshake rides on this same path, because a chat message is the only frame the
      * server delivers to every member of a channel.
+     *
+     * @param channelId the identifier of the channel
+     * @param plaintext the unencrypted data to process
+     * @throws Exception if the send chat payload operation cannot be completed.
+     * @throws IllegalStateException if the current state does not allow this operation.
      */
     private void sendChatPayload(final long channelId, final byte[] plaintext) throws Exception {
         final byte[] key = channelKeys.currentKey(channelId);
@@ -2782,6 +3091,12 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
      */
     private static final long PENDING_SERVER_ID_TTL = 30_000L;
 
+    /**
+     * Sends the read receipt.
+     *
+     * @param channelId the identifier of the channel
+     * @param messageId the identifier of the message
+     */
     public void sendReadReceipt(long channelId, long messageId) {
         if (!webSocketClient.isConnected()) {
             return;
@@ -2796,6 +3111,10 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
         }
     }
 
+    /**
+     * Closes the WebSocket and clears its connection state.
+     *
+     */
     public void disconnect() {
         webSocketClient.disconnect();
     }
@@ -2833,6 +3152,9 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
      * only fails the GCM tag check, so trying them in order is safe.
      *
      * @return the plaintext envelope, or {@code null} when no known key opens the payload
+     *
+     * @param channelId the identifier of the channel
+     * @param ciphertext the encrypted data to process
      */
     private byte[] decryptChatPayload(final long channelId, final byte[] ciphertext) {
         // Keyed by key material, so a key reachable through several of the ids below is still tried
@@ -2887,6 +3209,11 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
         return null;
     }
 
+    /**
+     * Handles the connected event.
+     *
+     * @param url the URL to process
+     */
     @Override
     public void onConnected(String url) {
         Log.d(TAG, "WebSocket connected successfully: " + url);
@@ -2896,6 +3223,8 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 
     /**
      * encrypt the new key rotation with shared ECDH key
+     *
+     * @param packet the packet to process
      */
     @Override
     public void onPacketReceived(final Packet packet) {
@@ -3086,10 +3415,18 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
         }
     }
 
+    /**
+     * Sends the acknowledgement.
+     *
+     */
     private void sendAcknowledgement() {
         webSocketClient.sendPacketAsync(new Packet(Packet.TYPE_ACK, new byte[0]));
     }
 
+    /**
+     * Handles the disconnected event.
+     *
+     */
     @Override
     public void onDisconnected() {
         Log.d(TAG, "WebSocket disconnected from " + currentServerHTTPIp);
@@ -3100,6 +3437,9 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
      * A close the peer announced with a code. A server error (1011) means the peer killed the session
      * while handling it - typically a moment after the handshake - and redialling immediately
      * reproduces exactly that, so the reason is reported instead of the generic unreachable message.
+     *
+     * @param code the close or status code
+     * @param reason the explanation associated with the status or close code
      */
     @Override
     public void onDisconnected(final int code, final String reason) {
@@ -3113,18 +3453,35 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
         notifyStateChanged(false, currentServerHTTPIp);
     }
 
+    /**
+     * Handles the error event.
+     *
+     * @param t the error that occurred
+     */
     @Override
     public void onError(Throwable t) {
         Log.e(TAG, "WebSocket error", t);
         notifyError(t != null ? t.getMessage() : "Unknown connection error");
     }
 
+    /**
+     * Handles the auth error event.
+     *
+     * @param statusCode the HTTP or WebSocket status code
+     * @param message the message to process
+     */
     @Override
     public void onAuthError(int statusCode, String message) {
         Log.e(TAG, "WebSocket auth error (" + statusCode + "): " + message);
         handleAuthError(statusCode, message);
     }
 
+    /**
+     * Notifies listeners about state changed.
+     *
+     * @param connected whether the WebSocket is connected
+     * @param serverBaseUrl the base URL of the server
+     */
     private void notifyStateChanged(boolean connected, String serverBaseUrl) {
         mainHandler.post(() -> {
             for (ConnectionListener l : listeners) {
@@ -3133,6 +3490,11 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
         });
     }
 
+    /**
+     * Notifies listeners about message received.
+     *
+     * @param message the message to process
+     */
     private void notifyMessageReceived(Message message) {
         mainHandler.post(() -> {
             for (ConnectionListener l : listeners) {
@@ -3148,6 +3510,8 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
      * so it enters the list with no server id and cannot take part in read receipts. The receipt
      * reports the newest position the device knows, so leaving that message anonymous would hold
      * the cursor back for every message behind it. The id is filled in as soon as it is known.
+     *
+     * @param message the message to process
      */
     private void replaceMessage(final Message message) {
         mainHandler.post(() -> {
@@ -3160,6 +3524,9 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
     /**
      * Remembers a message that reached the UI without a server id, so the next read cursor can
      * supply one. Must run on the socket thread, which is the only writer of the deque.
+     *
+     * @param message the message to process
+     * @param sentAt the time the message was sent
      */
     private void trackForServerId(final Message message, final long sentAt) {
         synchronized (awaitingServerIds) {
@@ -3177,6 +3544,8 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
      * with no gaps; it is not something the frame confirms. Were it ever false, the worst the
      * damage reaches is a receipt for a neighbouring message, which is what a cursor already
      * reports for everything behind it.
+     *
+     * @param lastDelivered the highest message ID delivered to the peer
      */
     private void assignServerIds(final long lastDelivered) {
         final List<Message> resolved = new ArrayList<>();
@@ -3205,6 +3574,10 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
     /**
      * Copy of {@code message} carrying {@code serverId}; every other field is carried over, and
      * {@link Message#getId()} is deliberately kept so the UI can find the row to replace.
+     *
+     * @param message the message to process
+     * @param serverId the identifier of the server
+     * @return the with server identifier result
      */
     private static Message withServerId(final Message message, final long serverId) {
         return new Message(message.getId(), serverId, message.getText(), message.getSender(),
@@ -3218,6 +3591,9 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
      * Monotonic per member: the server's own update is monotonic, but frames can arrive out of
      * order across a reconnect, and a stale frame must not un-deliver a message already shown as
      * delivered.
+     *
+     * @param userId the identifier of the user
+     * @param lastDelivered the highest message ID delivered to the peer
      */
     private void recordPeerDelivery(final long userId, final long lastDelivered) {
         final long previous = peerDeliveredCursors.merge(userId, lastDelivered, Math::max);
@@ -3251,6 +3627,8 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
      * messages already delivered before this device opened the channel are marked as such rather
      * than waiting for a frame that will not come. Live updates arrive afterwards over
      * {@code CHANNEL_MEMBER_INFO}.
+     *
+     * @param channelId the identifier of the channel
      */
     public void fetchPeerDeliveryCursors(final long channelId) {
         if (channelId < 0) {
@@ -3291,6 +3669,11 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
         });
     }
 
+    /**
+     * Notifies listeners about error.
+     *
+     * @param error the error message to report
+     */
     private void notifyError(String error) {
         mainHandler.post(() -> {
             for (ConnectionListener l : listeners) {
@@ -3299,6 +3682,10 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
         });
     }
 
+    /**
+     * Notifies listeners about auth required.
+     *
+     */
     private void notifyAuthRequired() {
         mainHandler.post(() -> {
             for (ConnectionListener l : listeners) {
@@ -3307,19 +3694,32 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
         });
     }
 
+    /**
+     * Defines the contract for connection listener.
+     *
+     */
     public interface ConnectionListener {
         /**
          * @param serverBaseUrl {@link #deployBaseUrl()} of the physical server, i.e. which host the
          *                      state change happened on. It is never an address the user picked.
+         *
+         * @param connected whether the WebSocket is connected
          */
         void onConnectionStateChanged(boolean connected, String serverBaseUrl);
 
+        /**
+         * Handles the message received event.
+         *
+         * @param message the message to process
+         */
         void onMessageReceived(Message message);
 
         /**
          * Replaces the message of the same {@link Message#getId()} with {@code message}, which
          * carries information the live frame did not have. The default does nothing, so a listener
          * that only shows notifications need not care.
+         *
+         * @param message the message to process
          */
         default void onMessageReplaced(Message message) {
         }
@@ -3331,22 +3731,56 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
          * members the channel has, which is not derivable from {@code cursors} because a member
          * who has acknowledged nothing has no entry. Called on the main thread; the default does
          * nothing.
+         *
+         * @param cursors per-peer message-delivery cursors
+         * @param peerCount the number of other members in the channel
          */
         default void onPeerDeliveryProgress(Map<Long, Long> cursors, int peerCount) {
         }
 
+        /**
+         * Handles the error event.
+         *
+         * @param errorMessage the error message to display or report
+         */
         void onError(String errorMessage);
 
+        /**
+         * Handles the auth required event.
+         *
+         */
         default void onAuthRequired() {
         }
 
+        /**
+         * Handles the member info received event.
+         *
+         * @param channelId the identifier of the channel
+         * @param userId the identifier of the user
+         * @param lastDeliveredMessageId the latest message ID acknowledged as delivered
+         * @param lastReadMessageId the latest message ID acknowledged as read
+         */
         default void onMemberInfoReceived(long channelId, long userId, long lastDeliveredMessageId, long lastReadMessageId) {
         }
     }
 
+    /**
+     * Defines the contract for callback.
+     *
+     */
     public interface Callback<T> {
+        /**
+         * Handles the result event.
+         *
+         * @param result the result to deliver or inspect
+         */
         void onResult(T result);
 
+        /**
+         * Handles the failure event.
+         *
+         * @param error the error message to report
+         */
         void onFailure(String error);
     }
 
@@ -3364,14 +3798,29 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
             this.body = body;
         }
 
+        /**
+         * Returns whether successful.
+         *
+         * @return successful.
+         */
         boolean isSuccessful() {
             return statusCode >= 200 && statusCode < 300;
         }
 
+        /**
+         * Returns the HTTP status code of the response.
+         *
+         * @return the status code result
+         */
         int statusCode() {
             return statusCode;
         }
 
+        /**
+         * Parses the response body as a JSON object.
+         *
+         * @return the as json result
+         */
         JSONObject asJson() {
             if (body == null || body.isEmpty()) {
                 return null;
@@ -3386,6 +3835,11 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
             }
         }
 
+        /**
+         * Parses the response body as a JSON array.
+         *
+         * @return the as json array result
+         */
         JSONArray asJsonArray() {
             if (body == null || body.isEmpty()) {
                 return null;

@@ -18,10 +18,22 @@ import cz.mkdaniel.enterprisemessenger.net.AccountStore;
 import cz.mkdaniel.enterprisemessenger.net.LocalNetworkPermission;
 import cz.mkdaniel.enterprisemessenger.net.ServerConnectionManager;
 
+/**
+ * Presents the sign-in form and submits account credentials.
+ *
+ */
 public class LoginFragment extends Fragment {
 
     private FragmentLoginBinding binding;
 
+    /**
+     * Handles the create view event.
+     *
+     * @param inflater the layout inflater used to create the view
+     * @param container the parent view that will contain the created view
+     * @param savedInstanceState the saved instance state to restore, or null when creating the screen for the first time
+     * @return the on create view result
+     */
     @Nullable
     @Override
     public View onCreateView(@NonNull LayoutInflater inflater, @Nullable ViewGroup container, @Nullable Bundle savedInstanceState) {
@@ -29,6 +41,12 @@ public class LoginFragment extends Fragment {
         return binding.getRoot();
     }
 
+    /**
+     * Handles the view created event.
+     *
+     * @param view the view to create, inspect, or update
+     * @param savedInstanceState the saved instance state to restore, or null when creating the screen for the first time
+     */
     @Override
     public void onViewCreated(@NonNull View view, @Nullable Bundle savedInstanceState) {
         super.onViewCreated(view, savedInstanceState);
@@ -40,6 +58,11 @@ public class LoginFragment extends Fragment {
         binding.buttonGoToRegister.setOnClickListener(v -> navController.navigate(R.id.action_login_to_register));
     }
 
+    /**
+     * Validates the sign-in form and submits the credentials.
+     *
+     * @param navController the navigation controller used after the operation
+     */
     private void performLogin(NavController navController) {
         String username = binding.edittextUsername.getText() != null ? binding.edittextUsername.getText().toString().trim() : "";
         String password = binding.edittextPassword.getText() != null ? binding.edittextPassword.getText().toString().trim() : "";
@@ -88,11 +111,21 @@ public class LoginFragment extends Fragment {
                         // server's member list, so the server list can tell an administrator from a
                         // plain member. Best-effort: the screens re-fetch it when it is still absent.
                         connectionManager.fetchUserId(new ServerConnectionManager.Callback<>() {
+                            /**
+                             * Handles the successful result of the asynchronous operation.
+                             *
+                             * @param userId the user ID returned by the server
+                             */
                             @Override
                             public void onResult(Long userId) {
                                 Log.d("LoginFragment", "Cached user id " + userId);
                             }
 
+                            /**
+                             * Handles a failure from the asynchronous operation.
+                             *
+                             * @param error the error message explaining the failure
+                             */
                             @Override
                             public void onFailure(String error) {
                                 Log.w("LoginFragment", "Could not read the user id: " + error);
@@ -112,6 +145,11 @@ public class LoginFragment extends Fragment {
         }).start();
     }
 
+    /**
+     * Sets the loading.
+     *
+     * @param loading whether a load operation is in progress
+     */
     private void setLoading(boolean loading) {
         if (binding == null) return;
         binding.progressbarLogin.setVisibility(loading ? View.VISIBLE : View.GONE);
@@ -121,17 +159,30 @@ public class LoginFragment extends Fragment {
         binding.edittextPassword.setEnabled(!loading);
     }
 
+    /**
+     * Shows the error.
+     *
+     * @param message the message to process
+     */
     private void showError(String message) {
         if (binding == null) return;
         binding.textError.setText(message);
         binding.textError.setVisibility(View.VISIBLE);
     }
 
+    /**
+     * Hides the error.
+     *
+     */
     private void hideError() {
         if (binding == null) return;
         binding.textError.setVisibility(View.GONE);
     }
 
+    /**
+     * Handles the destroy view event.
+     *
+     */
     @Override
     public void onDestroyView() {
         super.onDestroyView();

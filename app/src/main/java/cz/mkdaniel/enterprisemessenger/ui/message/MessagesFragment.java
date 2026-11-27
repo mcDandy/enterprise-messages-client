@@ -88,6 +88,10 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
     private long dropWasExplainedUntil = 0L;
     private final android.os.Handler pollHandler = new android.os.Handler(android.os.Looper.getMainLooper());
     private final Runnable pollRunnable = new Runnable() {
+        /**
+         * Runs the scheduled message polling task.
+         *
+         */
         @Override
         public void run() {
             pollLatestMessages();
@@ -95,6 +99,10 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
         }
     };
 
+    /**
+     * Fetches and displays the latest messages for the visible channel.
+     *
+     */
     private void pollLatestMessages() {
         if (connectionManager == null || roomId == null || roomId.isEmpty()) {
             return;
@@ -104,6 +112,11 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
                 0,
                 50,
                 new ServerConnectionManager.Callback<>() {
+                    /**
+                     * Handles the successful result of the asynchronous operation.
+                     *
+                     * @param pageMessages the page messages associated with this callback
+                     */
                     @Override
                     public void onResult(List<Message> pageMessages) {
                         if (binding == null || adapter == null || pageMessages.isEmpty()) {
@@ -129,6 +142,11 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
                         sendReadReceiptForLatest();
                     }
 
+                    /**
+                     * Handles a failure from the asynchronous operation.
+                     *
+                     * @param error the error message explaining the failure
+                     */
                     @Override
                     public void onFailure(String error) {
                         Log.d(TAG, "Poll failed: " + error);
@@ -136,6 +154,14 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
                 });
     }
 
+    /**
+     * Handles the create view event.
+     *
+     * @param inflater the layout inflater used to create the view
+     * @param container the parent view that will contain the created view
+     * @param savedInstanceState the saved instance state to restore, or null when creating the screen for the first time
+     * @return the on create view result
+     */
     @Override
     public View onCreateView(@NonNull LayoutInflater inflater,
                              ViewGroup container, Bundle savedInstanceState) {
@@ -143,6 +169,12 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
         return binding.getRoot();
     }
 
+    /**
+     * Handles the view created event.
+     *
+     * @param view the view to create, inspect, or update
+     * @param savedInstanceState the saved instance state to restore, or null when creating the screen for the first time
+     */
     @Override
     public void onViewCreated(@NonNull View view, Bundle savedInstanceState) {
         super.onViewCreated(view, savedInstanceState);
@@ -166,6 +198,13 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
         binding.recyclerviewMessages.setLayoutManager(messageLayoutManager);
         binding.recyclerviewMessages.setAdapter(adapter);
         binding.recyclerviewMessages.addOnScrollListener(new RecyclerView.OnScrollListener() {
+            /**
+             * Handles scrolling in the message list.
+             *
+             * @param recyclerView the list view whose scroll state changed
+             * @param dx the horizontal scroll distance
+             * @param dy the vertical scroll distance
+             */
             @Override
             public void onScrolled(@NonNull RecyclerView recyclerView, int dx, int dy) {
                 if (dy >= 0 || loadingOlderMessages || noMoreOlderMessages
@@ -228,6 +267,10 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
         loadMessagePage(0, false);
     }
 
+    /**
+     * Handles the resume event.
+     *
+     */
     @Override
     public void onResume() {
         super.onResume();
@@ -245,6 +288,10 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
         pollHandler.postDelayed(pollRunnable, 3_000L);
     }
 
+    /**
+     * Handles the pause event.
+     *
+     */
     @Override
     public void onPause() {
         super.onPause();
@@ -254,6 +301,11 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
         }
     }
 
+    /**
+     * Updates the input underline.
+     *
+     * @param isConnected whether the connection is currently active
+     */
     private void updateInputUnderline(boolean isConnected) {
         if (binding == null) return;
         if (isConnected) {
@@ -263,6 +315,10 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
         }
     }
 
+    /**
+     * Loads the older messages.
+     *
+     */
     private void loadOlderMessages() {
         if (connectionManager == null || loadingOlderMessages || noMoreOlderMessages) {
             return;
@@ -271,6 +327,12 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
         loadMessagePage(historyPage, true);
     }
 
+    /**
+     * Loads the message page.
+     *
+     * @param page the zero-based page number to retrieve
+     * @param loadingOlder whether older messages are being loaded
+     */
     private void loadMessagePage(int page, boolean loadingOlder) {
         if (connectionManager == null) {
             return;
@@ -288,6 +350,11 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
                 page,
                 50,
                 new ServerConnectionManager.Callback<>() {
+                    /**
+                     * Handles the successful result of the asynchronous operation.
+                     *
+                     * @param pageMessages the page messages associated with this callback
+                     */
                     @Override
                     public void onResult(List<Message> pageMessages) {
                         if (loadingOlder) {
@@ -322,6 +389,11 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
                         sendReadReceiptForLatest();
                     }
 
+                    /**
+                     * Handles a failure from the asynchronous operation.
+                     *
+                     * @param error the error message explaining the failure
+                     */
                     @Override
                     public void onFailure(String error) {
                         if (loadingOlder) {
@@ -334,6 +406,12 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
                 });
     }
 
+    /**
+     * Combines server messages with locally pending messages.
+     *
+     * @param serverMessages the messages returned by the server
+     * @return the merge with local messages collection
+     */
     private List<Message> mergeWithLocalMessages(List<Message> serverMessages) {
         final List<Message> merged = new ArrayList<>(serverMessages);
         final Set<Message> matchedServerMessages = new HashSet<>();
@@ -377,6 +455,11 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
         return merged;
     }
 
+    /**
+     * Sends the message from input.
+     *
+     * @param inputField the text input field to process
+     */
     private void sendMessageFromInput(EditText inputField) {
         String text = inputField.getText().toString().trim();
         if (text.isEmpty()) return;
@@ -399,6 +482,12 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
         inputField.setText("");
     }
 
+    /**
+     * Handles the connection state changed event.
+     *
+     * @param connected whether the WebSocket is connected
+     * @param ip the server IP address or host
+     */
     @Override
     public void onConnectionStateChanged(boolean connected, String ip) {
         if (!isAdded()) return;
@@ -416,6 +505,11 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
         }
     }
 
+    /**
+     * Handles the message received event.
+     *
+     * @param message the message to process
+     */
     @Override
     public void onMessageReceived(Message message) {
         if (!isAdded()) return;
@@ -434,6 +528,9 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
      * Peer delivery cursors moved. The bubble's background opacity is derived at bind time from
      * these cursors rather than stored per message, so no list has to be rebuilt - the rows are
      * repainted and re-read the new state.
+     *
+     * @param cursors per-peer message-delivery cursors
+     * @param peerCount the number of other members in the channel
      */
     @Override
     public void onPeerDeliveryProgress(Map<Long, Long> cursors, int peerCount) {
@@ -443,6 +540,11 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
         adapter.setPeerDelivery(cursors, peerCount);
     }
 
+    /**
+     * Handles the message replaced event.
+     *
+     * @param message the message to process
+     */
     @Override
     public void onMessageReplaced(Message message) {
         if (!isAdded() || adapter == null) return;
@@ -464,6 +566,10 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
     /**
      * Position of the message with {@code id}, or -1 when the list does not hold it. The id is
      * unique per message, so the first hit is the only one.
+     *
+     * @param messages the messages to display or process
+     * @param id the server-assigned or local identifier
+     * @return the index of message identifier result
      */
     private static int indexOfMessageId(List<Message> messages, String id) {
         for (int i = 0; i < messages.size(); i++) {
@@ -510,6 +616,11 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
         connectionManager.sendReadReceipt(channelId, newest);
     }
 
+    /**
+     * Handles the error event.
+     *
+     * @param errorMessage the error message to display or report
+     */
     @Override
     public void onError(String errorMessage) {
         if (!isAdded()) return;
@@ -522,6 +633,10 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
         Toast.makeText(requireContext(), errorMessage, Toast.LENGTH_SHORT).show();
     }
 
+    /**
+     * Handles the destroy view event.
+     *
+     */
     @Override
     public void onDestroyView() {
         super.onDestroyView();
@@ -544,6 +659,12 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
      * <p>
      * The ramp starts at nothing rather than at some visible minimum, so the first recipient
      * produces a small but real change instead of a jump from invisible to a fixed opacity.
+     *
+     * @param context the Android context used to access application resources and services
+     * @param accepted whether the operation was accepted
+     * @param recipients the recipients associated with the message
+     * @param peerCount the number of other members in the channel
+     * @return the bubble color result
      */
     private static int bubbleColor(android.content.Context context, boolean accepted,
                                    int recipients, int peerCount) {
@@ -560,6 +681,10 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
      * colour resource. A channel of one other member goes solid on their first acknowledgement; a
      * channel of ten climbs one tenth of the way per recipient. Clamped in case a cursor arrives
      * for a member the listing did not include, which would otherwise divide by zero or overshoot.
+     *
+     * @param recipients the recipients associated with the message
+     * @param peerCount the number of other members in the channel
+     * @return the bubble alpha result
      */
     private static int bubbleAlpha(int recipients, int peerCount) {
         final int steps = Math.max(peerCount, 1);
@@ -575,6 +700,8 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
      * there throws - {@code LinearLayoutManager} refuses to begin a {@code SmoothScroller} while it
      * is computing a layout or scrolling. A plain jump is tolerated, a smooth one is not, which is
      * why only the paths that scrolled smoothly ever crashed.
+     *
+     * @param position the item position in the adapter
      */
     private void scrollToLatest(int position) {
         if (binding == null || position < 0) {
@@ -608,15 +735,32 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
          */
         private volatile int peerCount = 0;
 
+        /**
+         * Sets the peer delivery.
+         *
+         * @param cursors per-peer message-delivery cursors
+         * @param peerCount the number of other members in the channel
+         */
         void setPeerDelivery(Map<Long, Long> cursors, int peerCount) {
             this.peerCursors = new HashMap<>(cursors);
             this.peerCount = peerCount;
         }
 
+        /**
+         * Returns the number of other channel members.
+         *
+         * @return the peer count result
+         */
         int peerCount() {
             return peerCount;
         }
 
+        /**
+         * Counts the peers whose delivery cursor reaches the message.
+         *
+         * @param message the message to process
+         * @return the recipients of result
+         */
         int recipientsOf(Message message) {
             final long id = message.getServerId();
             if (id <= 0) {
@@ -631,11 +775,25 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
             return reached;
         }
 
+        /**
+         * Compares message identifiers to determine whether two list items represent the same message.
+         *
+         * @param oldItem the previous item being compared
+         * @param newItem the updated item being compared
+         * @return whether the are items the same condition holds
+         */
         @Override
         public boolean areItemsTheSame(@NonNull Message oldItem, @NonNull Message newItem) {
             return oldItem.getId().equals(newItem.getId());
         }
 
+        /**
+         * Compares message contents and delivery state to determine whether a list row needs updating.
+         *
+         * @param oldItem the previous item being compared
+         * @param newItem the updated item being compared
+         * @return whether the are contents the same condition holds
+         */
         @Override
         public boolean areContentsTheSame(@NonNull Message oldItem, @NonNull Message newItem) {
             return oldItem.getText().equals(newItem.getText())
@@ -653,6 +811,10 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
         }
     }
 
+    /**
+     * Represents message adapter data or behavior used by the application.
+     *
+     */
     private static class MessageAdapter extends ListAdapter<Message, RecyclerView.ViewHolder> {
 
         private static final int VIEW_TYPE_SENT = 1;
@@ -678,6 +840,9 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
          * The list is handed back as a new instance because {@code ListAdapter} ignores a
          * submission of the list it already holds; the cursors are not part of {@link Message}, so
          * a diff of identical items would otherwise compute no change and nothing would repaint.
+         *
+         * @param cursors per-peer message-delivery cursors
+         * @param peerCount the number of other members in the channel
          */
         void setPeerDelivery(Map<Long, Long> cursors, int peerCount) {
             deliveryCallback.setPeerDelivery(cursors, peerCount);
@@ -686,6 +851,9 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
 
         /**
          * How many of the channel's other members have this message on their device.
+         *
+         * @param message the message to process
+         * @return the recipients of result
          */
         private int recipientsOf(Message message) {
             return deliveryCallback.recipientsOf(message);
@@ -700,6 +868,12 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
             this.deliveryCallback = deliveryCallback;
         }
 
+        /**
+         * Returns the item view type.
+         *
+         * @param position the item position in the adapter
+         * @return the item view type value
+         */
         @Override
         public int getItemViewType(int position) {
             Message message = getItem(position);
@@ -709,6 +883,13 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
             return VIEW_TYPE_RECEIVED;
         }
 
+        /**
+         * Handles the create view holder event.
+         *
+         * @param parent the parent view group
+         * @param viewType the adapter view type to create
+         * @return the on create view holder result
+         */
         @NonNull
         @Override
         public RecyclerView.ViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
@@ -722,6 +903,12 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
             }
         }
 
+        /**
+         * Handles the bind view holder event.
+         *
+         * @param holder the view holder to bind
+         * @param position the item position in the adapter
+         */
         @Override
         public void onBindViewHolder(@NonNull RecyclerView.ViewHolder holder, int position) {
             Message message = getItem(position);
@@ -771,6 +958,10 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
         }
     }
 
+    /**
+     * Represents sent message view holder data or behavior used by the application.
+     *
+     */
     private static class SentMessageViewHolder extends RecyclerView.ViewHolder {
         private final ItemMessageSentBinding binding;
 
@@ -780,6 +971,10 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
         }
     }
 
+    /**
+     * Represents received message view holder data or behavior used by the application.
+     *
+     */
     private static class ReceivedMessageViewHolder extends RecyclerView.ViewHolder {
         private final ItemMessageReceivedBinding binding;
 

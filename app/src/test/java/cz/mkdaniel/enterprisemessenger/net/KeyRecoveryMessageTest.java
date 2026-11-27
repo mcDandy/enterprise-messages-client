@@ -25,6 +25,10 @@ public class KeyRecoveryMessageTest {
 
     private static final char FIELD = (char) 0;
 
+    /**
+     * Verifies ordinary text is never a handshake for this case.
+     *
+     */
     @Test
     public void ordinaryTextIsNeverAHandshake() {
         assertFalse(KeyRecoveryMessage.isControl("hello"));
@@ -36,6 +40,10 @@ public class KeyRecoveryMessageTest {
         assertNull(KeyRecoveryMessage.parseOffer("hello"));
     }
 
+    /**
+     * Verifies request round trips every server row for this case.
+     *
+     */
     @Test
     public void requestRoundTripsEveryServerRow() {
         final List<UUID> rows = Arrays.asList(UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID());
@@ -54,6 +62,10 @@ public class KeyRecoveryMessageTest {
         assertNull(KeyRecoveryMessage.parseOffer(wire));
     }
 
+    /**
+     * Verifies offer round trips target responder and sealed blob for this case.
+     *
+     */
     @Test
     public void offerRoundTripsTargetResponderAndSealedBlob() {
         final byte[] sealed = new byte[]{0, 1, 2, (byte) 255, (byte) 128, 42};
@@ -70,6 +82,10 @@ public class KeyRecoveryMessageTest {
         assertNull(KeyRecoveryMessage.parseRequest(wire));
     }
 
+    /**
+     * Verifies key blob round trips versions and keys for this case.
+     *
+     */
     @Test
     public void keyBlobRoundTripsVersionsAndKeys() {
         final byte[] firstKey = new byte[32];
@@ -91,6 +107,10 @@ public class KeyRecoveryMessageTest {
         assertArrayEquals(secondKey, read.get(1).key());
     }
 
+    /**
+     * Verifies malformed handshakes are refused for this case.
+     *
+     */
     @Test
     public void malformedHandshakesAreRefused() {
         // A requester id that is not a number, and rows that are not uuids.

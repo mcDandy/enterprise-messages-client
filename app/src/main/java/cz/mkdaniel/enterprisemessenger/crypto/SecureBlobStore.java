@@ -50,6 +50,10 @@ public class SecureBlobStore {
      * key, so no value is ever sealed twice under the same nonce.
      *
      * @throws KeyStoreUnavailableException when the master key cannot be created or used
+     *
+     * @param key the encryption key to use
+     * @param value the value to process
+     * @throws InvalidAlgorithmParameterException if the put operation cannot be completed.
      */
     public synchronized void put(String key, byte[] value) throws KeyStoreUnavailableException {
         if (value == null) {
@@ -89,6 +93,8 @@ public class SecureBlobStore {
     /**
      * @return the plaintext previously stored under {@code key}, or {@code null} when the slot is
      * empty, the blob is malformed, or no known key opens it
+     *
+     * @param key the encryption key to use
      */
     public synchronized byte[] load(String key) {
         final String encoded = sink.getString(key);
@@ -130,12 +136,20 @@ public class SecureBlobStore {
         }
     }
 
+    /**
+     * Removes the encrypted value stored under the supplied key.
+     *
+     * @param key the encryption key to use
+     */
     public synchronized void remove(String key) {
         sink.remove(key);
     }
 
     /**
      * True when the slot holds a value, sealed or not.
+     *
+     * @param key the encryption key to use
+     * @return whether the contains condition holds
      */
     public synchronized boolean contains(String key) {
         final String encoded = sink.getString(key);
@@ -143,6 +157,10 @@ public class SecureBlobStore {
         return encoded != null && !encoded.isEmpty();
     }
 
+    /**
+     * Clears the all.
+     *
+     */
     public synchronized void clearAll() {
         for (final String key : new ArrayList<>(sink.keys())) {
             sink.remove(key);
@@ -152,6 +170,9 @@ public class SecureBlobStore {
     /**
      * Keys currently held, so a backup can walk them (see {@code KeyBackup}). The prefixes decide
      * which entries belong to a category, e.g. {@link ChannelKeyRegistry#KEY_PREFIX}.
+     *
+     * @param prefix the key prefix to match
+     * @return the keys with prefix collection
      */
     public synchronized List<String> keysWithPrefix(String prefix) {
         final List<String> matches = new ArrayList<>();
@@ -168,6 +189,8 @@ public class SecureBlobStore {
     /**
      * Whether the master key can be used at all. {@code false} means every sealed blob in this
      * store is unrecoverable and the UI should offer a restore instead of failing silently.
+     *
+     * @return available.
      */
     public boolean isAvailable() {
         try {

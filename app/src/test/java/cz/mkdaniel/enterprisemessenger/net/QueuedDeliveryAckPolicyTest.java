@@ -21,16 +21,28 @@ import org.junit.Test;
  */
 public class QueuedDeliveryAckPolicyTest {
 
+    /**
+     * Verifies chat messages come from the queue and are acknowledged for this case.
+     *
+     */
     @Test
     public void chatMessagesComeFromTheQueueAndAreAcknowledged() {
         assertTrue(Packet.isQueuedDelivery(Packet.TYPE_CHAT_MESSAGE));
     }
 
+    /**
+     * Verifies key unicasts come from the queue and are acknowledged for this case.
+     *
+     */
     @Test
     public void keyUnicastsComeFromTheQueueAndAreAcknowledged() {
         assertTrue(Packet.isQueuedDelivery(Packet.TYPE_UNICAST_ROTATED_KEY));
     }
 
+    /**
+     * Verifies member progress packets are never acknowledged for this case.
+     *
+     */
     @Test
     public void memberProgressPacketsAreNeverAcknowledged() {
         // CHANNEL_MEMBER_INFO is broadcast with a plain send, so an ACK for it would delete a
@@ -38,17 +50,29 @@ public class QueuedDeliveryAckPolicyTest {
         assertFalse(Packet.isQueuedDelivery(Packet.TYPE_CHANNEL_MEMBER_INFO));
     }
 
+    /**
+     * Verifies error packets are never acknowledged for this case.
+     *
+     */
     @Test
     public void errorPacketsAreNeverAcknowledged() {
         assertFalse(Packet.isQueuedDelivery(Packet.TYPE_UNKNOWN));
     }
 
+    /**
+     * Verifies an acknowledgement never acknowledges itself for this case.
+     *
+     */
     @Test
     public void anAcknowledgementNeverAcknowledgesItself() {
         // Acking an ACK would make the two peers answer each other indefinitely.
         assertFalse(Packet.isQueuedDelivery(Packet.TYPE_ACK));
     }
 
+    /**
+     * Verifies client to server only types are never acknowledged for this case.
+     *
+     */
     @Test
     public void clientToServerOnlyTypesAreNeverAcknowledged() {
         assertFalse(Packet.isQueuedDelivery(Packet.TYPE_READ));

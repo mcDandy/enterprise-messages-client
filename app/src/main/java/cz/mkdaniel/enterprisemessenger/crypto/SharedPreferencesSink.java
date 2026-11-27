@@ -36,6 +36,9 @@ public class SharedPreferencesSink implements KeyValueSink {
      * for a type mismatch instead of converting, so such a slot is dropped and read as empty: the
      * value is either a flag that will be written again on the next login or a cached id the app
      * re-fetches from the server.
+     *
+     * @param key the encryption key to use
+     * @return the string value
      */
     @Override
     public String getString(String key) {
@@ -49,6 +52,12 @@ public class SharedPreferencesSink implements KeyValueSink {
         }
     }
 
+    /**
+     * Stores a string value under the supplied key.
+     *
+     * @param key the encryption key to use
+     * @param value the value to process
+     */
     @Override
     public void putString(String key, String value) {
         if (value == null) {
@@ -59,11 +68,21 @@ public class SharedPreferencesSink implements KeyValueSink {
         prefs.edit().putString(key, value).apply();
     }
 
+    /**
+     * Removes the value associated with the supplied key.
+     *
+     * @param key the encryption key to use
+     */
     @Override
     public void remove(String key) {
         prefs.edit().remove(key).apply();
     }
 
+    /**
+     * Returns the keys of all stored values.
+     *
+     * @return the keys collection
+     */
     @Override
     public Set<String> keys() {
         return new HashSet<>(prefs.getAll().keySet());

@@ -71,6 +71,13 @@ public class ChannelKeyRegistry {
         this.blobs = blobs;
     }
 
+    /**
+     * Decodes a key version and key from their packed byte representation.
+     *
+     * @param source the source byte array
+     * @param offset the byte offset at which to read or write
+     * @return the to key version result
+     */
     private static KeyVersion toKeyVersion(byte[] source, int offset) {
         final long mostSignificant = readLong(source, offset);
         final long leastSignificant = readLong(source, offset + Long.BYTES);
@@ -81,17 +88,38 @@ public class ChannelKeyRegistry {
         return new KeyVersion(new UUID(mostSignificant, leastSignificant), key);
     }
 
+    /**
+     * Writes the UUID.
+     *
+     * @param uuid the key-version UUID
+     * @param target the destination byte array
+     * @param offset the byte offset at which to read or write
+     */
     private static void writeUuid(UUID uuid, byte[] target, int offset) {
         writeLong(uuid.getMostSignificantBits(), target, offset);
         writeLong(uuid.getLeastSignificantBits(), target, offset + Long.BYTES);
     }
 
+    /**
+     * Writes the long.
+     *
+     * @param value the value to process
+     * @param target the destination byte array
+     * @param offset the byte offset at which to read or write
+     */
     private static void writeLong(long value, byte[] target, int offset) {
         for (int i = 0; i < Long.BYTES; ++i) {
             target[offset + i] = (byte) (value >>> (8 * (Long.BYTES - 1 - i)));
         }
     }
 
+    /**
+     * Reads the long.
+     *
+     * @param source the source byte array
+     * @param offset the byte offset at which to read or write
+     * @return the read long result
+     */
     private static long readLong(byte[] source, int offset) {
         long value = 0;
 
@@ -102,6 +130,12 @@ public class ChannelKeyRegistry {
         return value;
     }
 
+    /**
+     * Parses the channel identifier.
+     *
+     * @param alias the stored key alias
+     * @return the parse channel identifier result
+     */
     private static long parseChannelId(String alias) {
         try {
             return Long.parseLong(alias.substring(KEY_PREFIX.length()).replace(HISTORY_SUFFIX, ""));
@@ -110,22 +144,55 @@ public class ChannelKeyRegistry {
         }
     }
 
+    /**
+     * Builds the storage alias for a channel current key.
+     *
+     * @param channelId the identifier of the channel
+     * @return the current alias result
+     */
     private static String currentAlias(long channelId) {
         return KEY_PREFIX + channelId;
     }
 
+    /**
+     * Builds the storage alias for a channel key history.
+     *
+     * @param channelId the identifier of the channel
+     * @return the history alias result
+     */
     private static String historyAlias(long channelId) {
         return KEY_PREFIX + channelId + HISTORY_SUFFIX;
     }
 
+    /**
+     * Builds the storage alias for the server-to-client key version map.
+     *
+     * @param channelId the identifier of the channel
+     * @return the server map alias result
+     */
     private static String serverMapAlias(long channelId) {
         return KEY_PREFIX + channelId + SERVER_MAP_SUFFIX;
     }
 
+    /**
+     * Reads the UUID.
+     *
+     * @param source the source byte array
+     * @param offset the byte offset at which to read or write
+     * @return the read UUID result
+     */
     private static UUID readUuid(byte[] source, int offset) {
         return new UUID(readLong(source, offset), readLong(source, offset + Long.BYTES));
     }
 
+    /**
+     * Returns whether UUID at.
+     *
+     * @param source the source byte array
+     * @param offset the byte offset at which to read or write
+     * @param uuid the key-version UUID
+     * @return UUID at.
+     */
     private static boolean isUuidAt(byte[] source, int offset, UUID uuid) {
         return readLong(source, offset) == uuid.getMostSignificantBits()
                 && readLong(source, offset + Long.BYTES) == uuid.getLeastSignificantBits();
@@ -140,6 +207,9 @@ public class ChannelKeyRegistry {
      * @throws KeyStoreUnavailableException when the sealing key is unusable and no key can be
      *                                      stored; without persistence the key would be lost on
      *                                      the next restart, so this is a hard failure
+     *
+     * @param channelId the identifier of the channel
+     * @return the ensure channel key result
      */
     public synchronized GenerationResult ensureChannelKey(long channelId) throws KeyStoreUnavailableException {
         final KeyVersion existing = currentKeyVersion(channelId);
@@ -163,6 +233,10 @@ public class ChannelKeyRegistry {
      * Replaces the channel's key with a fresh random one, in response to the server asking this
      * device to re-key the channel ({@code TYPE_KEY_ROTATION}). The superseded key moves into the
      * history, so messages already sent with it stay readable.
+     *
+     * @param channelId the identifier of the channel
+     * @return the rotate channel key result
+     * @throws KeyStoreUnavailableException if the secure key store cannot provide the required key.
      */
     public synchronized GenerationResult rotateChannelKey(long channelId) throws KeyStoreUnavailableException {
         final byte[] key = new byte[KEY_LENGTH_BYTES];
@@ -188,6 +262,8 @@ public class ChannelKeyRegistry {
      * for the other members and only calls {@link #adoptChannelKey} once the server accepted the
      * membership change that carries them. Rotating before that answer used to leave this device
      * holding a key nobody else had, and a failed request then made the channel unreadable for good.
+     *
+     * @return the new unstored key result
      */
     public KeyVersion newUnstoredKey() {
         final byte[] key = new byte[KEY_LENGTH_BYTES];
@@ -243,6 +319,9 @@ public class ChannelKeyRegistry {
 
     /**
      * Current key of the channel, or {@code null} when this device has never opened it.
+     *
+     * @param channelId the identifier of the channel
+     * @return the current key data
      */
     public synchronized byte[] currentKey(long channelId) {
         final KeyVersion current = currentKeyVersion(channelId);
@@ -252,6 +331,9 @@ public class ChannelKeyRegistry {
 
     /**
      * Version of {@link #currentKey(long)}, or {@code null} when the channel has no key.
+     *
+     * @param channelId the identifier of the channel
+     * @return the current version result
      */
     public synchronized UUID currentVersion(long channelId) {
         final KeyVersion current = currentKeyVersion(channelId);
@@ -263,6 +345,9 @@ public class ChannelKeyRegistry {
      * Every key that could open a message of {@code channelId}: the current one first, then the
      * superseded ones newest first. A wrong candidate only fails its GCM tag check, so trying them
      * in order is safe.
+     *
+     * @param channelId the identifier of the channel
+     * @return the decrypt candidates collection
      */
     public synchronized List<KeyVersion> decryptCandidates(long channelId) {
         final List<KeyVersion> candidates = new ArrayList<>();
@@ -281,6 +366,8 @@ public class ChannelKeyRegistry {
      * Value of the key-material change counter. Reading it before and after a decryption attempt
      * tells a caller whether the keys that failed are still the keys on this device, which is what
      * lets a reader cache an unreadable message without losing it for good.
+     *
+     * @return the key epoch result
      */
     public synchronized long keyEpoch() {
         return keyEpoch;
@@ -327,6 +414,11 @@ public class ChannelKeyRegistry {
      * ever had. Both halves arrive together in one {@code TYPE_UNICAST_ROTATED_KEY} - the server's uuid
      * in the header, the client's inside the envelope - which is the only moment the pairing can be
      * learned, and the header is otherwise discarded.
+     *
+     * @param channelId the identifier of the channel
+     * @param serverVersion the server-side key version
+     * @param clientVersion the client-side version associated with the server version
+     * @throws KeyStoreUnavailableException if the secure key store cannot provide the required key.
      */
     public synchronized void rememberServerVersion(long channelId, UUID serverVersion,
                                                    UUID clientVersion) throws KeyStoreUnavailableException {
@@ -370,6 +462,9 @@ public class ChannelKeyRegistry {
      * @return the key version this device holds for the server's key row {@code serverVersion}, or
      * {@code null} when this device never took part in that rotation - which is precisely the case of
      * a payload it cannot read, and the only way to name the key it is missing
+     *
+     * @param channelId the identifier of the channel
+     * @param serverVersion the server-side key version
      */
     public synchronized UUID clientVersionFor(long channelId, UUID serverVersion) {
         if (serverVersion == null) {
@@ -393,6 +488,8 @@ public class ChannelKeyRegistry {
     /**
      * Forgets a channel's key, its history and its server-version map, e.g. after the channel was
      * deleted.
+     *
+     * @param channelId the identifier of the channel
      */
     public synchronized void forget(long channelId) {
         blobs.remove(currentAlias(channelId));
@@ -402,6 +499,10 @@ public class ChannelKeyRegistry {
         ++keyEpoch;
     }
 
+    /**
+     * Forgets the all.
+     *
+     */
     public synchronized void forgetAll() {
         for (final String key : blobs.keysWithPrefix(KEY_PREFIX)) {
             blobs.remove(key);
@@ -414,6 +515,8 @@ public class ChannelKeyRegistry {
      * Every channel key this device holds, flattened for a backup archive. Entries whose sealed
      * blob cannot be opened (a master key that no longer exists) are skipped, which is what makes
      * an export of a partially damaged store still useful.
+     *
+     * @return the exportable entries collection
      */
     public synchronized List<ChannelKeyEntry> exportableEntries() {
         final List<ChannelKeyEntry> entries = new ArrayList<>();
@@ -444,6 +547,9 @@ public class ChannelKeyRegistry {
      * newest one ends up current, and each adoption pushes the previous one into the history.
      *
      * @return how many channels received at least one key
+     *
+     * @param entries the key entries to import
+     * @throws KeyStoreUnavailableException if the secure key store cannot provide the required key.
      */
     public synchronized int importEntries(List<ChannelKeyEntry> entries) throws KeyStoreUnavailableException {
         if (entries == null || entries.isEmpty()) {
@@ -475,6 +581,10 @@ public class ChannelKeyRegistry {
      * Such a key stays readable through {@link #decryptCandidates(long)} but must never become the
      * current one again, because the version uuids are random and carry no ordering that could
      * otherwise tell a replayed envelope from a newer rotation.
+     *
+     * @param channelId the identifier of the channel
+     * @param version the key version
+     * @return superseded.
      */
     private boolean isSuperseded(long channelId, UUID version) {
         for (final KeyVersion superseded : readHistory(channelId)) {
@@ -486,6 +596,12 @@ public class ChannelKeyRegistry {
         return false;
     }
 
+    /**
+     * Loads the current version and key for the channel.
+     *
+     * @param channelId the identifier of the channel
+     * @return the current key version result
+     */
     private KeyVersion currentKeyVersion(long channelId) {
         final byte[] stored = blobs.load(currentAlias(channelId));
         if (stored == null || stored.length != UUID_LENGTH_BYTES + KEY_LENGTH_BYTES) {
@@ -495,6 +611,14 @@ public class ChannelKeyRegistry {
         return toKeyVersion(stored, 0);
     }
 
+    /**
+     * Persists a channel key and its version in secure storage.
+     *
+     * @param channelId the identifier of the channel
+     * @param version the key version
+     * @param key the encryption key to use
+     * @throws KeyStoreUnavailableException if the secure key store cannot provide the required key.
+     */
     private void persist(long channelId, UUID version, byte[] key) throws KeyStoreUnavailableException {
         final byte[] stored = new byte[UUID_LENGTH_BYTES + KEY_LENGTH_BYTES];
 
@@ -508,6 +632,13 @@ public class ChannelKeyRegistry {
         ++keyEpoch;
     }
 
+    /**
+     * Appends the history.
+     *
+     * @param channelId the identifier of the channel
+     * @param superseded the previous channel key being archived
+     * @throws KeyStoreUnavailableException if the secure key store cannot provide the required key.
+     */
     private void appendHistory(long channelId, KeyVersion superseded) throws KeyStoreUnavailableException {
         final List<KeyVersion> history = readHistory(channelId);
 
@@ -530,6 +661,12 @@ public class ChannelKeyRegistry {
         blobs.put(historyAlias(channelId), packed);
     }
 
+    /**
+     * Reads the history.
+     *
+     * @param channelId the identifier of the channel
+     * @return the read history collection
+     */
     private List<KeyVersion> readHistory(long channelId) {
         final List<KeyVersion> history = new ArrayList<>();
 
@@ -564,10 +701,20 @@ public class ChannelKeyRegistry {
             this.key = key;
         }
 
+        /**
+         * Returns the key version UUID.
+         *
+         * @return the key version UUID
+         */
         public UUID version() {
             return version;
         }
 
+        /**
+         * Returns the key bytes.
+         *
+         * @return the key bytes
+         */
         public byte[] key() {
             return key;
         }
@@ -586,14 +733,29 @@ public class ChannelKeyRegistry {
             this.freshlyCreated = freshlyCreated;
         }
 
+        /**
+         * Returns the key bytes.
+         *
+         * @return the key bytes
+         */
         public byte[] key() {
             return keyVersion.key();
         }
 
+        /**
+         * Returns the key version UUID.
+         *
+         * @return the key version UUID
+         */
         public UUID version() {
             return keyVersion.version();
         }
 
+        /**
+         * Returns whether the channel key was freshly generated.
+         *
+         * @return {@code true} if this result represents a newly generated channel key
+         */
         public boolean freshlyCreated() {
             return freshlyCreated;
         }
@@ -611,12 +773,19 @@ public class ChannelKeyRegistry {
             this.versions = new ArrayList<>(versions);
         }
 
+        /**
+         * Returns the channel identifier.
+         *
+         * @return the channel identifier
+         */
         public long channelId() {
             return channelId;
         }
 
         /**
          * Current version first, then superseded ones newest first.
+         *
+         * @return the versions collection
          */
         public List<KeyVersion> versions() {
             return new ArrayList<>(versions);
@@ -624,6 +793,8 @@ public class ChannelKeyRegistry {
 
         /**
          * Appends a superseded version, used while reading a backup archive.
+         *
+         * @param version the key version
          */
         void addVersion(KeyVersion version) {
             versions.add(version);

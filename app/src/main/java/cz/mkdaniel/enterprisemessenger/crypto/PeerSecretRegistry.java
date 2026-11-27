@@ -28,6 +28,12 @@ public class PeerSecretRegistry {
         this.blobs = blobs;
     }
 
+    /**
+     * Builds a storage alias for the associated record.
+     *
+     * @param peerId the identifier of the peer
+     * @return the alias result
+     */
     private static String alias(long peerId) {
         return KEY_PREFIX + peerId;
     }
@@ -36,6 +42,10 @@ public class PeerSecretRegistry {
      * Remembers the shared secret with {@code peerId}, overwriting an older one.
      *
      * @throws KeyStoreUnavailableException when the sealing key is unusable
+     *
+     * @param peerId the identifier of the peer
+     * @param secret the shared secret to store or retrieve
+     * @throws IllegalArgumentException if an argument is invalid.
      */
     public void store(long peerId, byte[] secret) throws KeyStoreUnavailableException {
         if (secret == null || secret.length == 0) {
@@ -48,21 +58,36 @@ public class PeerSecretRegistry {
     /**
      * @return the shared secret, or {@code null} when none was ever derived for this peer (or the
      * sealing key no longer opens it)
+     *
+     * @param peerId the identifier of the peer
      */
     public byte[] secret(long peerId) {
         return blobs.load(alias(peerId));
     }
 
+    /**
+     * Returns whether a shared secret is stored for the peer.
+     *
+     * @param peerId the identifier of the peer
+     * @return a shared secret is stored for the peer.
+     */
     public boolean knows(long peerId) {
         return blobs.contains(alias(peerId));
     }
 
+    /**
+     * Removes the stored secret for the peer.
+     *
+     * @param peerId the identifier of the peer
+     */
     public void forget(long peerId) {
         blobs.remove(alias(peerId));
     }
 
     /**
      * Peer ids this device holds a sealed secret for.
+     *
+     * @return the known peers collection
      */
     public List<Long> knownPeers() {
         final List<Long> peers = new ArrayList<>();

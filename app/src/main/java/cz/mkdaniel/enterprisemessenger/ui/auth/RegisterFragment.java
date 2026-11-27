@@ -19,10 +19,22 @@ import cz.mkdaniel.enterprisemessenger.net.AccountStore;
 import cz.mkdaniel.enterprisemessenger.net.LocalNetworkPermission;
 import cz.mkdaniel.enterprisemessenger.net.ServerConnectionManager;
 
+/**
+ * Presents the account registration form and submits new credentials.
+ *
+ */
 public class RegisterFragment extends Fragment {
 
     private FragmentRegisterBinding binding;
 
+    /**
+     * Handles the create view event.
+     *
+     * @param inflater the layout inflater used to create the view
+     * @param container the parent view that will contain the created view
+     * @param savedInstanceState the saved instance state to restore, or null when creating the screen for the first time
+     * @return the on create view result
+     */
     @Nullable
     @Override
     public View onCreateView(@NonNull LayoutInflater inflater, @Nullable ViewGroup container, @Nullable Bundle savedInstanceState) {
@@ -30,6 +42,12 @@ public class RegisterFragment extends Fragment {
         return binding.getRoot();
     }
 
+    /**
+     * Handles the view created event.
+     *
+     * @param view the view to create, inspect, or update
+     * @param savedInstanceState the saved instance state to restore, or null when creating the screen for the first time
+     */
     @Override
     public void onViewCreated(@NonNull View view, @Nullable Bundle savedInstanceState) {
         super.onViewCreated(view, savedInstanceState);
@@ -41,6 +59,11 @@ public class RegisterFragment extends Fragment {
         binding.buttonGoToLogin.setOnClickListener(v -> navController.navigate(R.id.action_register_to_login));
     }
 
+    /**
+     * Validates the registration form and submits the new account details.
+     *
+     * @param navController the navigation controller used after the operation
+     */
     private void performRegister(NavController navController) {
         String username = binding.edittextUsername.getText() != null ? binding.edittextUsername.getText().toString().trim() : "";
         String password = binding.edittextPassword.getText() != null ? binding.edittextPassword.getText().toString().trim() : "";
@@ -115,11 +138,21 @@ public class RegisterFragment extends Fragment {
                         // Cache the id the server just assigned to the account - the server list
                         // needs it to tell an administrator from a plain member.
                         connectionManager.fetchUserId(new ServerConnectionManager.Callback<>() {
+                            /**
+                             * Handles the successful result of the asynchronous operation.
+                             *
+                             * @param userId the user ID returned by the server
+                             */
                             @Override
                             public void onResult(Long userId) {
                                 Log.d("RegisterFragment", "Cached user id " + userId);
                             }
 
+                            /**
+                             * Handles a failure from the asynchronous operation.
+                             *
+                             * @param error the error message explaining the failure
+                             */
                             @Override
                             public void onFailure(String error) {
                                 Log.w("RegisterFragment", "Could not read the user id: " + error);
@@ -143,6 +176,11 @@ public class RegisterFragment extends Fragment {
         }).start();
     }
 
+    /**
+     * Sets the loading.
+     *
+     * @param loading whether a load operation is in progress
+     */
     private void setLoading(boolean loading) {
         if (binding == null) return;
         binding.progressbarRegister.setVisibility(loading ? View.VISIBLE : View.GONE);
@@ -153,17 +191,30 @@ public class RegisterFragment extends Fragment {
         binding.edittextConfirmPassword.setEnabled(!loading);
     }
 
+    /**
+     * Shows the error.
+     *
+     * @param message the message to process
+     */
     private void showError(String message) {
         if (binding == null) return;
         binding.textError.setText(message);
         binding.textError.setVisibility(View.VISIBLE);
     }
 
+    /**
+     * Hides the error.
+     *
+     */
     private void hideError() {
         if (binding == null) return;
         binding.textError.setVisibility(View.GONE);
     }
 
+    /**
+     * Handles the destroy view event.
+     *
+     */
     @Override
     public void onDestroyView() {
         super.onDestroyView();

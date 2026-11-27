@@ -124,10 +124,22 @@ public class AccountStore {
         purgeLegacyPlaintextSecrets();
     }
 
+    /**
+     * Encodes a string as UTF-8 bytes, treating null as an empty string.
+     *
+     * @param value the value to process
+     * @return the bytes of data
+     */
     private static byte[] bytesOf(String value) {
         return (value == null ? "" : value).getBytes(StandardCharsets.UTF_8);
     }
 
+    /**
+     * Decodes UTF-8 bytes as a string, treating null as an empty string.
+     *
+     * @param value the value to process
+     * @return the string of result
+     */
     private static String stringOf(byte[] value) {
         return value == null ? "" : new String(value, StandardCharsets.UTF_8);
     }
@@ -152,6 +164,11 @@ public class AccountStore {
         Log.d(TAG, "Removed the credentials an earlier version stored in plaintext");
     }
 
+    /**
+     * Returns whether logged in.
+     *
+     * @return logged in.
+     */
     public synchronized boolean isLoggedIn() {
         return Boolean.parseBoolean(plain.getString(KEY_LOGGED_IN));
     }
@@ -163,6 +180,9 @@ public class AccountStore {
      *                    back to that address, otherwise it produces a 401 and a log-out the user
      *                    did not ask for
      * @param expiresAt   epoch milliseconds from the server's {@code expiresAt}, or 0 when unknown
+     *
+     * @param username the account username
+     * @param token the authentication token
      */
     public synchronized void saveSession(String username, String token, String tokenIssuer, long expiresAt) {
         plain.putString(KEY_USERNAME, username);
@@ -178,6 +198,13 @@ public class AccountStore {
         saveJwtToken(token, tokenIssuer, expiresAt);
     }
 
+    /**
+     * Saves the JWT token.
+     *
+     * @param token the authentication token
+     * @param tokenIssuer the server that issued the authentication token
+     * @param expiresAt the authentication-token expiry time
+     */
     public synchronized void saveJwtToken(String token, String tokenIssuer, long expiresAt) {
         try {
             blobs.put(SLOT_JWT_TOKEN, bytesOf(token));
@@ -194,6 +221,9 @@ public class AccountStore {
 
     /**
      * Convenience for callers that do not know the expiry.
+     *
+     * @param token the authentication token
+     * @param tokenIssuer the server that issued the authentication token
      */
     public synchronized void saveJwtToken(String token, String tokenIssuer) {
         saveJwtToken(token, tokenIssuer, 0L);
@@ -219,6 +249,8 @@ public class AccountStore {
      * Caches the numeric id the physical server handed to {@code GET /api/users/me}, so member lists
      * can be scanned for it without asking again on every screen. Not secret: the id appears in every
      * member list the user can read anyway.
+     *
+     * @param userId the identifier of the user
      */
     public synchronized void saveUserId(long userId) {
         plain.putString(KEY_USER_ID, Long.toString(userId));
@@ -228,6 +260,9 @@ public class AccountStore {
      * Caches the display name and registration instant from {@code GET /api/users/me}. Both are
      * optional on the server, so an absent value is stored as empty rather than removed: the About-you
      * card distinguishes "known to be unset" from "never read", and renders a fallback either way.
+     *
+     * @param displayName the display name to set
+     * @param registeredAt the account registration timestamp
      */
     public synchronized void saveProfileDetails(String displayName, String registeredAt) {
         plain.putString(KEY_DISPLAY_NAME, displayName == null ? "" : displayName);
@@ -236,6 +271,8 @@ public class AccountStore {
 
     /**
      * Cached display name, or {@code ""} when the account has never set one or it was never read.
+     *
+     * @return the display name value
      */
     public synchronized String getDisplayName() {
         final String displayName = plain.getString(KEY_DISPLAY_NAME);
@@ -245,6 +282,8 @@ public class AccountStore {
 
     /**
      * Cached registration instant as the server's ISO-8601 string, or {@code ""} when unknown.
+     *
+     * @return the registered at value
      */
     public synchronized String getRegisteredAt() {
         final String registeredAt = plain.getString(KEY_REGISTERED_AT);
@@ -254,6 +293,8 @@ public class AccountStore {
 
     /**
      * Cached user id, or {@code -1L} when this installation has never fetched it.
+     *
+     * @return the user identifier value
      */
     public synchronized long getUserId() {
         final String cached = plain.getString(KEY_USER_ID);
@@ -272,6 +313,9 @@ public class AccountStore {
     /**
      * Last message id this member reported as read in {@code channelId}, or {@code -1L} when the
      * channel has never been read on this installation.
+     *
+     * @param channelId the identifier of the channel
+     * @return the last read message identifier value
      */
     public synchronized long getLastReadMessageId(final long channelId) {
         final String cached = plain.getString(KEY_READ_CURSOR_PREFIX + channelId);
@@ -290,17 +334,27 @@ public class AccountStore {
     /**
      * Remembers that a receipt up to {@code messageId} reached the server for {@code channelId}, so
      * the same position is never reported twice.
+     *
+     * @param channelId the identifier of the channel
+     * @param messageId the identifier of the message
      */
     public synchronized void saveLastReadMessageId(final long channelId, final long messageId) {
         plain.putString(KEY_READ_CURSOR_PREFIX + channelId, Long.toString(messageId));
     }
 
+    /**
+     * Returns the JWT token.
+     *
+     * @return the JWT token value
+     */
     public synchronized String getJwtToken() {
         return stringOf(blobs.load(SLOT_JWT_TOKEN));
     }
 
     /**
      * Address of the server that issued the stored token, or "" when it was never recorded.
+     *
+     * @return the token issuer value
      */
     public synchronized String getTokenIssuer() {
         return stringOf(blobs.load(SLOT_TOKEN_ISSUER));
@@ -309,6 +363,8 @@ public class AccountStore {
     /**
      * Expiry of the stored token in epoch milliseconds, or 0 when the store does not know it (an
      * older installation, or a sealed slot that no longer opens).
+     *
+     * @return the token expires at value
      */
     public synchronized long getTokenExpiresAt() {
         final String raw = stringOf(blobs.load(SLOT_TOKEN_EXPIRES_AT));
@@ -328,6 +384,8 @@ public class AccountStore {
      * Whether the stored token should be exchanged before being used again. A token with no known
      * expiry is used as-is: the server rejects it if it is really dead, and the caller then clears
      * the session.
+     *
+     * @return whether the should refresh token condition holds
      */
     public synchronized boolean shouldRefreshToken() {
         final long expiresAt = getTokenExpiresAt();
@@ -335,6 +393,11 @@ public class AccountStore {
         return expiresAt > 0L && expiresAt - REFRESH_MARGIN_MILLIS <= System.currentTimeMillis();
     }
 
+    /**
+     * Returns the username.
+     *
+     * @return the username value
+     */
     public synchronized String getUsername() {
         final String username = plain.getString(KEY_USERNAME);
 
@@ -344,6 +407,8 @@ public class AccountStore {
     /**
      * The account this device's encryption identity is bound to, or {@code ""} when no account has
      * ever signed in here (a fresh installation, or a reset device identity).
+     *
+     * @return the bound account result
      */
     public synchronized String boundAccount() {
         final String bound = plain.getString(KEY_BOUND_ACCOUNT);
@@ -354,6 +419,9 @@ public class AccountStore {
     /**
      * Whether {@code username} may use this device's encryption identity: an unbound device accepts
      * anybody, a bound one only its own account.
+     *
+     * @param username the account username
+     * @return bound to.
      */
     public synchronized boolean isBoundTo(String username) {
         final String bound = boundAccount();

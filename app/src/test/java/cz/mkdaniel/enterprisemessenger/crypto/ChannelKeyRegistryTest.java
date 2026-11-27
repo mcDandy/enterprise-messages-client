@@ -29,12 +29,22 @@ public class ChannelKeyRegistryTest {
     private SecureBlobStore store;
     private ChannelKeyRegistry registry;
 
+    /**
+     * Creates the test fixture used by the test methods.
+     *
+     * @throws GeneralSecurityException if a cryptographic operation fails.
+     */
     @Before
     public void setUp() throws GeneralSecurityException {
         store = new SecureBlobStore(new FakeKeyValueSink(), new FixedMasterKey());
         registry = new ChannelKeyRegistry(store);
     }
 
+    /**
+     * Verifies first use invents a random key of the right length for this case.
+     *
+     * @throws Exception if the first use invents a random key of the right length operation cannot be completed.
+     */
     @Test
     public void firstUseInventsARandomKeyOfTheRightLength() throws Exception {
         final ChannelKeyRegistry.GenerationResult created = registry.ensureChannelKey(CHANNEL);
@@ -44,6 +54,11 @@ public class ChannelKeyRegistryTest {
         assertNotNull(created.version());
     }
 
+    /**
+     * Verifies ensure is idempotent so opening a channel does not rekey it for this case.
+     *
+     * @throws Exception if the ensure is idempotent so opening a channel does not rekey it operation cannot be completed.
+     */
     @Test
     public void ensureIsIdempotentSoOpeningAChannelDoesNotRekeyIt() throws Exception {
         final ChannelKeyRegistry.GenerationResult first = registry.ensureChannelKey(CHANNEL);
@@ -54,6 +69,11 @@ public class ChannelKeyRegistryTest {
         assertEquals(first.version(), second.version());
     }
 
+    /**
+     * Verifies two channels never share a key for this case.
+     *
+     * @throws Exception if the two channels never share a key operation cannot be completed.
+     */
     @Test
     public void twoChannelsNeverShareAKey() throws Exception {
         final byte[] first = registry.ensureChannelKey(1L).key();
@@ -62,6 +82,11 @@ public class ChannelKeyRegistryTest {
         assertFalse(java.util.Arrays.equals(first, second));
     }
 
+    /**
+     * Verifies keys do not depend on the channel identifier for this case.
+     *
+     * @throws Exception if the keys do not depend on the channel identifier operation cannot be completed.
+     */
     @Test
     public void keysDoNotDependOnTheChannelId() throws Exception {
         // The old scheme was SHA-256("ems-channel-" + id), which anyone could recompute. Neighbouring
@@ -78,6 +103,11 @@ public class ChannelKeyRegistryTest {
         }
     }
 
+    /**
+     * Verifies adopted key supersedes the current one and keeps it readable for this case.
+     *
+     * @throws Exception if the adopted key supersedes the current one and keeps it readable operation cannot be completed.
+     */
     @Test
     public void adoptedKeySupersedesTheCurrentOneAndKeepsItReadable() throws Exception {
         final byte[] own = registry.ensureChannelKey(CHANNEL).key();
@@ -98,6 +128,11 @@ public class ChannelKeyRegistryTest {
         assertArrayEquals(own, candidates.get(1).key());
     }
 
+    /**
+     * Verifies adopting the key we already have is a no op for this case.
+     *
+     * @throws Exception if the adopting the key we already have is a no op operation cannot be completed.
+     */
     @Test
     public void adoptingTheKeyWeAlreadyHaveIsANoOp() throws Exception {
         final ChannelKeyRegistry.GenerationResult own = registry.ensureChannelKey(CHANNEL);
@@ -108,6 +143,11 @@ public class ChannelKeyRegistryTest {
         assertEquals(1, registry.decryptCandidates(CHANNEL).size());
     }
 
+    /**
+     * Verifies malformed adoption is rejected for this case.
+     *
+     * @throws Exception if the malformed adoption is rejected operation cannot be completed.
+     */
     @Test
     public void malformedAdoptionIsRejected() throws Exception {
         registry.ensureChannelKey(CHANNEL);
@@ -120,6 +160,11 @@ public class ChannelKeyRegistryTest {
         assertNotEquals(0, registry.decryptCandidates(CHANNEL).size());
     }
 
+    /**
+     * Verifies history stays within its bound for this case.
+     *
+     * @throws Exception if the history stays within its bound operation cannot be completed.
+     */
     @Test
     public void historyStaysWithinItsBound() throws Exception {
         registry.ensureChannelKey(CHANNEL);
@@ -136,6 +181,11 @@ public class ChannelKeyRegistryTest {
         assertEquals(ChannelKeyRegistry.MAX_HISTORY + 1, candidates.size());
     }
 
+    /**
+     * Verifies rotation replaces the key and keeps the old readable for this case.
+     *
+     * @throws Exception if the rotation replaces the key and keeps the old readable operation cannot be completed.
+     */
     @Test
     public void rotationReplacesTheKeyAndKeepsTheOldReadable() throws Exception {
         final byte[] original = registry.ensureChannelKey(CHANNEL).key();
@@ -148,6 +198,11 @@ public class ChannelKeyRegistryTest {
         assertEquals(2, registry.decryptCandidates(CHANNEL).size());
     }
 
+    /**
+     * Verifies forget removes both the key and its history for this case.
+     *
+     * @throws Exception if the forget removes both the key and its history operation cannot be completed.
+     */
     @Test
     public void forgetRemovesBothTheKeyAndItsHistory() throws Exception {
         registry.ensureChannelKey(CHANNEL);
@@ -159,6 +214,11 @@ public class ChannelKeyRegistryTest {
         assertTrue(registry.decryptCandidates(CHANNEL).isEmpty());
     }
 
+    /**
+     * Verifies exportable entries carry current key and history for this case.
+     *
+     * @throws Exception if the exportable entries carry current key and history operation cannot be completed.
+     */
     @Test
     public void exportableEntriesCarryCurrentKeyAndHistory() throws Exception {
         registry.ensureChannelKey(1L);
@@ -181,6 +241,11 @@ public class ChannelKeyRegistryTest {
         assertEquals(2, entries.get(0).versions().size() + entries.get(1).versions().size() - 1);
     }
 
+    /**
+     * Verifies imported entries end with the newest version current for this case.
+     *
+     * @throws Exception if the imported entries end with the newest version current operation cannot be completed.
+     */
     @Test
     public void importedEntriesEndWithTheNewestVersionCurrent() throws Exception {
         registry.ensureChannelKey(CHANNEL);
@@ -197,6 +262,11 @@ public class ChannelKeyRegistryTest {
         assertEquals(newest.version(), other.currentVersion(CHANNEL));
     }
 
+    /**
+     * Verifies forget all clears every channel key for this case.
+     *
+     * @throws Exception if the forget all clears every channel key operation cannot be completed.
+     */
     @Test
     public void forgetAllClearsEveryChannelKey() throws Exception {
         registry.ensureChannelKey(1L);
@@ -208,6 +278,11 @@ public class ChannelKeyRegistryTest {
         assertNull(registry.currentKey(2L));
     }
 
+    /**
+     * Verifies key epoch moves only when the key material changes for this case.
+     *
+     * @throws Exception if the key epoch moves only when the key material changes operation cannot be completed.
+     */
     @Test
     public void keyEpochMovesOnlyWhenTheKeyMaterialChanges() throws Exception {
         // A reader caches the verdict "no key of this device opens that message" and retries the
@@ -251,6 +326,11 @@ public class ChannelKeyRegistryTest {
         assertTrue(registry.keyEpoch() > previous);
     }
 
+    /**
+     * Verifies replayed envelope of a superseded key does not downgrade the channel for this case.
+     *
+     * @throws Exception if the replayed envelope of a superseded key does not downgrade the channel operation cannot be completed.
+     */
     @Test
     public void replayedEnvelopeOfASupersededKeyDoesNotDowngradeTheChannel() throws Exception {
         final UUID firstVersion = registry.ensureChannelKey(CHANNEL).version();
@@ -276,6 +356,11 @@ public class ChannelKeyRegistryTest {
         assertEquals(firstVersion, candidates.get(1).version());
     }
 
+    /**
+     * Verifies server row map names the key version that sealed a message for this case.
+     *
+     * @throws Exception if the server row map names the key version that sealed a message operation cannot be completed.
+     */
     @Test
     public void serverRowMapNamesTheKeyVersionThatSealedAMessage() throws Exception {
         final UUID ownVersion = registry.ensureChannelKey(CHANNEL).version();
@@ -304,6 +389,11 @@ public class ChannelKeyRegistryTest {
         assertNull(registry.clientVersionFor(CHANNEL, serverRow));
     }
 
+    /**
+     * Verifies recovered key becomes readable without becoming current for this case.
+     *
+     * @throws Exception if the recovered key becomes readable without becoming current operation cannot be completed.
+     */
     @Test
     public void recoveredKeyBecomesReadableWithoutBecomingCurrent() throws Exception {
         registry.ensureChannelKey(CHANNEL);

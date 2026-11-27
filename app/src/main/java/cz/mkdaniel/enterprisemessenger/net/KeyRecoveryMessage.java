@@ -61,12 +61,19 @@ public final class KeyRecoveryMessage {
             this.serverRows = new ArrayList<>(serverRows);
         }
 
+        /**
+         * Requests the er user identifier.
+         *
+         * @return the requester user identifier result
+         */
         public long requesterUserId() {
             return requesterUserId;
         }
 
         /**
          * The server key rows whose keys the requester is missing, in the order asked for.
+         *
+         * @return the server rows collection
          */
         public List<UUID> serverRows() {
             return new ArrayList<>(serverRows);
@@ -88,6 +95,11 @@ public final class KeyRecoveryMessage {
             this.sealedKeys = sealedKeys.clone();
         }
 
+        /**
+         * Returns the identifier of the user this offer targets.
+         *
+         * @return the target user identifier result
+         */
         public long targetUserId() {
             return targetUserId;
         }
@@ -95,20 +107,40 @@ public final class KeyRecoveryMessage {
         /**
          * Whose private key sealed {@link #sealedKeys()}: the requester can only open the blob with
          * the ECDH secret it shares with this member, so its id has to travel with the answer.
+         *
+         * @return the responder user identifier result
          */
         public long responderUserId() {
             return responderUserId;
         }
 
+        /**
+         * Returns the sealed channel-key payload.
+         *
+         * @return the sealed keys data
+         */
         public byte[] sealedKeys() {
             return sealedKeys.clone();
         }
     }
 
+    /**
+     * Returns whether control.
+     *
+     * @param text the text to process or send
+     * @return control.
+     */
     public static boolean isControl(final String text) {
         return text != null && text.startsWith(MARKER);
     }
 
+    /**
+     * Encodes the request.
+     *
+     * @param requesterUserId the ID of the user requesting key recovery
+     * @param serverRows the server key-row versions included in the request
+     * @return the encode request result
+     */
     public static String encodeRequest(final long requesterUserId, final List<UUID> serverRows) {
         final StringBuilder rows = new StringBuilder();
 
@@ -122,6 +154,14 @@ public final class KeyRecoveryMessage {
         return MARKER + REQUEST + FIELD + requesterUserId + FIELD + rows;
     }
 
+    /**
+     * Encodes the offer.
+     *
+     * @param targetUserId the user ID that should receive the offer
+     * @param responderUserId the ID of the user responding to the request
+     * @param sealedKeys the encrypted channel-key data in the offer
+     * @return the encode offer result
+     */
     public static String encodeOffer(final long targetUserId, final long responderUserId,
                                      final byte[] sealedKeys) {
         return MARKER + OFFER + FIELD + targetUserId + FIELD + responderUserId + FIELD
@@ -130,6 +170,8 @@ public final class KeyRecoveryMessage {
 
     /**
      * @return the parsed request, or {@code null} when {@code text} is not one or is malformed
+     *
+     * @param text the text to process or send
      */
     public static Request parseRequest(final String text) {
         final String[] fields = fields(text, REQUEST, 2);
@@ -157,6 +199,8 @@ public final class KeyRecoveryMessage {
 
     /**
      * @return the parsed offer, or {@code null} when {@code text} is not one or is malformed
+     *
+     * @param text the text to process or send
      */
     public static Offer parseOffer(final String text) {
         final String[] fields = fields(text, OFFER, 3);
@@ -178,6 +222,9 @@ public final class KeyRecoveryMessage {
     /**
      * Packs recovered keys into the blob an offer carries: {@code [16-byte version][32-byte key]} per
      * key.
+     *
+     * @param keys the channel keys to process
+     * @return the pack keys data
      */
     public static byte[] packKeys(final List<ChannelKeyRegistry.KeyVersion> keys) {
         final ByteBuffer buffer = ByteBuffer.allocate(keys.size() * KEY_ENTRY_BYTES);
@@ -195,6 +242,9 @@ public final class KeyRecoveryMessage {
      * Reads back what {@link #packKeys(List)} wrote.
      *
      * @throws IllegalArgumentException when the blob is not a whole number of entries
+     *
+     * @param blob the encrypted blob to store or process
+     * @return the unpack keys collection
      */
     public static List<ChannelKeyRegistry.KeyVersion> unpackKeys(final byte[] blob) {
         if (blob == null || blob.length == 0 || blob.length % KEY_ENTRY_BYTES != 0) {
@@ -219,6 +269,11 @@ public final class KeyRecoveryMessage {
      * Splits a handshake into its fields, refusing anything that does not carry the number of fields
      * its kind requires - an offer missing the responder's id must be refused rather than read past
      * the end.
+     *
+     * @param text the text to process or send
+     * @param expectedKind the expected key kind
+     * @param required whether the value is required
+     * @return the fields data
      */
     private static String[] fields(final String text, final String expectedKind, final int required) {
         if (!isControl(text)) {
@@ -239,6 +294,12 @@ public final class KeyRecoveryMessage {
         return parts.length < required ? null : parts;
     }
 
+    /**
+     * Parses the long.
+     *
+     * @param value the value to process
+     * @return the parse long result
+     */
     private static long parseLong(final String value) {
         try {
             return Long.parseLong(value.trim());
@@ -247,6 +308,12 @@ public final class KeyRecoveryMessage {
         }
     }
 
+    /**
+     * Parses the UUID.
+     *
+     * @param value the value to process
+     * @return the parse UUID result
+     */
     private static UUID parseUuid(final String value) {
         try {
             return UUID.fromString(value.trim());
@@ -258,6 +325,9 @@ public final class KeyRecoveryMessage {
     /**
      * Hex rather than Base64 so this class stays free of {@code android.util} and can be tested as
      * plain Java. An offer carries a few dozen bytes, so the doubled length costs nothing.
+     *
+     * @param bytes the byte array to process
+     * @return the to hex result
      */
     private static String toHex(final byte[] bytes) {
         final StringBuilder hex = new StringBuilder(bytes.length * 2);
@@ -270,6 +340,12 @@ public final class KeyRecoveryMessage {
         return hex.toString();
     }
 
+    /**
+     * Decodes a hexadecimal string into its byte representation.
+     *
+     * @param hex the hexadecimal value to decode
+     * @return the from hex data
+     */
     private static byte[] fromHex(final String hex) {
         if (hex.isEmpty() || hex.length() % 2 != 0) {
             return null;

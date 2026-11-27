@@ -32,6 +32,8 @@ public class NotificationHelper {
 
     /**
      * Creates the notification channel required on Android 8.0 (API 26) and higher.
+     *
+     * @param context the Android context used to access application resources and services
      */
     public static void createNotificationChannel(Context context) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -52,6 +54,8 @@ public class NotificationHelper {
     /**
      * Checks if notification permission is granted on Android 13+ (API 33+),
      * and requests it from the activity if it has not been granted.
+     *
+     * @param activity the activity requesting the permission
      */
     public static void checkAndRequestPermission(Activity activity) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -125,6 +129,10 @@ public class NotificationHelper {
     /**
      * Shows (or updates) the "N new messages" notification of a channel, for a chat frame that
      * arrives over the WebSocket while that channel is not the one on screen.
+     *
+     * @param context the Android context used to access application resources and services
+     * @param channelId the identifier of the channel
+     * @param channelName the channel name to use
      */
     public static void showChannelMessageNotification(Context context, long channelId, String channelName) {
         // Keyed by channel id so cancelNotificationForChannel() finds it again
@@ -140,6 +148,9 @@ public class NotificationHelper {
 
     /**
      * Cancels the notification of a channel and resets its unread counter (user opened the channel).
+     *
+     * @param context the Android context used to access application resources and services
+     * @param channelId the identifier of the channel
      */
     public static void cancelNotificationForChannel(Context context, long channelId) {
         if (context == null) return;
@@ -148,12 +159,21 @@ public class NotificationHelper {
         cancelNotificationForServer(context, name);
     }
 
+    /**
+     * Builds the preference key used to store an unread count.
+     *
+     * @param name the name to use
+     * @return the unread key result
+     */
     private static String unreadKey(String name) {
         return "unread_" + name;
     }
 
     /**
      * Cancels notifications for a specific server when user reads the messages.
+     *
+     * @param context the Android context used to access application resources and services
+     * @param serverName the server name to use
      */
     public static void cancelNotificationForServer(Context context, String serverName) {
         if (context == null || serverName == null) return;

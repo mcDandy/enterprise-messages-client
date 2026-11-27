@@ -76,6 +76,11 @@ public class Message {
         this.peerDelivered = peerDelivered;
     }
 
+    /**
+     * Returns the identifier.
+     *
+     * @return the identifier value
+     */
     public String getId() {
         return id;
     }
@@ -84,23 +89,45 @@ public class Message {
      * The server's own id for this message, or {@link #NO_SERVER_ID} when the server has not
      * assigned one. Unlike {@link #getId()} it is never a stand-in built from a timestamp, so it
      * is safe to report to the server and safe to compare against another message.
+     *
+     * @return the server identifier value
      */
     public long getServerId() {
         return serverId;
     }
 
+    /**
+     * Returns the text.
+     *
+     * @return the text value
+     */
     public String getText() {
         return text;
     }
 
+    /**
+     * Returns the sender.
+     *
+     * @return the sender value
+     */
     public String getSender() {
         return sender;
     }
 
+    /**
+     * Returns the timestamp.
+     *
+     * @return the timestamp value
+     */
     public long getTimestamp() {
         return timestamp;
     }
 
+    /**
+     * Returns whether pending.
+     *
+     * @return pending.
+     */
     public boolean isPending() {
         return pending;
     }
@@ -112,6 +139,8 @@ public class Message {
      * <p>
      * Not the same as another member having it: the server can hold a message indefinitely for a
      * member who is offline.
+     *
+     * @return delivered.
      */
     public boolean isDelivered() {
         return delivered;
@@ -120,6 +149,8 @@ public class Message {
     /**
      * Whether another member's client has confirmed it holds this message. Always {@code false}
      * until the server reports other members' cursors - see {@link #peerDelivered}.
+     *
+     * @return peer delivered.
      */
     public boolean isPeerDelivered() {
         return peerDelivered;

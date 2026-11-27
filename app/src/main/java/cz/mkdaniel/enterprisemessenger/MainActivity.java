@@ -23,10 +23,19 @@ import cz.mkdaniel.enterprisemessenger.net.LocalNetworkPermission;
 import cz.mkdaniel.enterprisemessenger.net.ServerConnectionManager;
 import cz.mkdaniel.enterprisemessenger.notification.NotificationHelper;
 
+/**
+ * Hosts the main application interface and coordinates top-level navigation.
+ *
+ */
 public class MainActivity extends AppCompatActivity {
 
     private AppBarConfiguration mAppBarConfiguration;
 
+    /**
+     * Handles the create event.
+     *
+     * @param savedInstanceState the saved instance state to restore, or null when creating the screen for the first time
+     */
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -107,18 +116,38 @@ public class MainActivity extends AppCompatActivity {
         AccountStore accountStore = new AccountStore(this);
         ServerConnectionManager conn = ServerConnectionManager.getInstance(this);
         conn.addListener(new ServerConnectionManager.ConnectionListener() {
+            /**
+             * Handles a connection-state change reported by the server manager.
+             *
+             * @param connected whether the connection is active
+             * @param serverBaseUrl the base URL of the connected server
+             */
             @Override
             public void onConnectionStateChanged(boolean connected, String serverBaseUrl) {
             }
 
+            /**
+             * Handles a newly received chat message.
+             *
+             * @param message the message received or selected
+             */
             @Override
             public void onMessageReceived(cz.mkdaniel.enterprisemessenger.ui.message.Message message) {
             }
 
+            /**
+             * Handles an error reported by the connection manager.
+             *
+             * @param errorMessage the error message to display
+             */
             @Override
             public void onError(String errorMessage) {
             }
 
+            /**
+             * Handles a request to authenticate the current account.
+             *
+             */
             @Override
             public void onAuthRequired() {
                 runOnUiThread(() -> {
@@ -157,6 +186,13 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    /**
+     * Handles the request permissions result event.
+     *
+     * @param requestCode the Android permission request code
+     * @param permissions the permissions requested by Android
+     * @param grantResults the results corresponding to the requested permissions
+     */
     @Override
     public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions,
                                           @NonNull int[] grantResults) {
@@ -175,6 +211,12 @@ public class MainActivity extends AppCompatActivity {
         Toast.makeText(this, R.string.error_local_network_denied, Toast.LENGTH_LONG).show();
     }
 
+    /**
+     * Handles the create options menu event.
+     *
+     * @param menu the options menu to populate
+     * @return whether the on create options menu condition holds
+     */
     @Override
     public boolean onCreateOptionsMenu(Menu menu) {
         boolean result = super.onCreateOptionsMenu(menu);
@@ -185,6 +227,12 @@ public class MainActivity extends AppCompatActivity {
         return result;
     }
 
+    /**
+     * Handles the options item selected event.
+     *
+     * @param item the item displayed by this row
+     * @return whether the on options item selected condition holds
+     */
     @Override
     public boolean onOptionsItemSelected(@NonNull MenuItem item) {
         if (item.getItemId() == R.id.nav_settings) {
@@ -195,6 +243,11 @@ public class MainActivity extends AppCompatActivity {
         return super.onOptionsItemSelected(item);
     }
 
+    /**
+     * Handles the support navigate up event.
+     *
+     * @return whether the on support navigate up condition holds
+     */
     @Override
     public boolean onSupportNavigateUp() {
         NavController navController = Navigation.findNavController(this, R.id.nav_host_fragment_content_main);

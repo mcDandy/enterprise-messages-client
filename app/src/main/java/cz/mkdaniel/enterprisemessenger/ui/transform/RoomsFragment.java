@@ -48,6 +48,14 @@ public class RoomsFragment extends Fragment {
     private long serverId;
     private boolean isAdminServer;
 
+    /**
+     * Handles the create view event.
+     *
+     * @param inflater the layout inflater used to create the view
+     * @param container the parent view that will contain the created view
+     * @param savedInstanceState the saved instance state to restore, or null when creating the screen for the first time
+     * @return the on create view result
+     */
     @Override
     public View onCreateView(@NonNull LayoutInflater inflater,
                              ViewGroup container, Bundle savedInstanceState) {
@@ -57,6 +65,11 @@ public class RoomsFragment extends Fragment {
         isAdminServer = getArguments() != null && getArguments().getBoolean("isAdminServer", false);
 
         adapter = new RoomAdapter(new OnRoomClickListener() {
+            /**
+             * Handles selection of a room.
+             *
+             * @param room the room selected by the user
+             */
             @Override
             public void onRoomClicked(Room room) {
                 // When clicked, clear new messages indicator
@@ -72,6 +85,11 @@ public class RoomsFragment extends Fragment {
                 navController.navigate(R.id.action_rooms_to_messages, args);
             }
 
+            /**
+             * Handles a long press on a room.
+             *
+             * @param room the room selected by the user
+             */
             @Override
             public void onRoomLongClicked(Room room) {
                 showChannelOptionsDialog(room);
@@ -91,9 +109,18 @@ public class RoomsFragment extends Fragment {
         return binding.getRoot();
     }
 
+    /**
+     * Loads the channels.
+     *
+     */
     private void loadChannels() {
         ServerConnectionManager.getInstance(requireContext()).fetchChannels(serverId,
                 new ServerConnectionManager.Callback<>() {
+                    /**
+                     * Handles the successful result of the asynchronous operation.
+                     *
+                     * @param rooms the rooms associated with this callback
+                     */
                     @Override
                     public void onResult(List<Room> rooms) {
                         if (binding == null) return;
@@ -101,6 +128,11 @@ public class RoomsFragment extends Fragment {
                         adapter.submitList(rooms);
                     }
 
+                    /**
+                     * Handles a failure from the asynchronous operation.
+                     *
+                     * @param error the error message explaining the failure
+                     */
                     @Override
                     public void onFailure(String error) {
                         if (binding == null) return;
@@ -113,6 +145,8 @@ public class RoomsFragment extends Fragment {
     /**
      * Long-press menu. Channels exist to be opened by everyone, so only administrators get the
      * rename and delete entries.
+     *
+     * @param room the room whose details or messages are being handled
      */
     private void showChannelOptionsDialog(Room room) {
         if (!isAdminServer) {
@@ -146,12 +180,19 @@ public class RoomsFragment extends Fragment {
      * Member picker for removal. The server's channel member list carries nothing but user ids, so
      * that is all the list can show. Removal is also what revokes read access: the server responds by
      * handing every remaining member a new channel key.
+     *
+     * @param room the room whose details or messages are being handled
      */
     private void showRemoveChannelMemberDialog(Room room) {
         final long channelId = ServerConnectionManager.parseChannelId(room.getId());
 
         ServerConnectionManager.getInstance(requireContext()).fetchChannelMembers(channelId,
                 new ServerConnectionManager.Callback<>() {
+                    /**
+                     * Handles the successful result of the asynchronous operation.
+                     *
+                     * @param members the channel or server members returned by the request
+                     */
                     @Override
                     public void onResult(JSONArray members) {
                         if (binding == null) return;
@@ -176,6 +217,11 @@ public class RoomsFragment extends Fragment {
                                 .show();
                     }
 
+                    /**
+                     * Handles a failure from the asynchronous operation.
+                     *
+                     * @param error the error message explaining the failure
+                     */
                     @Override
                     public void onFailure(String error) {
                         if (binding == null) return;
@@ -188,6 +234,9 @@ public class RoomsFragment extends Fragment {
     /**
      * Removal is irreversible for the removed device's history access, so it is confirmed before the
      * server is asked to re-key the channel.
+     *
+     * @param channelId the identifier of the channel
+     * @param userId the identifier of the user
      */
     private void confirmRemoveChannelMember(long channelId, long userId) {
         new MaterialAlertDialogBuilder(requireContext())
@@ -197,11 +246,21 @@ public class RoomsFragment extends Fragment {
                         ServerConnectionManager.getInstance(requireContext()).removeChannelMember(
                                 channelId, userId,
                                 new ServerConnectionManager.Callback<>() {
+                                    /**
+                                     * Handles the successful result of the asynchronous operation.
+                                     *
+                                     * @param result the result produced by the asynchronous operation
+                                     */
                                     @Override
                                     public void onResult(Void result) {
                                         toast(getString(R.string.channel_member_removed));
                                     }
 
+                                    /**
+                                     * Handles a failure from the asynchronous operation.
+                                     *
+                                     * @param error the error message explaining the failure
+                                     */
                                     @Override
                                     public void onFailure(String error) {
                                         toast(error);
@@ -211,6 +270,11 @@ public class RoomsFragment extends Fragment {
                 .show();
     }
 
+    /**
+     * Shows the add channel member dialog.
+     *
+     * @param room the room whose details or messages are being handled
+     */
     private void showAddChannelMemberDialog(Room room) {
         final EditText input = new EditText(requireContext());
         input.setHint(R.string.hint_member_user_id);
@@ -231,11 +295,21 @@ public class RoomsFragment extends Fragment {
                     ServerConnectionManager.getInstance(requireContext()).addChannelMember(
                             ServerConnectionManager.parseChannelId(room.getId()), userId,
                             new ServerConnectionManager.Callback<>() {
+                                /**
+                                 * Handles the successful result of the asynchronous operation.
+                                 *
+                                 * @param result the result produced by the asynchronous operation
+                                 */
                                 @Override
                                 public void onResult(Void result) {
                                     toast(getString(R.string.channel_member_added));
                                 }
 
+                                /**
+                                 * Handles a failure from the asynchronous operation.
+                                 *
+                                 * @param error the error message explaining the failure
+                                 */
                                 @Override
                                 public void onFailure(String error) {
                                     toast(error);
@@ -249,6 +323,11 @@ public class RoomsFragment extends Fragment {
     /**
      * Name dialog for both flows: {@code existing == null} creates a channel in this virtual
      * server, otherwise the name replaces that of {@code existing}.
+     *
+     * @param titleRes the string resource ID for the dialog title
+     * @param hintRes the string resource ID for the input hint
+     * @param positiveButtonRes the string resource ID for the positive button
+     * @param existing the existing value or entry
      */
     private void showChannelNameDialog(int titleRes, int hintRes, int positiveButtonRes,
                                        @Nullable Room existing) {
@@ -259,11 +338,21 @@ public class RoomsFragment extends Fragment {
 
             if (existing == null) {
                 manager.createChannel(serverId, name, new ServerConnectionManager.Callback<>() {
+                    /**
+                     * Handles the successful result of the asynchronous operation.
+                     *
+                     * @param created the newly created room
+                     */
                     @Override
                     public void onResult(Room created) {
                         loadChannels();
                     }
 
+                    /**
+                     * Handles a failure from the asynchronous operation.
+                     *
+                     * @param error the error message explaining the failure
+                     */
                     @Override
                     public void onFailure(String error) {
                         toast(error);
@@ -273,11 +362,21 @@ public class RoomsFragment extends Fragment {
                 final long channelId = ServerConnectionManager.parseChannelId(existing.getId());
 
                 manager.renameChannel(channelId, name, new ServerConnectionManager.Callback<>() {
+                    /**
+                     * Handles the successful result of the asynchronous operation.
+                     *
+                     * @param result the result produced by the asynchronous operation
+                     */
                     @Override
                     public void onResult(Void result) {
                         loadChannels();
                     }
 
+                    /**
+                     * Handles a failure from the asynchronous operation.
+                     *
+                     * @param error the error message explaining the failure
+                     */
                     @Override
                     public void onFailure(String error) {
                         toast(error);
@@ -288,6 +387,11 @@ public class RoomsFragment extends Fragment {
         dialog.show(getParentFragmentManager(), "channel_name_dialog");
     }
 
+    /**
+     * Shows the delete confirmation dialog.
+     *
+     * @param room the room whose details or messages are being handled
+     */
     private void showDeleteConfirmationDialog(Room room) {
         new MaterialAlertDialogBuilder(requireContext())
                 .setTitle(R.string.dialog_delete_channel_title)
@@ -296,11 +400,21 @@ public class RoomsFragment extends Fragment {
                     ServerConnectionManager.getInstance(requireContext())
                             .deleteChannel(ServerConnectionManager.parseChannelId(room.getId()),
                                     new ServerConnectionManager.Callback<>() {
+                                        /**
+                                         * Handles the successful result of the asynchronous operation.
+                                         *
+                                         * @param result the result produced by the asynchronous operation
+                                         */
                                         @Override
                                         public void onResult(Void result) {
                                             loadChannels();
                                         }
 
+                                        /**
+                                         * Handles a failure from the asynchronous operation.
+                                         *
+                                         * @param error the error message explaining the failure
+                                         */
                                         @Override
                                         public void onFailure(String error) {
                                             toast(error);
@@ -311,11 +425,20 @@ public class RoomsFragment extends Fragment {
                 .show();
     }
 
+    /**
+     * Converts the value to ast.
+     *
+     * @param message the message to process
+     */
     private void toast(String message) {
         if (message == null || message.isEmpty() || !isAdded()) return;
         Toast.makeText(requireContext(), message, Toast.LENGTH_LONG).show();
     }
 
+    /**
+     * Handles the destroy view event.
+     *
+     */
     @Override
     public void onDestroyView() {
         super.onDestroyView();
@@ -323,12 +446,30 @@ public class RoomsFragment extends Fragment {
         adapter = null;
     }
 
+    /**
+     * Defines the contract for on room click listener.
+     *
+     */
     private interface OnRoomClickListener {
+        /**
+         * Handles the room clicked event.
+         *
+         * @param room the room whose details or messages are being handled
+         */
         void onRoomClicked(Room room);
 
+        /**
+         * Handles the room long clicked event.
+         *
+         * @param room the room whose details or messages are being handled
+         */
         void onRoomLongClicked(Room room);
     }
 
+    /**
+     * Represents room adapter data or behavior used by the application.
+     *
+     */
     private static class RoomAdapter extends ListAdapter<Room, RoomViewHolder> {
 
         @NonNull
@@ -336,11 +477,25 @@ public class RoomsFragment extends Fragment {
 
         protected RoomAdapter(@NonNull OnRoomClickListener clickListener) {
             super(new DiffUtil.ItemCallback<Room>() {
+                /**
+                 * Compares item identifiers to determine whether two list entries represent the same item.
+                 *
+                 * @param oldItem the earlier list item being compared
+                 * @param newItem the updated list item being compared
+                 * @return whether the operation succeeded
+                 */
                 @Override
                 public boolean areItemsTheSame(@NonNull Room oldItem, @NonNull Room newItem) {
                     return oldItem.getId().equals(newItem.getId());
                 }
 
+                /**
+                 * Compares item contents to determine whether a list entry needs rebinding.
+                 *
+                 * @param oldItem the earlier list item being compared
+                 * @param newItem the updated list item being compared
+                 * @return whether the operation succeeded
+                 */
                 @Override
                 public boolean areContentsTheSame(@NonNull Room oldItem, @NonNull Room newItem) {
                     return oldItem.getId().equals(newItem.getId())
@@ -351,6 +506,13 @@ public class RoomsFragment extends Fragment {
             this.clickListener = clickListener;
         }
 
+        /**
+         * Handles the create view holder event.
+         *
+         * @param parent the parent view group
+         * @param viewType the adapter view type to create
+         * @return the on create view holder result
+         */
         @NonNull
         @Override
         public RoomViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
@@ -359,6 +521,12 @@ public class RoomsFragment extends Fragment {
             return new RoomViewHolder(itemView);
         }
 
+        /**
+         * Handles the bind view holder event.
+         *
+         * @param holder the view holder to bind
+         * @param position the item position in the adapter
+         */
         @Override
         public void onBindViewHolder(@NonNull RoomViewHolder holder, int position) {
             Room room = getItem(position);
@@ -380,6 +548,10 @@ public class RoomsFragment extends Fragment {
         }
     }
 
+    /**
+     * Represents room view holder data or behavior used by the application.
+     *
+     */
     private static class RoomViewHolder extends RecyclerView.ViewHolder {
 
         private final TextView roomNameText;

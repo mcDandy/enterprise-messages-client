@@ -13,6 +13,8 @@ import javax.crypto.SecretKey;
 public interface MasterKeyProvider {
 
     /**
+     * Retrieves the symmetric key used to seal application secret values.
+     *
      * @return the master key, ready for {@code Cipher.init}. Never {@code null}.
      * @throws GeneralSecurityException when the key does not exist, cannot be created, or cannot
      *                                  be used (e.g. it was permanently invalidated). Never

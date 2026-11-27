@@ -85,6 +85,12 @@ public class SettingsFragment extends Fragment {
             });
     private FragmentSettingsBinding binding;
 
+    /**
+     * Copies the current text field contents into a character array.
+     *
+     * @param field the text field whose contents are read
+     * @return the chars of data
+     */
     private static char[] charsOf(EditText field) {
         final char[] value = new char[field.getText().length()];
         field.getText().getChars(0, value.length, value, 0);
@@ -92,6 +98,15 @@ public class SettingsFragment extends Fragment {
         return value;
     }
 
+    /**
+     * Writes the text.
+     *
+     * @param context the Android context used to access application resources and services
+     * @param target the destination byte array
+     * @param text the text to process or send
+     * @throws Exception if the write text operation cannot be completed.
+     * @throws IllegalStateException if the current state does not allow this operation.
+     */
     private static void writeText(Context context, Uri target, String text) throws Exception {
         try (final OutputStream out = context.getContentResolver().openOutputStream(target, "wt")) {
             if (out == null) {
@@ -102,6 +117,14 @@ public class SettingsFragment extends Fragment {
         }
     }
 
+    /**
+     * Reads the text.
+     *
+     * @param context the Android context used to access application resources and services
+     * @param source the source byte array
+     * @return the read text result
+     * @throws Exception if the read text operation cannot be completed.
+     */
     private static String readText(Context context, Uri source) throws Exception {
         final StringBuilder builder = new StringBuilder();
 
@@ -119,6 +142,14 @@ public class SettingsFragment extends Fragment {
         return builder.toString();
     }
 
+    /**
+     * Handles the create view event.
+     *
+     * @param inflater the layout inflater used to create the view
+     * @param container the parent view that will contain the created view
+     * @param savedInstanceState the saved instance state to restore, or null when creating the screen for the first time
+     * @return the on create view result
+     */
     public View onCreateView(@NonNull LayoutInflater inflater,
                              ViewGroup container, Bundle savedInstanceState) {
         SettingsViewModel settingsViewModel =
@@ -131,6 +162,12 @@ public class SettingsFragment extends Fragment {
         return root;
     }
 
+    /**
+     * Handles the view created event.
+     *
+     * @param view the view to create, inspect, or update
+     * @param savedInstanceState the saved instance state to restore, or null when creating the screen for the first time
+     */
     @Override
     public void onViewCreated(@NonNull View view, @Nullable Bundle savedInstanceState) {
         super.onViewCreated(view, savedInstanceState);
@@ -180,6 +217,11 @@ public class SettingsFragment extends Fragment {
     private void refreshProfile() {
         ServerConnectionManager.getInstance(requireContext()).fetchProfile(
                 new ServerConnectionManager.Callback<>() {
+                    /**
+                     * Handles the successful result of the asynchronous operation.
+                     *
+                     * @param profile the profile returned by the server
+                     */
                     @Override
                     public void onResult(ServerConnectionManager.Profile profile) {
                         if (!isAdded() || binding == null) {
@@ -190,6 +232,11 @@ public class SettingsFragment extends Fragment {
                                 profile.userId, profile.registeredAt);
                     }
 
+                    /**
+                     * Handles a failure from the asynchronous operation.
+                     *
+                     * @param error the error message explaining the failure
+                     */
                     @Override
                     public void onFailure(String error) {
                         // The cached values stay up; there is nothing the user can do from here.
@@ -202,6 +249,10 @@ public class SettingsFragment extends Fragment {
      * an account that has never set a display name simply shows its handle as the heading.
      *
      * @param registeredAt the server's ISO-8601 instant, or "" when unknown
+     *
+     * @param displayName the display name to set
+     * @param username the account username
+     * @param userId the identifier of the user
      */
     private void renderProfile(String displayName, String username, long userId, String registeredAt) {
         if (binding == null) {
@@ -236,6 +287,10 @@ public class SettingsFragment extends Fragment {
         }
     }
 
+    /**
+     * Hides the profile.
+     *
+     */
     private void hideProfile() {
         if (binding == null) {
             return;
@@ -251,6 +306,9 @@ public class SettingsFragment extends Fragment {
      * Turns the server's ISO-8601 instant into a date in the phone's zone and locale. Returns null for
      * a blank or unparseable value, which hides the row: an approximate or invented date would be worse
      * than none on a screen that otherwise reports exactly what the server says.
+     *
+     * @param registeredAt the account registration timestamp
+     * @return the format registration date result
      */
     private String formatRegistrationDate(String registeredAt) {
         if (registeredAt == null || registeredAt.isEmpty()) {
@@ -271,6 +329,9 @@ public class SettingsFragment extends Fragment {
     /**
      * Writes the archive to the document the user chose. The armored text is produced off the main
      * thread because PBKDF2 with 210 000 iterations takes a visible fraction of a second.
+     *
+     * @param target the destination byte array
+     * @param passphrase the passphrase protecting or unlocking the backup
      */
     private void exportKeys(final Uri target, final char[] passphrase) {
         final Context context = requireContext().getApplicationContext();
@@ -280,6 +341,11 @@ public class SettingsFragment extends Fragment {
 
     /**
      * Body of {@link #exportKeys}; returns the message to show the user.
+     *
+     * @param context the Android context used to access application resources and services
+     * @param target the destination byte array
+     * @param passphrase the passphrase protecting or unlocking the backup
+     * @return the export result result
      */
     private String exportResult(Context context, Uri target, char[] passphrase) {
         try {
@@ -302,6 +368,9 @@ public class SettingsFragment extends Fragment {
     /**
      * Reads and adopts the archive the user chose. A wrong passphrase or a foreign file changes
      * nothing: {@link KeyBackup#importArchive} decrypts and parses everything before adopting.
+     *
+     * @param source the source byte array
+     * @param passphrase the passphrase protecting or unlocking the backup
      */
     private void importKeys(final Uri source, final char[] passphrase) {
         final Context context = requireContext().getApplicationContext();
@@ -311,6 +380,11 @@ public class SettingsFragment extends Fragment {
 
     /**
      * Body of {@link #importKeys}; returns the message to show the user.
+     *
+     * @param context the Android context used to access application resources and services
+     * @param source the source byte array
+     * @param passphrase the passphrase protecting or unlocking the backup
+     * @return the import result result
      */
     private String importResult(Context context, Uri source, char[] passphrase) {
         try {
@@ -351,6 +425,11 @@ public class SettingsFragment extends Fragment {
                     ServerConnectionManager.getInstance(requireContext()).updateDisplayName(
                             displayName,
                             new ServerConnectionManager.Callback<>() {
+                                /**
+                                 * Handles the successful result of the asynchronous operation.
+                                 *
+                                 * @param result the result produced by the asynchronous operation
+                                 */
                                 @Override
                                 public void onResult(Void result) {
                                     // text_logged_user keeps reporting the login handle; only the
@@ -360,6 +439,11 @@ public class SettingsFragment extends Fragment {
                                     toastText("Display name updated");
                                 }
 
+                                /**
+                                 * Handles a failure from the asynchronous operation.
+                                 *
+                                 * @param error the error message explaining the failure
+                                 */
                                 @Override
                                 public void onFailure(String error) {
                                     toastText(error);
@@ -370,6 +454,10 @@ public class SettingsFragment extends Fragment {
                 .show();
     }
 
+    /**
+     * Asks the user to confirm resetting the local identity.
+     *
+     */
     private void confirmIdentityReset() {
         final String bound = new AccountStore(requireContext()).boundAccount();
 
@@ -419,6 +507,9 @@ public class SettingsFragment extends Fragment {
      * The session is cleared before the key is deleted, and the binding only after the KeyStore
      * confirms the entry is gone: a device whose identity is still there must stay bound to its
      * account, otherwise the next sign-in would inherit keys it cannot prove it owns.
+     *
+     * @param context the Android context used to access application resources and services
+     * @return the reset result result
      */
     private String resetResult(Context context) {
         final AppSecrets secrets = AppSecrets.getInstance(context);
@@ -444,6 +535,10 @@ public class SettingsFragment extends Fragment {
     /**
      * Asks for the archive passphrase. On export a confirmation field appears, because an archive
      * whose passphrase is forgotten is worthless and the user only finds out after losing the phone.
+     *
+     * @param titleRes the string resource ID for the dialog title
+     * @param confirmToo whether to also request confirmation
+     * @param onAccepted the action to run after the identity is accepted
      */
     private void askForPassphrase(final int titleRes, final boolean confirmToo,
                                   final java.util.function.Consumer<char[]> onAccepted) {
@@ -486,6 +581,12 @@ public class SettingsFragment extends Fragment {
                 .show();
     }
 
+    /**
+     * Creates a password field for entering a backup passphrase.
+     *
+     * @param hintRes the string resource ID for the input hint
+     * @return the new passphrase field result
+     */
     private EditText newPassphraseField(int hintRes) {
         final EditText field = new EditText(requireContext());
 
@@ -496,6 +597,11 @@ public class SettingsFragment extends Fragment {
         return field;
     }
 
+    /**
+     * Posts a message to be shown as a toast on the UI thread.
+     *
+     * @param message the message to process
+     */
     private void postToast(final String message) {
         if (!isAdded() || getActivity() == null) {
             return;
@@ -504,10 +610,20 @@ public class SettingsFragment extends Fragment {
         getActivity().runOnUiThread(() -> toastText(message));
     }
 
+    /**
+     * Converts the value to ast.
+     *
+     * @param messageRes the string resource ID for the toast message
+     */
     private void toast(int messageRes) {
         toastText(getString(messageRes));
     }
 
+    /**
+     * Displays the supplied text as a toast.
+     *
+     * @param message the message to process
+     */
     private void toastText(String message) {
         if (!isAdded()) {
             return;
@@ -516,12 +632,20 @@ public class SettingsFragment extends Fragment {
         Toast.makeText(requireContext(), message, Toast.LENGTH_LONG).show();
     }
 
+    /**
+     * Handles the destroy view event.
+     *
+     */
     @Override
     public void onDestroyView() {
         super.onDestroyView();
         binding = null;
     }
 
+    /**
+     * Handles the destroy event.
+     *
+     */
     @Override
     public void onDestroy() {
         super.onDestroy();

@@ -65,6 +65,12 @@ public class CryptoManager {
     private CryptoManager() {
     }
 
+    /**
+     * Returns the instance.
+     *
+     * @param context the Android context used to access application resources and services
+     * @return the instance value
+     */
     public static CryptoManager getInstance(Context context) {
         if (instance == null) {
             synchronized (CryptoManager.class) {
@@ -124,6 +130,12 @@ public class CryptoManager {
         }
     }
 
+    /**
+     * Returns the elliptic-curve parameters used for identity keys.
+     *
+     * @return the reference curve result
+     * @throws GeneralSecurityException if a cryptographic operation fails.
+     */
     private static ECParameterSpec referenceCurve() throws GeneralSecurityException {
         final AlgorithmParameters parameters = AlgorithmParameters.getInstance("EC");
         parameters.init(new ECGenParameterSpec(EC_CURVE));
@@ -134,6 +146,10 @@ public class CryptoManager {
     /**
      * SHA-256 of {@code input}, for the few places that need a digest of key material without each
      * of them instantiating a {@link MessageDigest}.
+     *
+     * @param input the input value to process
+     * @return the sha256 data
+     * @throws GeneralSecurityException if a cryptographic operation fails.
      */
     public static byte[] sha256(byte[] input) throws GeneralSecurityException {
         return MessageDigest.getInstance("SHA-256").digest(input);
@@ -142,6 +158,9 @@ public class CryptoManager {
     /**
      * Decodes a peer public key that arrives as Base64 (the shape {@code /api/channels/{id}/keys}
      * and {@code /api/users/{id}/key} return).
+     *
+     * @param base64Key the base64-encoded key material
+     * @return the decode peer key data
      */
     public static byte[] decodePeerKey(String base64Key) {
         if (base64Key == null || base64Key.isEmpty()) {
@@ -182,6 +201,8 @@ public class CryptoManager {
      *
      * @throws KeyStoreUnavailableException when the key cannot be created or read. Never answered
      *                                      with a software-generated pair.
+     *
+     * @return the or create key pair value
      */
     public synchronized KeyPair getOrCreateKeyPair() throws KeyStoreUnavailableException {
         if (keyPair != null) {
@@ -228,6 +249,8 @@ public class CryptoManager {
     /**
      * Like {@link #getOrCreateKeyPair()} but {@code null} on failure, for the paths that already
      * have to cope with a missing key (registration, the startup handshake).
+     *
+     * @return the try get key pair result
      */
     public KeyPair tryGetKeyPair() {
         try {
@@ -239,6 +262,12 @@ public class CryptoManager {
         }
     }
 
+    /**
+     * Generates a new elliptic-curve identity key pair.
+     *
+     * @return the generate identity key pair result
+     * @throws GeneralSecurityException if a cryptographic operation fails.
+     */
     private KeyPair generateIdentityKeyPair() throws GeneralSecurityException {
         final KeyPairGenerator keyPairGenerator =
                 KeyPairGenerator.getInstance(KeyProperties.KEY_ALGORITHM_EC, ANDROID_KEYSTORE);
@@ -295,6 +324,11 @@ public class CryptoManager {
         }
     }
 
+    /**
+     * Returns the public key.
+     *
+     * @return the public key value
+     */
     public PublicKey getPublicKey() {
         final KeyPair pair = tryGetKeyPair();
 
@@ -305,6 +339,8 @@ public class CryptoManager {
      * The identity public key in the X.509 encoding the server stores ({@code user_key.public_key}),
      * or {@code null} when the identity key is unavailable. Callers must treat {@code null} as a hard
      * failure: registering without a public key would create an account nobody can talk to.
+     *
+     * @return the public key base64 value
      */
     public String getPublicKeyBase64() {
         final PublicKey publicKey = getPublicKey();
@@ -317,6 +353,12 @@ public class CryptoManager {
 
     /**
      * Opens an AES-GCM payload of the form {@code [12-byte IV][ciphertext + tag]}.
+     *
+     * @param encryptedBytes the encrypted bytes to decode
+     * @param aesKeyBytes the AES key bytes to use
+     * @return the decrypt payload data
+     * @throws GeneralSecurityException if a cryptographic operation fails.
+     * @throws IllegalArgumentException if an argument is invalid.
      */
     public byte[] decryptPayload(byte[] encryptedBytes, byte[] aesKeyBytes) throws GeneralSecurityException {
         if (encryptedBytes == null || encryptedBytes.length <= IV_LENGTH_BYTES) {
@@ -353,6 +395,12 @@ public class CryptoManager {
     /**
      * Seals {@code plainBytes} with AES-GCM under a fresh random IV.
      * Output format: {@code [12-byte IV][ciphertext + tag]}.
+     *
+     * @param plainBytes the plaintext bytes to encrypt
+     * @param aesKeyBytes the AES key bytes to use
+     * @return the encrypt payload data
+     * @throws GeneralSecurityException if a cryptographic operation fails.
+     * @throws IllegalArgumentException if an argument is invalid.
      */
     public byte[] encryptPayload(final byte[] plainBytes, final byte[] aesKeyBytes) throws GeneralSecurityException {
         if (aesKeyBytes == null || aesKeyBytes.length == 0) {
@@ -392,6 +440,9 @@ public class CryptoManager {
      * @param remotePublicKeyBytes the peer key in X.509 encoding, as {@code GET /api/channels/{id}/keys}
      *                             returns it
      * @throws GeneralSecurityException when the key is not a usable secp256r1 public key
+     *
+     * @return the derive shared secret data
+     * @throws IllegalArgumentException if an argument is invalid.
      */
     public byte[] deriveSharedSecret(byte[] remotePublicKeyBytes) throws GeneralSecurityException {
         if (remotePublicKeyBytes == null || remotePublicKeyBytes.length == 0) {
@@ -413,6 +464,10 @@ public class CryptoManager {
 
     /**
      * Decodes a peer key and rejects anything that is not a point on {@value #EC_CURVE}.
+     *
+     * @param encodedKey the encoded key material
+     * @return the validate peer public key result
+     * @throws GeneralSecurityException if a cryptographic operation fails.
      */
     private PublicKey validatePeerPublicKey(byte[] encodedKey) throws GeneralSecurityException {
         final KeyFactory keyFactory = KeyFactory.getInstance("EC");
@@ -443,6 +498,11 @@ public class CryptoManager {
      * Reports a key pair that could not be created or loaded.
      */
     public interface KeyInitListener {
+        /**
+         * Handles the key init failed event.
+         *
+         * @param failure the failure that prevented the operation
+         */
         void onKeyInitFailed(KeyStoreUnavailableException failure);
     }
 }
