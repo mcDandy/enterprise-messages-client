@@ -47,6 +47,9 @@ public final class LocalNetworkPermission {
      * <p>
      * Below API 37 the permission does not exist and {@code INTERNET} carries an implicit grant, so
      * asking for it would only produce a prompt-less denial on a device where the LAN already works.
+     *
+     * @param context the Android context used to access application resources and services
+     * @return granted.
      */
     public static boolean isGranted(Context context) {
         if (Build.VERSION.SDK_INT < 37) {
@@ -60,6 +63,10 @@ public final class LocalNetworkPermission {
     /**
      * Whether the app may dial {@code host} right now: either local network access is held, or the
      * host is not on the local network and never needed the permission.
+     *
+     * @param context the Android context used to access application resources and services
+     * @param host the host name or address
+     * @return whether the may connect condition holds
      */
     public static boolean mayConnect(Context context, String host) {
         return isGranted(context) || !needsLocalNetworkAccess(host);
@@ -69,6 +76,8 @@ public final class LocalNetworkPermission {
      * Launches the prompt through the caller's own launcher, so a Fragment keeps its result callback.
      * Pair it with {@link #mayConnect(Context, String)}; asking when the answer is already "may
      * connect" would show a prompt the user has nothing to decide about.
+     *
+     * @param launcher the Android activity-result launcher to use
      */
     public static void requestUsing(@NonNull ActivityResultLauncher<String> launcher) {
         if (Build.VERSION.SDK_INT < 37) {
@@ -85,6 +94,8 @@ public final class LocalNetworkPermission {
      * so a normal sign-in on a production deployment never shows a prompt.
      *
      * @param host {@link ServerConnectionManager#WS_HOST}, i.e. the value of {@code @string/server_ip}
+     *
+     * @param activity the activity requesting the permission
      */
     public static void checkAndRequest(Activity activity, String host) {
         // The constant and the enforcement both exist from API 37; below it the permission is not
@@ -107,6 +118,9 @@ public final class LocalNetworkPermission {
      * on the way to the first prompt, and a name on a company network is the common case, so the
      * conservative answer keeps the app working. A deployment that uses a public host name and wants
      * to avoid the prompt can set {@code @string/server_ip} to that host's public IP.
+     *
+     * @param host the host name or address
+     * @return whether the needs local network access condition holds
      */
     public static boolean needsLocalNetworkAccess(String host) {
         final String trimmed = host == null ? "" : host.trim();
@@ -123,6 +137,12 @@ public final class LocalNetworkPermission {
         return isLocalAddress(trimmed);
     }
 
+    /**
+     * Returns whether local address.
+     *
+     * @param literalAddress whether the address should be treated as a literal IP address
+     * @return local address.
+     */
     private static boolean isLocalAddress(String literalAddress) {
         try {
             final java.net.InetAddress address = java.net.InetAddress.getByName(literalAddress);

@@ -22,6 +22,11 @@ public class PeerSecretRegistryTest {
     private SecureBlobStore store;
     private PeerSecretRegistry registry;
 
+    /**
+     * Verifies random key for this case.
+     *
+     * @return the random key data
+     */
     private static byte[] randomKey() {
         final byte[] key = new byte[32];
         new java.security.SecureRandom().nextBytes(key);
@@ -29,12 +34,22 @@ public class PeerSecretRegistryTest {
         return Arrays.equals(key, new byte[32]) ? randomKey() : key;
     }
 
+    /**
+     * Creates the test fixture used by the test methods.
+     *
+     * @throws GeneralSecurityException if a cryptographic operation fails.
+     */
     @Before
     public void setUp() throws GeneralSecurityException {
         store = new SecureBlobStore(new FakeKeyValueSink(), new FixedMasterKey());
         registry = new PeerSecretRegistry(store);
     }
 
+    /**
+     * Verifies secret survives a simulated restart for this case.
+     *
+     * @throws Exception if the secret survives a simulated restart operation cannot be completed.
+     */
     @Test
     public void secretSurvivesASimulatedRestart() throws Exception {
         final byte[] secret = randomKey();
@@ -48,12 +63,21 @@ public class PeerSecretRegistryTest {
         assertArrayEquals(secret, afterRestart.secret(7L));
     }
 
+    /**
+     * Verifies unknown peer has no secret for this case.
+     *
+     */
     @Test
     public void unknownPeerHasNoSecret() {
         assertFalse(registry.knows(99L));
         assertNull(registry.secret(99L));
     }
 
+    /**
+     * Verifies peers are listed and can be forgotten for this case.
+     *
+     * @throws Exception if the peers are listed and can be forgotten operation cannot be completed.
+     */
     @Test
     public void peersAreListedAndCanBeForgotten() throws Exception {
         registry.store(7L, randomKey());
@@ -68,6 +92,11 @@ public class PeerSecretRegistryTest {
         assertEquals(1, registry.knownPeers().size());
     }
 
+    /**
+     * Verifies forget all drops every peer secret but keeps other slots for this case.
+     *
+     * @throws Exception if the forget all drops every peer secret but keeps other slots operation cannot be completed.
+     */
     @Test
     public void forgetAllDropsEveryPeerSecretButKeepsOtherSlots() throws Exception {
         registry.store(7L, randomKey());
@@ -79,6 +108,11 @@ public class PeerSecretRegistryTest {
         assertTrue(store.contains("channel_3"));
     }
 
+    /**
+     * Verifies empty secret is rejected for this case.
+     *
+     * @throws Exception if the empty secret is rejected operation cannot be completed.
+     */
     @Test
     public void emptySecretIsRejected() throws Exception {
         boolean rejected = false;

@@ -24,12 +24,22 @@ public class SecureBlobStoreTest {
     private FakeKeyValueSink sink;
     private SecureBlobStore store;
 
+    /**
+     * Creates the test fixture used by the test methods.
+     *
+     * @throws GeneralSecurityException if a cryptographic operation fails.
+     */
     @Before
     public void setUp() throws GeneralSecurityException {
         sink = new FakeKeyValueSink();
         store = new SecureBlobStore(sink, new FixedMasterKey());
     }
 
+    /**
+     * Verifies value round trips for this case.
+     *
+     * @throws Exception if the value round trips operation cannot be completed.
+     */
     @Test
     public void valueRoundTrips() throws Exception {
         final byte[] secret = SECRET.getBytes(StandardCharsets.UTF_8);
@@ -39,6 +49,11 @@ public class SecureBlobStoreTest {
         assertArrayEquals(secret, store.load(SLOT));
     }
 
+    /**
+     * Verifies stored value is never the plaintext for this case.
+     *
+     * @throws Exception if the stored value is never the plaintext operation cannot be completed.
+     */
     @Test
     public void storedValueIsNeverThePlaintext() throws Exception {
         store.put(SLOT, SECRET.getBytes(StandardCharsets.UTF_8));
@@ -52,6 +67,11 @@ public class SecureBlobStoreTest {
                         .encodeToString(SECRET.getBytes(StandardCharsets.UTF_8))));
     }
 
+    /**
+     * Verifies two writes of the same value produce different blobs for this case.
+     *
+     * @throws Exception if the two writes of the same value produce different blobs operation cannot be completed.
+     */
     @Test
     public void twoWritesOfTheSameValueProduceDifferentBlobs() throws Exception {
         final byte[] secret = SECRET.getBytes(StandardCharsets.UTF_8);
@@ -67,6 +87,11 @@ public class SecureBlobStoreTest {
         assertFalse(first.equals(second));
     }
 
+    /**
+     * Verifies every blob carries the iv its provider minted for it for this case.
+     *
+     * @throws Exception if the every blob carries the iv its provider minted for it operation cannot be completed.
+     */
     @Test
     public void everyBlobCarriesTheIvItsProviderMintedForIt() throws Exception {
         final byte[] secret = SECRET.getBytes(StandardCharsets.UTF_8);
@@ -86,12 +111,21 @@ public class SecureBlobStoreTest {
         assertArrayEquals(secret, store.load("a"));
     }
 
+    /**
+     * Verifies missing slot reads as null for this case.
+     *
+     */
     @Test
     public void missingSlotReadsAsNull() {
         assertNull(store.load("never-written"));
         assertFalse(store.contains("never-written"));
     }
 
+    /**
+     * Verifies removed slot reads as null for this case.
+     *
+     * @throws Exception if the removed slot reads as null operation cannot be completed.
+     */
     @Test
     public void removedSlotReadsAsNull() throws Exception {
         store.put(SLOT, SECRET.getBytes(StandardCharsets.UTF_8));
@@ -100,6 +134,11 @@ public class SecureBlobStoreTest {
         assertNull(store.load(SLOT));
     }
 
+    /**
+     * Verifies corrupted blob reads as null and is dropped for this case.
+     *
+     * @throws Exception if the corrupted blob reads as null and is dropped operation cannot be completed.
+     */
     @Test
     public void corruptedBlobReadsAsNullAndIsDropped() throws Exception {
         sink.putString(SLOT, "not base64 at all !!");
@@ -108,6 +147,11 @@ public class SecureBlobStoreTest {
         assertNull(sink.getString(SLOT));
     }
 
+    /**
+     * Verifies blob sealed by another key reads as null for this case.
+     *
+     * @throws Exception if the blob sealed by another key reads as null operation cannot be completed.
+     */
     @Test
     public void blobSealedByAnotherKeyReadsAsNull() throws Exception {
         store.put(SLOT, SECRET.getBytes(StandardCharsets.UTF_8));
@@ -118,6 +162,11 @@ public class SecureBlobStoreTest {
         assertNull(withNewKey.load(SLOT));
     }
 
+    /**
+     * Verifies store without a usable master key is reported unavailable for this case.
+     *
+     * @throws Exception if the store without a usable master key is reported unavailable operation cannot be completed.
+     */
     @Test
     public void storeWithoutAUsableMasterKeyIsReportedUnavailable() throws Exception {
         final SecureBlobStore broken = new SecureBlobStore(sink, FixedMasterKey.unavailable());
@@ -136,6 +185,11 @@ public class SecureBlobStoreTest {
                 thrown);
     }
 
+    /**
+     * Verifies clear all empties the sink for this case.
+     *
+     * @throws Exception if the clear all empties the sink operation cannot be completed.
+     */
     @Test
     public void clearAllEmptiesTheSink() throws Exception {
         store.put("a", "one".getBytes(StandardCharsets.UTF_8));
@@ -146,6 +200,11 @@ public class SecureBlobStoreTest {
         assertEquals(0, sink.keys().size());
     }
 
+    /**
+     * Verifies keys with prefix selects a category for this case.
+     *
+     * @throws Exception if the keys with prefix selects a category operation cannot be completed.
+     */
     @Test
     public void keysWithPrefixSelectsACategory() throws Exception {
         store.put("peer_7", "x".getBytes(StandardCharsets.UTF_8));

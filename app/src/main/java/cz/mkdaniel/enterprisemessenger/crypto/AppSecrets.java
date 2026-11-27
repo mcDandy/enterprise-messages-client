@@ -27,6 +27,12 @@ public final class AppSecrets {
         this.peerSecrets = new PeerSecretRegistry(blobs);
     }
 
+    /**
+     * Returns the instance.
+     *
+     * @param context the Android context used to access application resources and services
+     * @return the instance value
+     */
     public static AppSecrets getInstance(Context context) {
         if (instance == null) {
             synchronized (AppSecrets.class) {
@@ -41,6 +47,8 @@ public final class AppSecrets {
 
     /**
      * The sealed key/value store itself, for secrets that belong to no registry (the JWT).
+     *
+     * @return the blobs result
      */
     public SecureBlobStore blobs() {
         return blobs;
@@ -48,6 +56,8 @@ public final class AppSecrets {
 
     /**
      * Per-channel AES keys, sealed.
+     *
+     * @return the channel keys result
      */
     public ChannelKeyRegistry channelKeys() {
         return channelKeys;
@@ -55,6 +65,8 @@ public final class AppSecrets {
 
     /**
      * ECDH secrets shared with other users, sealed.
+     *
+     * @return the peer secrets result
      */
     public PeerSecretRegistry peerSecrets() {
         return peerSecrets;
@@ -62,6 +74,8 @@ public final class AppSecrets {
 
     /**
      * Backup of {@link #channelKeys()} to a passphrase-protected archive the user keeps.
+     *
+     * @return the key backup result
      */
     public KeyBackup keyBackup() {
         return new KeyBackup(channelKeys);

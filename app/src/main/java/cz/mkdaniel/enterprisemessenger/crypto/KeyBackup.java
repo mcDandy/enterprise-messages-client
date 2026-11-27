@@ -88,6 +88,9 @@ public class KeyBackup {
 
     /**
      * Whether {@code blob} carries our header, i.e. it is a file this app wrote.
+     *
+     * @param blob the encrypted blob to store or process
+     * @return our archive.
      */
     public static boolean isOurArchive(byte[] blob) {
         if (blob == null || blob.length <= MAGIC.length + SALT_LENGTH_BYTES + IV_LENGTH_BYTES) {
@@ -103,6 +106,12 @@ public class KeyBackup {
         return true;
     }
 
+    /**
+     * Serializes the selected channel key entries into the backup body.
+     *
+     * @param entries the key entries to import
+     * @return the body of result
+     */
     private static String bodyOf(List<ChannelKeyRegistry.ChannelKeyEntry> entries) {
         final StringBuilder body = new StringBuilder(BODY_HEADER).append('\n');
 
@@ -167,6 +176,10 @@ public class KeyBackup {
     /**
      * Groups a version under its channel, keeping the order of the archive: the first entry of a
      * channel is its current key, the later ones are the readable history.
+     *
+     * @param entries the key entries to import
+     * @param channelId the identifier of the channel
+     * @param version the key version
      */
     private static void appendVersion(List<ChannelKeyRegistry.ChannelKeyEntry> entries,
                                       long channelId, ChannelKeyRegistry.KeyVersion version) {
@@ -183,6 +196,14 @@ public class KeyBackup {
         entries.add(new ChannelKeyRegistry.ChannelKeyEntry(channelId, versions));
     }
 
+    /**
+     * Derives the key.
+     *
+     * @param passphrase the passphrase protecting or unlocking the backup
+     * @param salt the random salt used for key derivation
+     * @return the derive key result
+     * @throws GeneralSecurityException if a cryptographic operation fails.
+     */
     private static SecretKeySpec deriveKey(char[] passphrase, byte[] salt) throws GeneralSecurityException {
         // PBEKeySpec reads the char[] itself and wipes its copy, so the passphrase never becomes a
         // String that would sit in the string pool until the garbage collector says otherwise.
@@ -198,6 +219,12 @@ public class KeyBackup {
         }
     }
 
+    /**
+     * Wraps base64 backup data in the printable backup format.
+     *
+     * @param base64 the base64-encoded backup content
+     * @return the armored backup text
+     */
     private static String armor(String base64) {
         final StringBuilder builder = new StringBuilder(base64.length() + 64);
 
@@ -212,6 +239,13 @@ public class KeyBackup {
         return builder.toString();
     }
 
+    /**
+     * Extracts and decodes base64 backup data from the printable format.
+     *
+     * @param armored the printable backup text to decode
+     * @return the decoded backup bytes
+     * @throws BackupFormatException if the dearmor operation cannot be completed.
+     */
     private static byte[] dearmor(String armored) throws BackupFormatException {
         if (armored == null) {
             throw new BackupFormatException("No backup was selected", false);
@@ -240,6 +274,11 @@ public class KeyBackup {
      * Serialises every readable channel key of this device into an armored archive.
      *
      * @return the text to write into the file the user picked; never contains a plaintext key
+     *
+     * @param passphrase the passphrase protecting or unlocking the backup
+     * @throws GeneralSecurityException if a cryptographic operation fails.
+     * @throws IllegalArgumentException if an argument is invalid.
+     * @throws IllegalStateException if the current state does not allow this operation.
      */
     public String export(final char[] passphrase) throws GeneralSecurityException {
         if (passphrase == null || passphrase.length == 0) {
@@ -362,6 +401,8 @@ public class KeyBackup {
 
         /**
          * True when the only problem is the passphrase, so the UI can simply ask for it again.
+         *
+         * @return wrong passphrase.
          */
         public boolean isWrongPassphrase() {
             return wrongPassphrase;

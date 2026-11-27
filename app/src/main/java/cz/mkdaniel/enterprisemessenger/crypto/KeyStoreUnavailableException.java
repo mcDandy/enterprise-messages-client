@@ -12,10 +12,21 @@ import java.security.GeneralSecurityException;
  */
 public class KeyStoreUnavailableException extends GeneralSecurityException {
 
+    /**
+     * Creates an exception that describes a KeyStore failure and retains its underlying cause.
+     *
+     * @param message human-readable description of the failed key operation
+     * @param cause underlying security exception or other failure
+     */
     public KeyStoreUnavailableException(String message, Throwable cause) {
         super(message, cause);
     }
 
+    /**
+     * Creates an exception that describes a KeyStore failure.
+     *
+     * @param message human-readable description of the failed key operation
+     */
     public KeyStoreUnavailableException(String message) {
         super(message);
     }

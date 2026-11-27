@@ -26,6 +26,11 @@ public class KeyBackupTest {
     private ChannelKeyRegistry sourceKeys;
     private KeyBackup backup;
 
+    /**
+     * Creates the test fixture used by the test methods.
+     *
+     * @throws GeneralSecurityException if a cryptographic operation fails.
+     */
     @Before
     public void setUp() throws GeneralSecurityException {
         sourceKeys = new ChannelKeyRegistry(
@@ -34,6 +39,11 @@ public class KeyBackupTest {
         backup = new KeyBackup(sourceKeys);
     }
 
+    /**
+     * Verifies keys round trip into a fresh store for this case.
+     *
+     * @throws Exception if the keys round trip into a fresh store operation cannot be completed.
+     */
     @Test
     public void keysRoundTripIntoAFreshStore() throws Exception {
         final byte[] first = sourceKeys.ensureChannelKey(7L).key();
@@ -56,6 +66,11 @@ public class KeyBackupTest {
         assertArrayEquals(sourceKeys.currentKey(9L), restored.currentKey(9L));
     }
 
+    /**
+     * Verifies archive never contains a plaintext key for this case.
+     *
+     * @throws Exception if the archive never contains a plaintext key operation cannot be completed.
+     */
     @Test
     public void archiveNeverContainsAPlaintextKey() throws Exception {
         final byte[] key = sourceKeys.ensureChannelKey(7L).key();
@@ -67,6 +82,11 @@ public class KeyBackupTest {
         assertTrue(archive.contains("-----BEGIN EMS KEY BACKUP-----"));
     }
 
+    /**
+     * Verifies two exports differ because of salt and iv for this case.
+     *
+     * @throws Exception if the two exports differ because of salt and iv operation cannot be completed.
+     */
     @Test
     public void twoExportsDifferBecauseOfSaltAndIv() throws Exception {
         sourceKeys.ensureChannelKey(7L);
@@ -74,6 +94,11 @@ public class KeyBackupTest {
         assertNotEquals(backup.export(PASSPHRASE), backup.export(PASSPHRASE));
     }
 
+    /**
+     * Verifies wrong passphrase fails as wrong passphrase and changes nothing for this case.
+     *
+     * @throws Exception if the wrong passphrase fails as wrong passphrase and changes nothing operation cannot be completed.
+     */
     @Test
     public void wrongPassphraseFailsAsWrongPassphraseAndChangesNothing() throws Exception {
         final byte[] key = sourceKeys.ensureChannelKey(7L).key();
@@ -98,6 +123,11 @@ public class KeyBackupTest {
                 Arrays.equals(key, target.currentKey(7L)));
     }
 
+    /**
+     * Verifies foreign file is rejected as not an archive for this case.
+     *
+     * @throws Exception if the foreign file is rejected as not an archive operation cannot be completed.
+     */
     @Test
     public void foreignFileIsRejectedAsNotAnArchive() throws Exception {
         final ChannelKeyRegistry target = new ChannelKeyRegistry(
@@ -114,6 +144,11 @@ public class KeyBackupTest {
         assertTrue(failure != null && !failure.isWrongPassphrase());
     }
 
+    /**
+     * Verifies export without any key is refused for this case.
+     *
+     * @throws Exception if the export without any key is refused operation cannot be completed.
+     */
     @Test
     public void exportWithoutAnyKeyIsRefused() throws Exception {
         boolean refused = false;
@@ -127,6 +162,11 @@ public class KeyBackupTest {
         assertTrue(refused);
     }
 
+    /**
+     * Verifies peek does not touch the store for this case.
+     *
+     * @throws Exception if the peek does not touch the store operation cannot be completed.
+     */
     @Test
     public void peekDoesNotTouchTheStore() throws Exception {
         sourceKeys.ensureChannelKey(7L);
@@ -141,12 +181,21 @@ public class KeyBackupTest {
         assertEquals(0, target.exportableEntries().size());
     }
 
+    /**
+     * Verifies header of another app is not our archive for this case.
+     *
+     */
     @Test
     public void headerOfAnotherAppIsNotOurArchive() {
         assertFalse(KeyBackup.isOurArchive("hello".getBytes(java.nio.charset.StandardCharsets.UTF_8)));
         assertFalse(KeyBackup.isOurArchive(null));
     }
 
+    /**
+     * Verifies adopted version uuids survive the round trip for this case.
+     *
+     * @throws Exception if the adopted version uuids survive the round trip operation cannot be completed.
+     */
     @Test
     public void adoptedVersionUuidsSurviveTheRoundTrip() throws Exception {
         sourceKeys.ensureChannelKey(7L);

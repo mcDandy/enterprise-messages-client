@@ -28,6 +28,11 @@ public class AccountStoreTest {
     private SecureBlobStore blobs;
     private AccountStore store;
 
+    /**
+     * Creates the test fixture used by the test methods.
+     *
+     * @throws GeneralSecurityException if a cryptographic operation fails.
+     */
     @Before
     public void setUp() throws GeneralSecurityException {
         plain = new FakeKeyValueSink();
@@ -35,6 +40,10 @@ public class AccountStoreTest {
         store = new AccountStore(plain, blobs);
     }
 
+    /**
+     * Verifies session round trips without a password for this case.
+     *
+     */
     @Test
     public void sessionRoundTripsWithoutAPassword() {
         store.saveSession("alice", TOKEN, ISSUER, System.currentTimeMillis() + 3_600_000L);
@@ -45,6 +54,10 @@ public class AccountStoreTest {
         assertEquals(ISSUER, store.getTokenIssuer());
     }
 
+    /**
+     * Verifies nothing secret reaches the plain slots for this case.
+     *
+     */
     @Test
     public void nothingSecretReachesThePlainSlots() {
         store.saveSession("alice", TOKEN, ISSUER, 0L);
@@ -58,6 +71,10 @@ public class AccountStoreTest {
         }
     }
 
+    /**
+     * Verifies legacy plaintext credentials are purged on open for this case.
+     *
+     */
     @Test
     public void legacyPlaintextCredentialsArePurgedOnOpen() {
         // An installation upgrading from the version that stored these in the clear.
@@ -71,6 +88,10 @@ public class AccountStoreTest {
         assertFalse(upgrading.keys().contains("jwt_token"));
     }
 
+    /**
+     * Verifies clear session drops both stores for this case.
+     *
+     */
     @Test
     public void clearSessionDropsBothStores() {
         store.saveSession("alice", TOKEN, ISSUER, 0L);
@@ -87,6 +108,10 @@ public class AccountStoreTest {
         assertEquals("the registration date belongs to the session", "", store.getRegisteredAt());
     }
 
+    /**
+     * Verifies user identifier round trips for this case.
+     *
+     */
     @Test
     public void userIdRoundTrips() {
         assertEquals(-1L, store.getUserId());
@@ -96,6 +121,10 @@ public class AccountStoreTest {
         assertEquals(4242L, store.getUserId());
     }
 
+    /**
+     * Verifies profile details round trip for this case.
+     *
+     */
     @Test
     public void profileDetailsRoundTrip() {
         assertEquals("an account that was never read has no display name", "", store.getDisplayName());
@@ -108,6 +137,10 @@ public class AccountStoreTest {
         assertEquals("2026-11-20T15:23:27.526124Z", store.getRegisteredAt());
     }
 
+    /**
+     * Verifies absent profile details store empty rather than null for this case.
+     *
+     */
     @Test
     public void absentProfileDetailsStoreEmptyRatherThanNull() {
         // GET /api/users/me answers JSON null for an account that never set a display name; the store
@@ -119,6 +152,10 @@ public class AccountStoreTest {
         assertEquals("", store.getRegisteredAt());
     }
 
+    /**
+     * Verifies the first account to sign in owns the device for this case.
+     *
+     */
     @Test
     public void theFirstAccountToSignInOwnsTheDevice() {
         assertEquals("an untouched installation is unbound", "", store.boundAccount());
@@ -132,6 +169,10 @@ public class AccountStoreTest {
         assertFalse("a second account may not inherit the device", store.isBoundTo("bob"));
     }
 
+    /**
+     * Verifies a second account cannot steal the binding for this case.
+     *
+     */
     @Test
     public void aSecondAccountCannotStealTheBinding() {
         store.saveSession("alice", TOKEN, ISSUER, 0L);
@@ -140,6 +181,10 @@ public class AccountStoreTest {
         assertEquals("only the reset in Settings may rebind a device", "alice", store.boundAccount());
     }
 
+    /**
+     * Verifies logging out keeps the device bound for this case.
+     *
+     */
     @Test
     public void loggingOutKeepsTheDeviceBound() {
         store.saveSession("alice", TOKEN, ISSUER, 0L);
@@ -150,6 +195,10 @@ public class AccountStoreTest {
         assertEquals("a log-out is not a hand-over", "alice", store.boundAccount());
     }
 
+    /**
+     * Verifies unbinding is the only way to accept another account for this case.
+     *
+     */
     @Test
     public void unbindingIsTheOnlyWayToAcceptAnotherAccount() {
         store.saveSession("alice", TOKEN, ISSUER, 0L);
@@ -164,6 +213,10 @@ public class AccountStoreTest {
         assertEquals("bob", store.boundAccount());
     }
 
+    /**
+     * Verifies token expiry drives the refresh decision for this case.
+     *
+     */
     @Test
     public void tokenExpiryDrivesTheRefreshDecision() {
         store.saveSession("alice", TOKEN, ISSUER, 0L);
@@ -177,6 +230,11 @@ public class AccountStoreTest {
         assertFalse(store.shouldRefreshToken());
     }
 
+    /**
+     * Verifies the blob store holds the token only sealed for this case.
+     *
+     * @throws Exception if the the blob store holds the token only sealed operation cannot be completed.
+     */
     @Test
     public void theBlobStoreHoldsTheTokenOnlySealed() throws Exception {
         // The same sink the account layer writes to, read directly under its slot name.

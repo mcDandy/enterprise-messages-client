@@ -48,6 +48,14 @@ public class TransformFragment extends Fragment {
     private FragmentTransformBinding binding;
     private TransformViewModel transformViewModel;
 
+    /**
+     * Handles the create view event.
+     *
+     * @param inflater the layout inflater used to create the view
+     * @param container the parent view that will contain the created view
+     * @param savedInstanceState the saved instance state to restore, or null when creating the screen for the first time
+     * @return the on create view result
+     */
     public View onCreateView(@NonNull LayoutInflater inflater,
                              ViewGroup container, Bundle savedInstanceState) {
         transformViewModel = new ViewModelProvider(requireActivity()).get(TransformViewModel.class);
@@ -94,6 +102,11 @@ public class TransformFragment extends Fragment {
 
         ListAdapter<ServerViewItem, TransformViewHolder> adapter =
                 new TransformAdapter(new OnServerClickListener() {
+                    /**
+                     * Handles selection of a server.
+                     *
+                     * @param server the server selected by the user
+                     */
                     @Override
                     public void onServerClicked(ServerViewItem server) {
                         // Cancel notification for this server when user opens it
@@ -101,6 +114,11 @@ public class TransformFragment extends Fragment {
                         openServer(server);
                     }
 
+                    /**
+                     * Handles a long press on a server.
+                     *
+                     * @param item the item selected by the user
+                     */
                     @Override
                     public void onServerLongClicked(ServerViewItem item) {
                         showServerOptionsDialog(item);
@@ -142,6 +160,8 @@ public class TransformFragment extends Fragment {
     /**
      * Long-press menu. Rename and delete are only offered to the virtual server's administrator -
      * see {@link ServerViewItem#isAdmin()}, which mirrors the server-side membership check.
+     *
+     * @param item the item displayed by this row
      */
     private void showServerOptionsDialog(ServerViewItem item) {
         final String switchLabel = getString(R.string.action_switch_server);
@@ -175,9 +195,19 @@ public class TransformFragment extends Fragment {
                 .show();
     }
 
+    /**
+     * Shows the admin panel dialog.
+     *
+     * @param item the item displayed by this row
+     */
     private void showAdminPanelDialog(ServerViewItem item) {
         ServerConnectionManager.getInstance(requireContext()).fetchServerMembers(
                 item.getServerId(), new ServerConnectionManager.Callback<>() {
+                    /**
+                     * Handles the successful result of the asynchronous operation.
+                     *
+                     * @param members the channel or server members returned by the request
+                     */
                     @Override
                     public void onResult(JSONArray members) {
                         if (!isAdded() || getContext() == null) return;
@@ -207,6 +237,11 @@ public class TransformFragment extends Fragment {
                                 .show();
                     }
 
+                    /**
+                     * Handles a failure from the asynchronous operation.
+                     *
+                     * @param error the error message explaining the failure
+                     */
                     @Override
                     public void onFailure(String error) {
                         if (isAdded()) {
@@ -216,6 +251,12 @@ public class TransformFragment extends Fragment {
                 });
     }
 
+    /**
+     * Shows the member action dialog.
+     *
+     * @param item the item displayed by this row
+     * @param targetUserId the user ID that should receive the offer
+     */
     private void showMemberActionDialog(ServerViewItem item, long targetUserId) {
         final String removeLabel = getString(R.string.action_remove_member);
         final String banLabel = getString(R.string.action_ban_user);
@@ -230,11 +271,21 @@ public class TransformFragment extends Fragment {
                         // Remove from server
                         ServerConnectionManager.getInstance(requireContext()).removeServerMember(
                                 item.getServerId(), targetUserId, new ServerConnectionManager.Callback<>() {
+                                    /**
+                                     * Handles the successful result of the asynchronous operation.
+                                     *
+                                     * @param result the result produced by the asynchronous operation
+                                     */
                                     @Override
                                     public void onResult(Void result) {
                                         Toast.makeText(requireContext(), R.string.member_removed, Toast.LENGTH_SHORT).show();
                                     }
 
+                                    /**
+                                     * Handles a failure from the asynchronous operation.
+                                     *
+                                     * @param error the error message explaining the failure
+                                     */
                                     @Override
                                     public void onFailure(String error) {
                                         Toast.makeText(requireContext(), error, Toast.LENGTH_LONG).show();
@@ -244,11 +295,21 @@ public class TransformFragment extends Fragment {
                         // Ban user globally
                         ServerConnectionManager.getInstance(requireContext()).banUser(
                                 targetUserId, new ServerConnectionManager.Callback<>() {
+                                    /**
+                                     * Handles the successful result of the asynchronous operation.
+                                     *
+                                     * @param result the result produced by the asynchronous operation
+                                     */
                                     @Override
                                     public void onResult(Void result) {
                                         Toast.makeText(requireContext(), R.string.member_banned, Toast.LENGTH_SHORT).show();
                                     }
 
+                                    /**
+                                     * Handles a failure from the asynchronous operation.
+                                     *
+                                     * @param error the error message explaining the failure
+                                     */
                                     @Override
                                     public void onFailure(String error) {
                                         Toast.makeText(requireContext(), error, Toast.LENGTH_LONG).show();
@@ -258,11 +319,21 @@ public class TransformFragment extends Fragment {
                         // Unban user globally
                         ServerConnectionManager.getInstance(requireContext()).unbanUser(
                                 targetUserId, new ServerConnectionManager.Callback<>() {
+                                    /**
+                                     * Handles the successful result of the asynchronous operation.
+                                     *
+                                     * @param result the result produced by the asynchronous operation
+                                     */
                                     @Override
                                     public void onResult(Void result) {
                                         Toast.makeText(requireContext(), R.string.member_unbanned, Toast.LENGTH_SHORT).show();
                                     }
 
+                                    /**
+                                     * Handles a failure from the asynchronous operation.
+                                     *
+                                     * @param error the error message explaining the failure
+                                     */
                                     @Override
                                     public void onFailure(String error) {
                                         Toast.makeText(requireContext(), error, Toast.LENGTH_LONG).show();
@@ -274,6 +345,11 @@ public class TransformFragment extends Fragment {
                 .show();
     }
 
+    /**
+     * Shows the add member dialog.
+     *
+     * @param item the item displayed by this row
+     */
     private void showAddMemberDialog(ServerViewItem item) {
         final EditText input = new EditText(requireContext());
         input.setHint(R.string.hint_member_user_id);
@@ -295,12 +371,22 @@ public class TransformFragment extends Fragment {
 
                     ServerConnectionManager.getInstance(requireContext()).addServerMember(
                             item.getServerId(), userId, new ServerConnectionManager.Callback<>() {
+                                /**
+                                 * Handles the successful result of the asynchronous operation.
+                                 *
+                                 * @param result the result produced by the asynchronous operation
+                                 */
                                 @Override
                                 public void onResult(Void result) {
                                     Toast.makeText(requireContext(), R.string.member_added,
                                             Toast.LENGTH_SHORT).show();
                                 }
 
+                                /**
+                                 * Handles a failure from the asynchronous operation.
+                                 *
+                                 * @param error the error message explaining the failure
+                                 */
                                 @Override
                                 public void onFailure(String error) {
                                     Toast.makeText(requireContext(), error, Toast.LENGTH_LONG).show();
@@ -313,6 +399,8 @@ public class TransformFragment extends Fragment {
 
     /**
      * Same navigation as a tap on the tile - "switch" to this virtual server.
+     *
+     * @param item the item displayed by this row
      */
     private void openServer(ServerViewItem item) {
         item.setUnreadCount(0);
@@ -328,6 +416,11 @@ public class TransformFragment extends Fragment {
     /**
      * Name dialog for both flows: {@code existing == null} creates a virtual server, otherwise the
      * name replaces that of {@code existing}.
+     *
+     * @param titleRes the string resource ID for the dialog title
+     * @param hintRes the string resource ID for the input hint
+     * @param positiveButtonRes the string resource ID for the positive button
+     * @param existing the existing value or entry
      */
     private void showServerNameDialog(int titleRes, int hintRes, int positiveButtonRes,
                                       @androidx.annotation.Nullable ServerViewItem existing) {
@@ -343,6 +436,11 @@ public class TransformFragment extends Fragment {
         dialog.show(getParentFragmentManager(), "server_name_dialog");
     }
 
+    /**
+     * Shows the delete confirmation dialog.
+     *
+     * @param item the item displayed by this row
+     */
     private void showDeleteConfirmationDialog(ServerViewItem item) {
         new MaterialAlertDialogBuilder(requireContext())
                 .setTitle(R.string.dialog_delete_server_title)
@@ -353,6 +451,10 @@ public class TransformFragment extends Fragment {
                 .show();
     }
 
+    /**
+     * Handles the resume event.
+     *
+     */
     @Override
     public void onResume() {
         super.onResume();
@@ -361,18 +463,40 @@ public class TransformFragment extends Fragment {
         }
     }
 
+    /**
+     * Handles the destroy view event.
+     *
+     */
     @Override
     public void onDestroyView() {
         super.onDestroyView();
         binding = null;
     }
 
+    /**
+     * Defines the contract for on server click listener.
+     *
+     */
     private interface OnServerClickListener {
+        /**
+         * Handles the server clicked event.
+         *
+         * @param server the server whose details are being updated
+         */
         void onServerClicked(ServerViewItem server);
 
+        /**
+         * Handles the server long clicked event.
+         *
+         * @param item the item displayed by this row
+         */
         void onServerLongClicked(ServerViewItem item);
     }
 
+    /**
+     * Represents transform adapter data or behavior used by the application.
+     *
+     */
     private static class TransformAdapter extends ListAdapter<ServerViewItem, TransformViewHolder> {
 
         @NonNull
@@ -380,11 +504,25 @@ public class TransformFragment extends Fragment {
 
         protected TransformAdapter(@NonNull OnServerClickListener clickListener) {
             super(new DiffUtil.ItemCallback<ServerViewItem>() {
+                /**
+                 * Compares item identifiers to determine whether two list entries represent the same item.
+                 *
+                 * @param oldItem the earlier list item being compared
+                 * @param newItem the updated list item being compared
+                 * @return whether the operation succeeded
+                 */
                 @Override
                 public boolean areItemsTheSame(@NonNull ServerViewItem oldItem, @NonNull ServerViewItem newItem) {
                     return oldItem.getId().equals(newItem.getId());
                 }
 
+                /**
+                 * Compares item contents to determine whether a list entry needs rebinding.
+                 *
+                 * @param oldItem the earlier list item being compared
+                 * @param newItem the updated list item being compared
+                 * @return whether the operation succeeded
+                 */
                 @Override
                 public boolean areContentsTheSame(@NonNull ServerViewItem oldItem, @NonNull ServerViewItem newItem) {
                     return oldItem.getText().equals(newItem.getText())
@@ -397,6 +535,13 @@ public class TransformFragment extends Fragment {
             this.clickListener = clickListener;
         }
 
+        /**
+         * Handles the create view holder event.
+         *
+         * @param parent the parent view group
+         * @param viewType the adapter view type to create
+         * @return the on create view holder result
+         */
         @NonNull
         @Override
         public TransformViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
@@ -404,6 +549,12 @@ public class TransformFragment extends Fragment {
             return new TransformViewHolder(binding);
         }
 
+        /**
+         * Handles the bind view holder event.
+         *
+         * @param holder the view holder to bind
+         * @param position the item position in the adapter
+         */
         @Override
         public void onBindViewHolder(@NonNull TransformViewHolder holder, int position) {
             ServerViewItem item = getItem(position);
@@ -440,6 +591,10 @@ public class TransformFragment extends Fragment {
         }
     }
 
+    /**
+     * Represents transform view holder data or behavior used by the application.
+     *
+     */
     private static class TransformViewHolder extends RecyclerView.ViewHolder {
 
         private final ImageView imageView;

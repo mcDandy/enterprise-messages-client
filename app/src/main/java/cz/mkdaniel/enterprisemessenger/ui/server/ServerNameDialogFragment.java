@@ -32,6 +32,15 @@ public class ServerNameDialogFragment extends DialogFragment {
     @Nullable
     private OnNameConfirmed listener;
 
+    /**
+     * Creates a dialog for entering or changing a server name.
+     *
+     * @param titleRes the string resource ID for the dialog title
+     * @param hintRes the string resource ID for the input hint
+     * @param positiveButtonRes the string resource ID for the positive button
+     * @param currentName the current server or room name
+     * @return the new instance result
+     */
     public static ServerNameDialogFragment newInstance(
             @StringRes int titleRes,
             @StringRes int hintRes,
@@ -48,10 +57,21 @@ public class ServerNameDialogFragment extends DialogFragment {
         return fragment;
     }
 
+    /**
+     * Sets the on name confirmed.
+     *
+     * @param listener the listener to add or remove
+     */
     public void setOnNameConfirmed(@Nullable OnNameConfirmed listener) {
         this.listener = listener;
     }
 
+    /**
+     * Handles the create dialog event.
+     *
+     * @param savedInstanceState the saved instance state to restore, or null when creating the screen for the first time
+     * @return the on create dialog result
+     */
     @NonNull
     @Override
     public Dialog onCreateDialog(@Nullable Bundle savedInstanceState) {
@@ -101,6 +121,10 @@ public class ServerNameDialogFragment extends DialogFragment {
         return dialog;
     }
 
+    /**
+     * Handles the detach event.
+     *
+     */
     @Override
     public void onDetach() {
         super.onDetach();
@@ -111,6 +135,11 @@ public class ServerNameDialogFragment extends DialogFragment {
      * Called with the confirmed, already trimmed name.
      */
     public interface OnNameConfirmed {
+        /**
+         * Handles the name confirmed event.
+         *
+         * @param name the name to use
+         */
         void onNameConfirmed(String name);
     }
 }

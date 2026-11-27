@@ -59,6 +59,9 @@ public class ServerViewItem {
     /**
      * Avatar for the server at {@code index}; the id is accepted as well, so a freshly created
      * server keeps the same avatar as the same entry fetched again later.
+     *
+     * @param index the zero-based element index
+     * @return the avatar drawable for index result
      */
     public static int avatarDrawableForIndex(int index) {
         final int safeIndex = index < 0 ? -index : index;
@@ -68,6 +71,8 @@ public class ServerViewItem {
 
     /**
      * Numeric id of the virtual server, as handed out by {@code GET /api/servers}.
+     *
+     * @return the server identifier value
      */
     public long getServerId() {
         return serverId;
@@ -75,17 +80,26 @@ public class ServerViewItem {
 
     /**
      * String form of {@link #getServerId()}, used as the {@code DiffUtil} item key.
+     *
+     * @return the identifier value
      */
     public String getId() {
         return String.format(Locale.US, "%d", serverId);
     }
 
+    /**
+     * Returns the text.
+     *
+     * @return the text value
+     */
     public String getText() {
         return text;
     }
 
     /**
      * {@code "ORGANIZATION"} or {@code "DIRECT"} as the server reports it.
+     *
+     * @return the type value
      */
     public String getType() {
         return type;
@@ -94,23 +108,45 @@ public class ServerViewItem {
     /**
      * Whether the signed-in user is {@code ADMINISTRATOR} of this virtual server; mirrors the
      * server-side membership check, so the UI only offers mutations the server will accept.
+     *
+     * @return admin.
      */
     public boolean isAdmin() {
         return isAdmin;
     }
 
+    /**
+     * Returns the drawable identifier.
+     *
+     * @return the drawable identifier value
+     */
     public int getDrawableId() {
         return drawableId;
     }
 
+    /**
+     * Returns the unread count.
+     *
+     * @return the unread count value
+     */
     public int getUnreadCount() {
         return unreadCount;
     }
 
+    /**
+     * Sets the unread count.
+     *
+     * @param unreadCount the number of unread messages
+     */
     public void setUnreadCount(int unreadCount) {
         this.unreadCount = unreadCount;
     }
 
+    /**
+     * Returns whether unread.
+     *
+     * @return unread.
+     */
     public boolean hasUnread() {
         return unreadCount > 0;
     }

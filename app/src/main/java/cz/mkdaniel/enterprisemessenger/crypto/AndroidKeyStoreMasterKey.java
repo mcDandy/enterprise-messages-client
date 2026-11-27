@@ -30,6 +30,12 @@ public class AndroidKeyStoreMasterKey implements MasterKeyProvider {
     private static final String TAG = "AndroidKeyStoreMasterKey";
     private static final String ANDROID_KEYSTORE = "AndroidKeyStore";
 
+    /**
+     * Returns the master key used by this provider.
+     *
+     * @return the master key result
+     * @throws GeneralSecurityException if a cryptographic operation fails.
+     */
     @Override
     public SecretKey masterKey() throws GeneralSecurityException {
         final KeyStore keyStore = KeyStore.getInstance(ANDROID_KEYSTORE);

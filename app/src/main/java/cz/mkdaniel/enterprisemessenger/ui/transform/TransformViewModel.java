@@ -31,12 +31,19 @@ public class TransformViewModel extends AndroidViewModel {
         loadServers();
     }
 
+    /**
+     * Returns the items.
+     *
+     * @return the items value
+     */
     public LiveData<List<ServerViewItem>> getItems() {
         return mItems;
     }
 
     /**
      * Message to surface as a toast whenever a request fails, or {@code null} when nothing failed.
+     *
+     * @return the error message value
      */
     public LiveData<String> getErrorMessage() {
         return mErrorMessage;
@@ -57,6 +64,11 @@ public class TransformViewModel extends AndroidViewModel {
     public void loadServers() {
         ServerConnectionManager.getInstance(getApplication()).fetchServers(
                 new ServerConnectionManager.Callback<>() {
+                    /**
+                     * Handles the successful result of the asynchronous operation.
+                     *
+                     * @param servers the servers returned by the request
+                     */
                     @Override
                     public void onResult(List<ServerViewItem> servers) {
                         List<ServerViewItem> current = mItems.getValue();
@@ -76,6 +88,11 @@ public class TransformViewModel extends AndroidViewModel {
                         mItems.setValue(servers == null ? new ArrayList<>() : servers);
                     }
 
+                    /**
+                     * Handles a failure from the asynchronous operation.
+                     *
+                     * @param error the error message explaining the failure
+                     */
                     @Override
                     public void onFailure(String error) {
                         mErrorMessage.setValue(error);
@@ -86,15 +103,27 @@ public class TransformViewModel extends AndroidViewModel {
     /**
      * Creates a virtual server; the creator becomes its administrator, so the reload shows the
      * rename and delete affordances for it straight away.
+     *
+     * @param name the name to use
      */
     public void addServer(String name) {
         ServerConnectionManager.getInstance(getApplication()).createServer(name,
                 new ServerConnectionManager.Callback<>() {
+                    /**
+                     * Handles the successful result of the asynchronous operation.
+                     *
+                     * @param server the server selected by the user
+                     */
                     @Override
                     public void onResult(ServerViewItem server) {
                         loadServers();
                     }
 
+                    /**
+                     * Handles a failure from the asynchronous operation.
+                     *
+                     * @param error the error message explaining the failure
+                     */
                     @Override
                     public void onFailure(String error) {
                         mErrorMessage.setValue(error);
@@ -105,15 +134,28 @@ public class TransformViewModel extends AndroidViewModel {
     /**
      * Renames a virtual server; the server accepts it from its administrator only, and a 403 is
      * reported as a permission error rather than a log-out.
+     *
+     * @param serverId the identifier of the server
+     * @param name the name to use
      */
     public void renameServer(long serverId, String name) {
         ServerConnectionManager.getInstance(getApplication()).renameServer(serverId, name,
                 new ServerConnectionManager.Callback<>() {
+                    /**
+                     * Handles the successful result of the asynchronous operation.
+                     *
+                     * @param result the result produced by the asynchronous operation
+                     */
                     @Override
                     public void onResult(Void result) {
                         loadServers();
                     }
 
+                    /**
+                     * Handles a failure from the asynchronous operation.
+                     *
+                     * @param error the error message explaining the failure
+                     */
                     @Override
                     public void onFailure(String error) {
                         mErrorMessage.setValue(error);
@@ -121,14 +163,29 @@ public class TransformViewModel extends AndroidViewModel {
                 });
     }
 
+    /**
+     * Deletes the server.
+     *
+     * @param serverId the identifier of the server
+     */
     public void deleteServer(long serverId) {
         ServerConnectionManager.getInstance(getApplication()).deleteServer(serverId,
                 new ServerConnectionManager.Callback<>() {
+                    /**
+                     * Handles the successful result of the asynchronous operation.
+                     *
+                     * @param result the result produced by the asynchronous operation
+                     */
                     @Override
                     public void onResult(Void result) {
                         loadServers();
                     }
 
+                    /**
+                     * Handles a failure from the asynchronous operation.
+                     *
+                     * @param error the error message explaining the failure
+                     */
                     @Override
                     public void onFailure(String error) {
                         mErrorMessage.setValue(error);

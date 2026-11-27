@@ -51,12 +51,21 @@ public class Packet {
     private final int payloadLength;
     private final byte[] payload;
 
+    /**
+     * Creates a packet with the supplied wire type and payload.
+     *
+     * @param type packet type byte
+     * @param payload packet payload bytes
+     */
     public Packet(byte type, byte[] payload) {
         this.type = type;
         this.payloadLength = payload.length;
         this.payload = payload;
     }
 
+    /**
+     * Creates an unknown packet with a payload containing one 64-bit zero value.
+     */
     public Packet() {
         this(TYPE_UNKNOWN, new byte[Long.BYTES]);
     }
@@ -64,6 +73,13 @@ public class Packet {
     /**
      * Reads an incoming packet from a stream holding exactly one frame: the 1-byte type
      * followed by the payload. If encrypted, decrypts the payload using the provided key.
+     *
+     * @param inputStream stream containing one complete binary packet frame
+     * @param cryptoManager cryptographic service used to decrypt the payload, or {@code null}
+     * @param encryptionKey AES key used to decrypt the payload, or {@code null} to leave it encrypted
+     * @return packet parsed from the frame
+     * @throws IOException if reading the frame or validating its payload size fails
+     * @throws Exception if payload decryption or packet parsing fails
      */
     public static Packet readFromStream(InputStream inputStream, CryptoManager cryptoManager, byte[] encryptionKey) throws Exception {
         final var dis = (inputStream instanceof DataInputStream) ? (DataInputStream) inputStream : new DataInputStream(inputStream);
@@ -83,12 +99,25 @@ public class Packet {
         return new Packet(type, finalPayload);
     }
 
+    /**
+     * Reads an incoming packet without decrypting its payload.
+     *
+     * @param inputStream stream containing one complete binary packet frame
+     * @return packet parsed from the frame
+     * @throws Exception if reading or parsing the frame fails
+     */
     public static Packet readFromStream(InputStream inputStream) throws Exception {
         return readFromStream(inputStream, null, null);
     }
 
     /**
      * Reads an incoming packet from a byte array (e.g. from a WebSocket binary frame).
+     *
+     * @param data the encoded data to decode
+     * @param cryptoManager the cryptographic service used for payload operations
+     * @param encryptionKey the key used to encrypt or decrypt the payload
+     * @return the read from byte array result
+     * @throws Exception if the read from byte array operation cannot be completed.
      */
     public static Packet readFromByteArray(byte[] data, CryptoManager cryptoManager, byte[] encryptionKey) throws Exception {
         try (ByteArrayInputStream bais = new ByteArrayInputStream(data)) {
@@ -103,11 +132,20 @@ public class Packet {
      * {@link #TYPE_UNKNOWN} error packet are sent directly and never queued, so acknowledging one of
      * them would silently discard a different pending frame. Not acknowledging a queued one stalls
      * that user's queue.
+     *
+     * @param type the packet or value type
+     * @return queued delivery.
      */
     public static boolean isQueuedDelivery(final byte type) {
         return type == TYPE_CHAT_MESSAGE || type == TYPE_UNICAST_ROTATED_KEY;
     }
 
+    /**
+     * Returns the symbolic name of a packet type.
+     *
+     * @param type the packet or value type
+     * @return the type name result
+     */
     public static String typeName(final byte type) {
         switch (type) {
             case TYPE_UNKNOWN:
@@ -127,14 +165,31 @@ public class Packet {
         }
     }
 
+    /**
+     * Reads the from byte array.
+     *
+     * @param data the encoded data to decode
+     * @return the read from byte array result
+     * @throws Exception if the read from byte array operation cannot be completed.
+     */
     public static Packet readFromByteArray(byte[] data) throws Exception {
         return readFromByteArray(data, null, null);
     }
 
+    /**
+     * Returns the type.
+     *
+     * @return the type value
+     */
     public byte getType() {
         return type;
     }
 
+    /**
+     * Returns the payload.
+     *
+     * @return the payload value
+     */
     public byte[] getPayload() {
         return payload;
     }
@@ -144,6 +199,11 @@ public class Packet {
      * Format: 1 type byte followed by the payload; the frame boundary is the framing, so no
      * length prefix is written (see the server's {@code PacketCodec#encode}).
      * If an encryption key is provided, the payload is encrypted using AES-GCM before output.
+     *
+     * @param cryptoManager the cryptographic service used for payload operations
+     * @param encryptionKey the key used to encrypt or decrypt the payload
+     * @return the serialize data
+     * @throws Exception if the serialize operation cannot be completed.
      */
     public byte[] serialize(final CryptoManager cryptoManager, final byte[] encryptionKey) throws Exception {
         byte[] outgoing = payload != null ? payload : new byte[0];
@@ -159,6 +219,12 @@ public class Packet {
         return buffer.array();
     }
 
+    /**
+     * Serializes this packet into bytes for a WebSocket frame.
+     *
+     * @return the serialized packet bytes
+     * @throws Exception if the serialize operation cannot be completed.
+     */
     public byte[] serialize() throws Exception {
         return serialize(null, null);
     }

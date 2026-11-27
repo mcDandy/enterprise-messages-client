@@ -24,18 +24,38 @@ public class Room {
         this(id, name, false);
     }
 
+    /**
+     * Returns the identifier.
+     *
+     * @return the identifier value
+     */
     public String getId() {
         return id;
     }
 
+    /**
+     * Returns the name.
+     *
+     * @return the name value
+     */
     public String getName() {
         return name;
     }
 
+    /**
+     * Returns whether new messages.
+     *
+     * @return new messages.
+     */
     public boolean hasNewMessages() {
         return hasNewMessages;
     }
 
+    /**
+     * Sets the has new messages.
+     *
+     * @param hasNewMessages whether the room has unread messages
+     */
     public void setHasNewMessages(boolean hasNewMessages) {
         this.hasNewMessages = hasNewMessages;
     }

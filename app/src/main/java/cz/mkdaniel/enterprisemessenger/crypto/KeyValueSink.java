@@ -12,18 +12,31 @@ public interface KeyValueSink {
 
     /**
      * Stored value, or {@code null} when the slot is empty.
+     *
+     * @param key the encryption key to use
+     * @return the string value
      */
     String getString(String key);
 
     /**
      * Stores {@code value}; {@code null} removes the slot.
+     *
+     * @param key the encryption key to use
+     * @param value the value to process
      */
     void putString(String key, String value);
 
+    /**
+     * Removes the value associated with the supplied key.
+     *
+     * @param key the encryption key to use
+     */
     void remove(String key);
 
     /**
      * Every key currently held by this sink, for {@link SecureBlobStore#clearAll()} and export.
+     *
+     * @return the keys collection
      */
     Set<String> keys();
 }

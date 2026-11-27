@@ -4,6 +4,10 @@ import androidx.lifecycle.LiveData;
 import androidx.lifecycle.MutableLiveData;
 import androidx.lifecycle.ViewModel;
 
+/**
+ * Holds settings-screen state and operations.
+ *
+ */
 public class SettingsViewModel extends ViewModel {
 
     private final MutableLiveData<String> mText;
@@ -13,6 +17,11 @@ public class SettingsViewModel extends ViewModel {
         mText.setValue("This is settings fragment");
     }
 
+    /**
+     * Returns the text.
+     *
+     * @return the text value
+     */
     public LiveData<String> getText() {
         return mText;
     }

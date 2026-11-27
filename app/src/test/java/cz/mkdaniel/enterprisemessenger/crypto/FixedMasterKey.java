@@ -24,6 +24,9 @@ public class FixedMasterKey implements MasterKeyProvider {
 
     /**
      * A store whose master key cannot be loaded, e.g. after a keystore reset.
+     *
+     * @return the unavailable result
+     * @throws GeneralSecurityException if a cryptographic operation fails.
      */
     public static FixedMasterKey unavailable() throws GeneralSecurityException {
         final FixedMasterKey provider = new FixedMasterKey();
@@ -34,11 +37,20 @@ public class FixedMasterKey implements MasterKeyProvider {
 
     /**
      * A provider holding a different key: what the app sees after the master key was regenerated.
+     *
+     * @return the different result
+     * @throws GeneralSecurityException if a cryptographic operation fails.
      */
     public FixedMasterKey different() throws GeneralSecurityException {
         return new FixedMasterKey();
     }
 
+    /**
+     * Returns the master key used by this provider.
+     *
+     * @return the master key result
+     * @throws GeneralSecurityException if a cryptographic operation fails.
+     */
     @Override
     public SecretKey masterKey() throws GeneralSecurityException {
         if (unavailable) {

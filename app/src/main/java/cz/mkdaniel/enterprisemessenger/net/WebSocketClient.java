@@ -93,6 +93,8 @@ public class WebSocketClient {
      * validated against the platform's trust anchors ({@code @xml/network_security_config}).
      * A custom SSLSocketFactory/HostnameVerifier must never be installed here: doing so disables
      * certificate validation and lets any network attacker read the JWT and all chat payloads.
+     *
+     * @return the create ok HTTP client result
      */
     private static OkHttpClient createOkHttpClient() {
         return new OkHttpClient.Builder()
@@ -105,26 +107,58 @@ public class WebSocketClient {
                 .build();
     }
 
+    /**
+     * Removes the token value from a URL before it is logged.
+     *
+     * @param url the URL to process
+     * @return the redact token result
+     */
     private static String redactToken(String url) {
         return url == null ? null : url.replaceAll("token=[^&]*", "token=***");
     }
 
+    /**
+     * Sets the listener.
+     *
+     * @param listener the listener to add or remove
+     */
     public void setListener(WebSocketClientListener listener) {
         this.listener = listener;
     }
 
+    /**
+     * Sets the token provider.
+     *
+     * @param tokenProvider the provider used to obtain an authentication token
+     */
     public void setTokenProvider(TokenProvider tokenProvider) {
         this.tokenProvider = tokenProvider;
     }
 
+    /**
+     * Returns whether connected.
+     *
+     * @return connected.
+     */
     public boolean isConnected() {
         return isConnected.get() && webSocket != null;
     }
 
+    /**
+     * Returns the current URL.
+     *
+     * @return the current URL value
+     */
     public String getCurrentUrl() {
         return currentUrl;
     }
 
+    /**
+     * Returns whether token valid.
+     *
+     * @param tokenToCheck the token whose issuer should be checked
+     * @return token valid.
+     */
     public boolean isTokenValid(String tokenToCheck) {
         String t = (tokenToCheck != null && !tokenToCheck.isEmpty()) ? tokenToCheck : this.token;
         if (t == null || t.isEmpty() || t.equalsIgnoreCase("Invalid")) {
@@ -144,6 +178,9 @@ public class WebSocketClient {
      * Asynchronously connects to the remote WebSocket URL.
      * <p>
      * Close existing connection, if any.
+     *
+     * @param url the URL to process
+     * @param token the authentication token
      */
     public void connectAsync(final String url, final String token) {
         if (!isTokenValid(token)) {
@@ -194,8 +231,19 @@ public class WebSocketClient {
         });
     }
 
+    /**
+     * Creates the web socket listener.
+     *
+     * @return the create web socket listener result
+     */
     private WebSocketListener createWebSocketListener() {
         return new WebSocketListener() {
+            /**
+             * Handles successful establishment of the WebSocket connection.
+             *
+             * @param webSocket the WebSocket connection
+             * @param response the server response
+             */
             @Override
             public void onOpen(@NonNull WebSocket webSocket, @NonNull Response response) {
                 Log.d(TAG, "WebSocket connected: " + redactToken(currentUrl));
@@ -207,6 +255,12 @@ public class WebSocketClient {
                 }
             }
 
+            /**
+             * Handles a message received from the WebSocket.
+             *
+             * @param webSocket the WebSocket connection
+             * @param bytes the binary message payload
+             */
             @Override
             public void onMessage(@NonNull final WebSocket webSocket, @NonNull final ByteString bytes) {
                 try {
@@ -229,12 +283,26 @@ public class WebSocketClient {
                 }
             }
 
+            /**
+             * Handles the start of WebSocket shutdown.
+             *
+             * @param webSocket the WebSocket connection
+             * @param code the WebSocket close code
+             * @param reason the reason for the connection closure
+             */
             @Override
             public void onClosing(@NonNull WebSocket webSocket, int code, @NonNull String reason) {
                 Log.d(TAG, "WebSocket closing: " + code + " / " + reason);
                 webSocket.close(1000, null);
             }
 
+            /**
+             * Handles completion of WebSocket shutdown.
+             *
+             * @param webSocket the WebSocket connection
+             * @param code the WebSocket close code
+             * @param reason the reason for the connection closure
+             */
             @Override
             public void onClosed(@NonNull WebSocket webSocket, int code, @NonNull String reason) {
                 Log.d(TAG, "WebSocket closed: " + code + " / " + reason);
@@ -250,6 +318,13 @@ public class WebSocketClient {
                 }
             }
 
+            /**
+             * Handles a failure from the asynchronous operation.
+             *
+             * @param webSocket the WebSocket connection
+             * @param t the error that occurred
+             * @param response the server response
+             */
             @Override
             public void onFailure(@NonNull WebSocket webSocket, @NonNull Throwable t, @Nullable Response response) {
                 Log.w(TAG, "WebSocket failure: " + t.getMessage() + (response != null ? " HTTP " + response.code() : ""));
@@ -291,6 +366,8 @@ public class WebSocketClient {
      * Counts how often the peer hangs up moments after opening. A connection that lived longer than
      * {@link #INSTANT_CLOSE_MILLIS} proves the path itself works, so the streak resets and the retry
      * interval returns to normal.
+     *
+     * @param wasConnected whether the client was connected before the state change
      */
     private void noteConnectionEnd(boolean wasConnected) {
         if (!wasConnected) {
@@ -304,6 +381,10 @@ public class WebSocketClient {
         }
     }
 
+    /**
+     * Schedules a reconnect attempt if reconnection is still appropriate.
+     *
+     */
     private synchronized void scheduleReconnect() {
         if (!shouldConnect.get()) {
             Log.d(TAG, "Skipping WebSocket reconnect: shouldConnect is false");
@@ -364,6 +445,10 @@ public class WebSocketClient {
         }, delay, TimeUnit.MILLISECONDS);
     }
 
+    /**
+     * Returns whether cel scheduled reconnect.
+     *
+     */
     private synchronized void cancelScheduledReconnect() {
         if (reconnectTask != null && !reconnectTask.isDone()) {
             reconnectTask.cancel(true);
@@ -373,6 +458,8 @@ public class WebSocketClient {
 
     /**
      * Sends a packet asynchronously over the WebSocket connection as a binary frame.
+     *
+     * @param packet the packet to process
      */
     public void sendPacketAsync(Packet packet) {
         if (!isConnected()) {
@@ -414,6 +501,11 @@ public class WebSocketClient {
         disconnectInternal(true);
     }
 
+    /**
+     * Disconnects from internal.
+     *
+     * @param notifyListener whether listeners should be notified
+     */
     private synchronized void disconnectInternal(boolean notifyListener) {
         boolean wasConnected = isConnected.getAndSet(false);
 
@@ -431,24 +523,56 @@ public class WebSocketClient {
         }
     }
 
+    /**
+     * Defines the contract for web socket client listener.
+     *
+     */
     public interface WebSocketClientListener {
+        /**
+         * Handles the connected event.
+         *
+         * @param url the URL to process
+         */
         void onConnected(String url);
 
+        /**
+         * Handles the packet received event.
+         *
+         * @param packet the packet to process
+         */
         void onPacketReceived(Packet packet);
 
+        /**
+         * Handles the disconnected event.
+         *
+         */
         void onDisconnected();
 
         /**
          * A disconnect that knows why. {@code code} is the close code the peer sent (OkHttp reports
          * 1005 when it sent none), which is the difference between "the network is down" and "the
          * server closed our session" - the second one never heals by redialling at full speed.
+         *
+         * @param code the close or status code
+         * @param reason the explanation associated with the status or close code
          */
         default void onDisconnected(int code, String reason) {
             onDisconnected();
         }
 
+        /**
+         * Handles the error event.
+         *
+         * @param t the error that occurred
+         */
         void onError(Throwable t);
 
+        /**
+         * Handles the auth error event.
+         *
+         * @param statusCode the HTTP or WebSocket status code
+         * @param message the message to process
+         */
         default void onAuthError(int statusCode, String message) {
         }
     }
@@ -458,6 +582,11 @@ public class WebSocketClient {
      * Called on a background thread, may block.
      */
     public interface TokenProvider {
+        /**
+         * Fetches the token.
+         *
+         * @return the fetch token result
+         */
         String fetchToken();
     }
 }
