@@ -149,6 +149,19 @@ public class ChannelKeyRegistry {
     }
 
     /**
+     * A fresh random key and version that are deliberately <b>not</b> stored. The caller seals them
+     * for the other members and only calls {@link #adoptChannelKey} once the server accepted the
+     * membership change that carries them. Rotating before that answer used to leave this device
+     * holding a key nobody else had, and a failed request then made the channel unreadable for good.
+     */
+    public KeyVersion newUnstoredKey() {
+        final byte[] key = new byte[KEY_LENGTH_BYTES];
+        random.nextBytes(key);
+
+        return new KeyVersion(UUID.randomUUID(), key);
+    }
+
+    /**
      * Adopts a key received from another member, superseding whatever this device had. The old key
      * is moved into the history so older messages stay readable.
      *

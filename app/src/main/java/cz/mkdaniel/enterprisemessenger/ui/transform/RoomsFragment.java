@@ -19,6 +19,9 @@ import androidx.recyclerview.widget.ListAdapter;
 import androidx.recyclerview.widget.RecyclerView;
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 
+import org.json.JSONArray;
+import org.json.JSONObject;
+
 import java.util.List;
 
 import cz.mkdaniel.enterprisemessenger.R;
@@ -119,19 +122,92 @@ public class RoomsFragment extends Fragment {
         final String renameLabel = getString(R.string.action_rename);
         final String deleteLabel = getString(R.string.action_delete);
         final String addMemberLabel = getString(R.string.action_add_channel_member);
+        final String removeMemberLabel = getString(R.string.action_remove_channel_member);
 
         new MaterialAlertDialogBuilder(requireContext())
                 .setTitle(room.getName())
-                .setItems(new String[]{addMemberLabel, renameLabel, deleteLabel}, (dialog, which) -> {
-                    if (which == 0) {
-                        showAddChannelMemberDialog(room);
-                    } else if (which == 1) {
-                        showChannelNameDialog(R.string.dialog_edit_channel_title, R.string.hint_channel_name,
-                                R.string.action_save, room);
-                    } else {
-                        showDeleteConfirmationDialog(room);
+                .setItems(new String[]{addMemberLabel, removeMemberLabel, renameLabel, deleteLabel},
+                        (dialog, which) -> {
+                            if (which == 0) {
+                                showAddChannelMemberDialog(room);
+                            } else if (which == 1) {
+                                showRemoveChannelMemberDialog(room);
+                            } else if (which == 2) {
+                                showChannelNameDialog(R.string.dialog_edit_channel_title, R.string.hint_channel_name,
+                                        R.string.action_save, room);
+                            } else {
+                                showDeleteConfirmationDialog(room);
+                            }
+                        })
+                .show();
+    }
+
+    /**
+     * Member picker for removal. The server's channel member list carries nothing but user ids, so
+     * that is all the list can show. Removal is also what revokes read access: the server responds by
+     * handing every remaining member a new channel key.
+     */
+    private void showRemoveChannelMemberDialog(Room room) {
+        final long channelId = ServerConnectionManager.parseChannelId(room.getId());
+
+        ServerConnectionManager.getInstance(requireContext()).fetchChannelMembers(channelId,
+                new ServerConnectionManager.Callback<>() {
+                    @Override
+                    public void onResult(JSONArray members) {
+                        if (binding == null) return;
+
+                        final String[] labels = new String[members.length()];
+                        final long[] userIds = new long[members.length()];
+                        for (int i = 0; i < members.length(); i++) {
+                            final JSONObject member = members.optJSONObject(i);
+                            userIds[i] = member == null ? -1L : member.optLong("userId", -1L);
+                            labels[i] = "User ID: " + userIds[i];
+                        }
+
+                        if (labels.length == 0) {
+                            toast(getString(R.string.channel_no_members));
+                            return;
+                        }
+
+                        new MaterialAlertDialogBuilder(requireContext())
+                                .setTitle(R.string.dialog_remove_channel_member_title)
+                                .setItems(labels, (dialog, which) ->
+                                        confirmRemoveChannelMember(channelId, userIds[which]))
+                                .show();
                     }
-                })
+
+                    @Override
+                    public void onFailure(String error) {
+                        if (binding == null) return;
+                        Log.w(TAG, "Failed to load the member list of channel " + channelId + ": " + error);
+                        toast(error);
+                    }
+                });
+    }
+
+    /**
+     * Removal is irreversible for the removed device's history access, so it is confirmed before the
+     * server is asked to re-key the channel.
+     */
+    private void confirmRemoveChannelMember(long channelId, long userId) {
+        new MaterialAlertDialogBuilder(requireContext())
+                .setTitle(R.string.dialog_remove_channel_member_title)
+                .setMessage(getString(R.string.dialog_remove_channel_member_message, userId))
+                .setPositiveButton(R.string.action_remove, (dialog, which) ->
+                        ServerConnectionManager.getInstance(requireContext()).removeChannelMember(
+                                channelId, userId,
+                                new ServerConnectionManager.Callback<>() {
+                                    @Override
+                                    public void onResult(Void result) {
+                                        toast(getString(R.string.channel_member_removed));
+                                    }
+
+                                    @Override
+                                    public void onFailure(String error) {
+                                        toast(error);
+                                    }
+                                }))
+                .setNegativeButton(R.string.action_cancel, (dialog, which) -> dialog.dismiss())
                 .show();
     }
 

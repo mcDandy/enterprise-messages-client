@@ -33,6 +33,7 @@ import cz.mkdaniel.enterprisemessenger.R;
 import cz.mkdaniel.enterprisemessenger.databinding.FragmentMessagesBinding;
 import cz.mkdaniel.enterprisemessenger.databinding.ItemMessageReceivedBinding;
 import cz.mkdaniel.enterprisemessenger.databinding.ItemMessageSentBinding;
+import cz.mkdaniel.enterprisemessenger.net.AccountStore;
 import cz.mkdaniel.enterprisemessenger.net.LocalNetworkPermission;
 import cz.mkdaniel.enterprisemessenger.net.ServerConnectionManager;
 import cz.mkdaniel.enterprisemessenger.notification.NotificationHelper;
@@ -122,6 +123,8 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
                                 binding.recyclerviewMessages.scrollToPosition(merged.size() - 1);
                             }
                         });
+
+                        sendReadReceiptForLatest();
                     }
 
                     @Override
@@ -308,6 +311,8 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
                         if (pageMessages.size() < 50) {
                             noMoreOlderMessages = true;
                         }
+
+                        sendReadReceiptForLatest();
                     }
 
                     @Override
@@ -413,24 +418,43 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
         sendReadReceiptForLatest();
     }
 
-    @Override
-    public void onMemberInfoReceived(long channelId, long userId, long lastDeliveredMessageId, long lastReadMessageId) {
-        if (!isAdded()) return;
-        long currentChannelId = ServerConnectionManager.parseChannelId(roomId);
-        if (channelId == currentChannelId) {
-            sendReadReceiptForLatest();
-        }
-    }
-
+    /**
+     * Reports the newest message of this channel as read, and only when that position is ahead of the
+     * one already reported. The cursor lives in {@link AccountStore} rather than in this screen, so
+     * reopening a channel without new messages stays silent: the server treats a repeated position as
+     * a refused receipt and answers with an error packet, which would surface as a bogus failure.
+     * Messages the user wrote himself carry a local UUID instead of a server id, and the list is
+     * ordered by timestamp rather than by id, so the newest <i>numeric</i> id is scanned for.
+     */
     private void sendReadReceiptForLatest() {
-        if (connectionManager == null || roomId == null || roomId.isEmpty()) return;
-        if (adapter != null && !adapter.getCurrentList().isEmpty()) {
-            Message lastMsg = adapter.getCurrentList().get(adapter.getCurrentList().size() - 1);
-            try {
-                long msgId = Long.parseLong(lastMsg.getId());
-                connectionManager.sendReadReceipt(ServerConnectionManager.parseChannelId(roomId), msgId);
-            } catch (NumberFormatException ignored) {}
+        if (!isResumed() || connectionManager == null || roomId == null || roomId.isEmpty()) {
+            return;
         }
+        if (adapter == null || adapter.getCurrentList().isEmpty()) {
+            return;
+        }
+
+        long newest = -1L;
+        for (Message message : adapter.getCurrentList()) {
+            try {
+                newest = Math.max(newest, Long.parseLong(message.getId()));
+            } catch (NumberFormatException ignored) {
+                // A pending local message: no server position to report for it.
+            }
+        }
+
+        if (newest <= 0) {
+            return;
+        }
+
+        final long channelId = ServerConnectionManager.parseChannelId(roomId);
+        final AccountStore accountStore = new AccountStore(requireContext());
+        if (newest <= accountStore.getLastReadMessageId(channelId)) {
+            return;
+        }
+
+        accountStore.saveLastReadMessageId(channelId, newest);
+        connectionManager.sendReadReceipt(channelId, newest);
     }
 
     @Override

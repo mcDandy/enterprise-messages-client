@@ -31,13 +31,19 @@ import cz.mkdaniel.enterprisemessenger.crypto.CryptoManager;
  * Authentication is no longer a packet: the JWT is passed as the {@code token} query
  * parameter of the WebSocket handshake. End-to-end encryption of chat payloads is done
  * by the caller before the payload is put into a packet (the server only stores ciphertext).
+ * <p>
+ * <b>Which packets carry a queue.</b> The server keeps one FIFO queue per user and sends only its
+ * head, so {@link #TYPE_CHAT_MESSAGE} and {@link #TYPE_UNICAST_ROTATED_KEY} are queued deliveries
+ * and each needs exactly one {@link #TYPE_ACK}: one acknowledgement pops exactly one frame. There is
+ * no per-packet id in an {@code ACK}, so acknowledging anything else - {@link #TYPE_CHANNEL_MEMBER_INFO}
+ * or the {@link #TYPE_UNKNOWN} error packet, both of which the server sends directly - would silently
+ * discard a different pending frame and lose a message.
  */
 public class Packet {
     public static final byte TYPE_UNKNOWN = 0x0;
     public static final byte TYPE_CHAT_MESSAGE = 0x1;
     public static final byte TYPE_ACK = 0x2;
     public static final byte TYPE_READ = 0x3;
-    public static final byte TYPE_KEY_ROTATION = 0xa;
     public static final byte TYPE_UNICAST_ROTATED_KEY = 0xd;
     public static final byte TYPE_CHANNEL_MEMBER_INFO = 0x0e;
 
@@ -90,6 +96,18 @@ public class Packet {
         }
     }
 
+    /**
+     * Whether the server hands this type out of the per-user FIFO queue and therefore expects an
+     * {@link #TYPE_ACK} for it. That acknowledgement carries no id and pops exactly one queue row, so
+     * only these two may be acknowledged: {@link #TYPE_CHANNEL_MEMBER_INFO} and the
+     * {@link #TYPE_UNKNOWN} error packet are sent directly and never queued, so acknowledging one of
+     * them would silently discard a different pending frame. Not acknowledging a queued one stalls
+     * that user's queue.
+     */
+    public static boolean isQueuedDelivery(final byte type) {
+        return type == TYPE_CHAT_MESSAGE || type == TYPE_UNICAST_ROTATED_KEY;
+    }
+
     public static String typeName(final byte type) {
         switch (type) {
             case TYPE_UNKNOWN:
@@ -98,8 +116,6 @@ public class Packet {
                 return "CHAT_MESSAGE";
             case TYPE_ACK:
                 return "ACK";
-            case TYPE_KEY_ROTATION:
-                return "KEY_ROTATION";
             case TYPE_READ:
                 return "READ";
             case TYPE_UNICAST_ROTATED_KEY:

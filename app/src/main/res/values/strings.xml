@@ -106,6 +106,14 @@
     <string name="action_add_channel_member">Add channel member</string>
     <string name="dialog_add_channel_member_title">Add member to channel</string>
     <string name="channel_member_added">Channel member added</string>
+    <string name="action_remove_channel_member">Remove channel member</string>
+    <string name="dialog_remove_channel_member_title">Remove member from channel</string>
+    <string name="action_remove">Remove</string>
+    <!-- Removal is what revokes read access: the server hands the remaining members a new channel
+         key, so the removed device can no longer open future messages. -->
+    <string name="dialog_remove_channel_member_message">Remove user %1$s from this channel? The members who stay get a new channel key, so the removed device can no longer read future messages.</string>
+    <string name="channel_member_removed">Channel member removed</string>
+    <string name="channel_no_members">This channel has no members</string>
     <string name="action_delete">Delete</string>
     <string name="action_cancel">Cancel</string>
     <string name="dialog_add_member_title">Add server member</string>

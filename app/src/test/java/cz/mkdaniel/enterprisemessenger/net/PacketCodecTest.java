@@ -68,8 +68,8 @@ public class PacketCodecTest {
 
     @Test
     public void emptyPayloadIsAccepted() throws Exception {
-        // The server accepts a zero-length ROTATE_KEY request body.
-        final byte[] frame = new Packet(Packet.TYPE_KEY_ROTATION, new byte[0]).serialize();
+        // The server accepts a zero-length ACKNOWLEDGE body, and an ACK must never carry a payload.
+        final byte[] frame = new Packet(Packet.TYPE_ACK, new byte[0]).serialize();
 
         assertEquals(1, frame.length);
 
