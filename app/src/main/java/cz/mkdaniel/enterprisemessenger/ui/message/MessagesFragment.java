@@ -390,11 +390,7 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
         Message sent = new Message(messageId, text, "You", System.currentTimeMillis(), true);
         List<Message> updated = new ArrayList<>(adapter.getCurrentList());
         updated.add(sent);
-        adapter.submitList(updated, () -> {
-            if (binding != null) {
-                binding.recyclerviewMessages.smoothScrollToPosition(updated.size() - 1);
-            }
-        });
+        scrollToLatest(updated.size() - 1);
 
         // The server queues the encrypted message for other channel members, not back to the sender.
         connectionManager.sendChatMessage(text);
@@ -429,11 +425,7 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
         }
         List<Message> updated = new ArrayList<>(adapter.getCurrentList());
         updated.add(message);
-        adapter.submitList(updated, () -> {
-            if (binding != null) {
-                binding.recyclerviewMessages.smoothScrollToPosition(updated.size() - 1);
-            }
-        });
+        scrollToLatest(updated.size() - 1);
         sendReadReceiptForLatest();
     }
 
@@ -572,6 +564,23 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
         final int steps = Math.max(peerCount, 1);
         final float fraction = Math.min(1f, Math.max(0f, (float) recipients / steps));
         return (int) (0xFF * fraction);
+    }
+
+    /**
+     * Jumps the list to the newest message once the list carrying it is on screen.
+     * <p>
+     * Deferred to the next frame rather than run in {@code submitList}'s callback. That callback
+     * fires while the diff is still dispatching its updates, and starting a smooth scroll from
+     * there throws - {@code LinearLayoutManager} refuses to begin a {@code SmoothScroller} while it
+     * is computing a layout or scrolling. A plain jump is tolerated, a smooth one is not, which is
+     * why only the paths that scrolled smoothly ever crashed.
+     */
+    private void scrollToLatest(int position) {
+        if (binding == null || position < 0) {
+            return;
+        }
+        binding.recyclerviewMessages.post(
+                () -> binding.recyclerviewMessages.smoothScrollToPosition(position));
     }
 
     /**
