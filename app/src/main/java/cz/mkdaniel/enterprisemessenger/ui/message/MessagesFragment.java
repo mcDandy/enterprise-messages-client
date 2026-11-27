@@ -346,6 +346,18 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
                         <= PENDING_RECONCILIATION_WINDOW_MILLIS) {
                     confirmedByServer = true;
                     matchedServerMessages.add(message);
+                    // The server's copy is kept, but under the id the row already carries, so the
+                    // diff recognises it as the same item and the bubble does not blink as the
+                    // pending one is taken over. The server id comes along with it, so the read
+                    // receipt can reach a message the user wrote himself.
+                    final int position = merged.indexOf(message);
+                    merged.set(position, new Message(
+                            localMessage.getId(),
+                            message.getServerId(),
+                            message.getText(),
+                            message.getSender(),
+                            message.getTimestamp(),
+                            false));
                     break;
                 }
             }
@@ -419,12 +431,50 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
     }
 
     /**
+     * Swaps in the copy of a message that arrived later carrying its server id, in place so the
+     * row keeps its position and the list does not jump. A live message enters the list before the
+     * server names its position, and without this it would stay nameless in the list even after
+     * the poll returned it, so the receipt could never reach it.
+     */
+    @Override
+    public void onMessageReplaced(Message message) {
+        if (!isAdded() || adapter == null) return;
+
+        final List<Message> current = adapter.getCurrentList();
+        final int index = indexOfMessageId(current, message.getId());
+        if (index < 0) {
+            // The poll already replaced the row, or the user left the channel. Either way the
+            // server's copy is the one on screen and nothing has to be done.
+            return;
+        }
+
+        final List<Message> updated = new ArrayList<>(current);
+        updated.set(index, message);
+        adapter.submitList(updated);
+        sendReadReceiptForLatest();
+    }
+
+    /**
+     * Position of the message with {@code id}, or -1 when the list does not hold it. The id is
+     * unique per message, so the first hit is the only one.
+     */
+    private static int indexOfMessageId(List<Message> messages, String id) {
+        for (int i = 0; i < messages.size(); i++) {
+            if (messages.get(i).getId().equals(id)) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    /**
      * Reports the newest message of this channel as read, and only when that position is ahead of the
      * one already reported. The cursor lives in {@link AccountStore} rather than in this screen, so
      * reopening a channel without new messages stays silent: the server treats a repeated position as
      * a refused receipt and answers with an error packet, which would surface as a bogus failure.
-     * Messages the user wrote himself carry a local UUID instead of a server id, and the list is
-     * ordered by timestamp rather than by id, so the newest <i>numeric</i> id is scanned for.
+     * Only {@link Message#getServerId()} is considered: it is the position the server itself
+     * handed out, whereas {@link Message#getId()} is also used for messages this device wrote,
+     * which the server has never seen.
      */
     private void sendReadReceiptForLatest() {
         if (!isResumed() || connectionManager == null || roomId == null || roomId.isEmpty()) {
@@ -434,13 +484,9 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
             return;
         }
 
-        long newest = -1L;
+        long newest = Message.NO_SERVER_ID;
         for (Message message : adapter.getCurrentList()) {
-            try {
-                newest = Math.max(newest, Long.parseLong(message.getId()));
-            } catch (NumberFormatException ignored) {
-                // A pending local message: no server position to report for it.
-            }
+            newest = Math.max(newest, message.getServerId());
         }
 
         if (newest <= 0) {

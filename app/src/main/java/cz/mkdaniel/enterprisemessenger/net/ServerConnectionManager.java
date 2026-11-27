@@ -13,6 +13,7 @@ import org.json.JSONObject;
 import org.json.JSONArray;
 
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.Arrays;
@@ -143,6 +144,37 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
      */
     private final LruCache<Long, Long> historyUndecryptableAtEpoch =
             new LruCache<>(HISTORY_CACHE_MAX_ENTRIES);
+    /**
+     * Messages this device sent live but that had no server id when they were handed to the UI,
+     * oldest first. The {@code CHAT_MESSAGE} frame carries no id, so the position only shows up in
+     * the {@code CHANNEL_MEMBER_INFO} that follows, and the two are matched up by reading that
+     * cursor against the last position this device knew.
+     * <p>
+     * Kept only while the id is unknown, which is a fraction of a second in practice. A message
+     * whose id never arrives is dropped once it is older than {@link #PENDING_SERVER_ID_TTL},
+     * because guessing at it would report the wrong position in a read receipt.
+     */
+    private final ArrayDeque<UnassignedMessage> awaitingServerIds = new ArrayDeque<>();
+    /**
+     * Newest message position this device has seen, from history or from a read cursor. It is the
+     * baseline the next {@code CHANNEL_MEMBER_INFO} is compared against to tell how many messages
+     * arrived since.
+     */
+    private volatile long highestKnownMessageId = -1L;
+
+    /**
+     * A sent message still waiting for its server id, with the instant it was sent so a stale one
+     * can be discarded rather than matched to a message it has nothing to do with.
+     */
+    private static final class UnassignedMessage {
+        final Message message;
+        final long sentAt;
+
+        UnassignedMessage(final Message message, final long sentAt) {
+            this.message = message;
+            this.sentAt = sentAt;
+        }
+    }
     /**
      * Deliveries of a key envelope this device failed to open, counted per envelope fingerprint and
      * only for the lifetime of this process. See {@link #answerKeyEnvelopeFailure(long, byte[])}.
@@ -964,7 +996,16 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
                     final String messageId = fallbackId;
                     long timestamp = parseOffsetDateTime(item.optString("sentAt", ""));
 
-                    decrypted.add(new Message(messageId, text, normalizeSenderName(sender), timestamp));
+                    decrypted.add(new Message(
+                        messageId,
+                        serverMessageId,
+                        text,
+                        normalizeSenderName(sender),
+                        timestamp,
+                        false));
+                if (serverMessageId > highestKnownMessageId) {
+                    highestKnownMessageId = serverMessageId;
+                }
                 }
 
                 if (!missingRows.isEmpty()) {
@@ -2709,6 +2750,12 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
         webSocketClient.sendPacketAsync(new Packet(Packet.TYPE_CHAT_MESSAGE, messagePayload.array()));
     }
 
+    /**
+     * How long a sent message may wait for the read cursor to name its position. Past this the
+     * link to the cursor is too uncertain to guess from, and the message keeps no id.
+     */
+    private static final long PENDING_SERVER_ID_TTL = 30_000L;
+
     public void sendReadReceipt(long channelId, long messageId) {
         if (!webSocketClient.isConnected()) {
             return;
@@ -2852,8 +2899,12 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
                         break;
                     }
 
+                    // The frame carries no id of its own, so the position the server reports in
+                    // the next CHANNEL_MEMBER_INFO is the only one this message will ever have.
+                    // Until then it is identified by a random id: two messages can arrive in the
+                    // same millisecond, and an id built from the clock would name them alike.
                     final long receivedAt = System.currentTimeMillis();
-                    String messageId = String.valueOf(receivedAt);
+                    final String messageId = UUID.randomUUID().toString();
                     final String senderName = "Server User";
 
                     final ByteBuffer chatPayload = ByteBuffer.wrap(payload);
@@ -2881,11 +2932,22 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
                         break;
                     }
 
-                    notifyMessageReceived(new Message(
+                    // Only a message of the channel on screen can be matched to a read cursor,
+                    // which is a per-member position and therefore only meaningful for the
+                    // channel the user is actually looking at.
+                    final boolean trackServerId = packetChannelId == visibleChannelId;
+
+                    final Message liveMessage = new Message(
                             messageId,
+                            Message.NO_SERVER_ID,
                             messageText,
                             normalizeSenderName(senderName),
-                            receivedAt));
+                            receivedAt,
+                            false);
+                    notifyMessageReceived(liveMessage);
+                    if (trackServerId) {
+                        trackForServerId(liveMessage, receivedAt);
+                    }
 
                     if (!isChannelVisible(visibleChannelId)) {
                         NotificationHelper.showChannelMessageNotification(context, visibleChannelId, null);
@@ -2914,6 +2976,13 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 
                     Log.d(TAG, "Received CHANNEL_MEMBER_INFO: channel=" + channelId + ", user=" + userId
                             + ", delivered=" + lastDelivered + ", read=" + lastRead);
+
+                    if (lastDelivered > highestKnownMessageId) {
+                        highestKnownMessageId = lastDelivered;
+                    }
+                    if (channelId == visibleChannelId) {
+                        assignServerIds(lastDelivered);
+                    }
 
                     mainHandler.post(() -> {
                         for (ConnectionListener l : listeners) {
@@ -3029,6 +3098,76 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
         });
     }
 
+    /**
+     * Hands the listeners a copy of {@code message} carrying the position the server assigned it.
+     * <p>
+     * A live {@code CHAT_MESSAGE} arrives before {@code CHANNEL_MEMBER_INFO} names its position,
+     * so it enters the list with no server id and cannot take part in read receipts. The receipt
+     * reports the newest position the device knows, so leaving that message anonymous would hold
+     * the cursor back for every message behind it. The id is filled in as soon as it is known.
+     */
+    private void replaceMessage(final Message message) {
+        mainHandler.post(() -> {
+            for (ConnectionListener l : listeners) {
+                l.onMessageReplaced(message);
+            }
+        });
+    }
+
+    /**
+     * Remembers a message that reached the UI without a server id, so the next read cursor can
+     * supply one. Must run on the socket thread, which is the only writer of the deque.
+     */
+    private void trackForServerId(final Message message, final long sentAt) {
+        synchronized (awaitingServerIds) {
+            awaitingServerIds.addLast(new UnassignedMessage(message, sentAt));
+        }
+    }
+
+    /**
+     * Gives the messages that arrived since {@link #highestKnownMessageId} the positions the
+     * cursor now reports, and hands the UI a copy of each carrying its own.
+     * <p>
+     * The cursor is a single high-water mark, so it only proves that the {@code n} positions
+     * ending at {@code lastDelivered} are the newest ones, where {@code n} is how many messages
+     * are still unnamed. That is an assumption about the server handing out ids one per message
+     * with no gaps; it is not something the frame confirms. Were it ever false, the worst the
+     * damage reaches is a receipt for a neighbouring message, which is what a cursor already
+     * reports for everything behind it.
+     */
+    private void assignServerIds(final long lastDelivered) {
+        final List<Message> resolved = new ArrayList<>();
+        synchronized (awaitingServerIds) {
+            final long now = System.currentTimeMillis();
+            UnassignedMessage oldest;
+            while ((oldest = awaitingServerIds.peekFirst()) != null
+                    && now - oldest.sentAt > PENDING_SERVER_ID_TTL) {
+                awaitingServerIds.pollFirst();
+            }
+            final int unnamed = awaitingServerIds.size();
+            if (unnamed == 0 || lastDelivered - unnamed + 1 <= 0) {
+                return;
+            }
+            long id = lastDelivered - unnamed + 1;
+            for (final UnassignedMessage pending : awaitingServerIds) {
+                resolved.add(withServerId(pending.message, id++));
+            }
+            awaitingServerIds.clear();
+        }
+        for (final Message message : resolved) {
+            replaceMessage(message);
+        }
+    }
+
+    /**
+     * Copy of {@code message} carrying {@code serverId}; every other field is carried over, and
+     * {@link Message#getId()} is deliberately kept so the UI can find the row to replace.
+     */
+    private static Message withServerId(final Message message, final long serverId) {
+        return new Message(message.getId(), serverId, message.getText(), message.getSender(),
+                message.getTimestamp(), message.isPending());
+    }
+
     private void notifyError(String error) {
         mainHandler.post(() -> {
             for (ConnectionListener l : listeners) {
@@ -3053,6 +3192,14 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
         void onConnectionStateChanged(boolean connected, String serverBaseUrl);
 
         void onMessageReceived(Message message);
+
+        /**
+         * Replaces the message of the same {@link Message#getId()} with {@code message}, which
+         * carries information the live frame did not have. The default does nothing, so a listener
+         * that only shows notifications need not care.
+         */
+        default void onMessageReplaced(Message message) {
+        }
 
         void onError(String errorMessage);
 
