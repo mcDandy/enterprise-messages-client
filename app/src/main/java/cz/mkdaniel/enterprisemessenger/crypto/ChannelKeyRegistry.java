@@ -49,6 +49,12 @@ public class ChannelKeyRegistry {
 
     private final SecureBlobStore blobs;
     private final SecureRandom random = new SecureRandom();
+    /**
+     * Counts every change of this device's key material: a key created, rotated, adopted or
+     * forgotten. Whether a payload can be opened depends on nothing else, so a caller may cache the
+     * verdict of a failed attempt and only has to retry it once this counter moves.
+     */
+    private long keyEpoch = 0L;
 
     public ChannelKeyRegistry(SecureBlobStore blobs) {
         this.blobs = blobs;
@@ -236,17 +242,30 @@ public class ChannelKeyRegistry {
     }
 
     /**
+     * Value of the key-material change counter. Reading it before and after a decryption attempt
+     * tells a caller whether the keys that failed are still the keys on this device, which is what
+     * lets a reader cache an unreadable message without losing it for good.
+     */
+    public synchronized long keyEpoch() {
+        return keyEpoch;
+    }
+
+    /**
      * Forgets a channel's key and its history, e.g. after the channel was deleted.
      */
     public synchronized void forget(long channelId) {
         blobs.remove(currentAlias(channelId));
         blobs.remove(historyAlias(channelId));
+
+        ++keyEpoch;
     }
 
-    public void forgetAll() {
+    public synchronized void forgetAll() {
         for (final String key : blobs.keysWithPrefix(KEY_PREFIX)) {
             blobs.remove(key);
         }
+
+        ++keyEpoch;
     }
 
     /**
@@ -325,6 +344,10 @@ public class ChannelKeyRegistry {
         System.arraycopy(key, 0, stored, UUID_LENGTH_BYTES, KEY_LENGTH_BYTES);
 
         blobs.put(currentAlias(channelId), stored);
+
+        // Every key this device starts holding - created, rotated or adopted from a peer - goes
+        // through here, so the counter cannot miss a change that could open a new payload.
+        ++keyEpoch;
     }
 
     private void appendHistory(long channelId, KeyVersion superseded) throws KeyStoreUnavailableException {

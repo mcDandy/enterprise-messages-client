@@ -207,4 +207,47 @@ public class ChannelKeyRegistryTest {
         assertNull(registry.currentKey(1L));
         assertNull(registry.currentKey(2L));
     }
+
+    @Test
+    public void keyEpochMovesOnlyWhenTheKeyMaterialChanges() throws Exception {
+        // A reader caches the verdict "no key of this device opens that message" and retries the
+        // message once the epoch moves. The counter therefore has to react to every way a key can
+        // appear or disappear, and to nothing that leaves the keys untouched.
+        long previous = registry.keyEpoch();
+
+        registry.ensureChannelKey(CHANNEL);
+        assertTrue(registry.keyEpoch() > previous);
+
+        // Reading must not look like a change: a poll would otherwise throw away the very cache it
+        // has just filled.
+        previous = registry.keyEpoch();
+        registry.ensureChannelKey(CHANNEL);
+        registry.currentKey(CHANNEL);
+        registry.currentVersion(CHANNEL);
+        registry.decryptCandidates(CHANNEL);
+        registry.exportableEntries();
+        assertEquals(previous, registry.keyEpoch());
+
+        final byte[] fromPeer = new byte[KEY_LENGTH];
+        java.util.Arrays.fill(fromPeer, (byte) 0x5A);
+        final UUID peerVersion = UUID.randomUUID();
+        assertTrue(registry.adoptChannelKey(CHANNEL, peerVersion, fromPeer));
+        assertTrue(registry.keyEpoch() > previous);
+
+        // Being handed the key this device already holds is not a change.
+        previous = registry.keyEpoch();
+        assertFalse(registry.adoptChannelKey(CHANNEL, peerVersion, fromPeer));
+        assertEquals(previous, registry.keyEpoch());
+
+        registry.rotateChannelKey(CHANNEL);
+        assertTrue(registry.keyEpoch() > previous);
+
+        registry.forget(CHANNEL);
+        assertTrue(registry.keyEpoch() > previous);
+
+        registry.ensureChannelKey(CHANNEL);
+        previous = registry.keyEpoch();
+        registry.forgetAll();
+        assertTrue(registry.keyEpoch() > previous);
+    }
 }

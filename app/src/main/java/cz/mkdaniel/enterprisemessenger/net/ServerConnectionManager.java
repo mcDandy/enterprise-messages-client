@@ -4,6 +4,7 @@ import android.content.Context;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
+import android.util.LruCache;
 import android.util.Base64;
 
 import java.nio.ByteBuffer;
@@ -76,6 +77,12 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
     private static final int PING_INTERVAL_SECONDS = 15;
     private static final String TAG = "ServerConnectionManager";
     /**
+     * How many history messages keep their decrypted text, see {@link #historyPlaintext}. One page
+     * of chat history is 50 messages, so this covers a screen of scrollback several times over while
+     * staying far below what the chat adapter itself holds.
+     */
+    private static final int HISTORY_CACHE_MAX_ENTRIES = 512;
+    /**
      * Reported when the server answers 403 to a CRUD call: the session is fine, the role is not.
      */
     private static final String ERROR_PERMISSION_DENIED = "You do not have permission to do that on this server";
@@ -103,6 +110,26 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final Set<ConnectionListener> listeners = new CopyOnWriteArraySet<>();
+    /**
+     * Decrypted text of history messages, keyed by the server's message id.
+     * <p>
+     * The chat screen polls page 0 every few seconds, and each poll used to walk the whole page
+     * through the candidate-key sweep again - fifty messages, each trying every key the channel has
+     * ever had, for a page that is nearly always identical to the one before it. A message id is
+     * immutable and its ciphertext never changes, so a payload that opened once never has to be
+     * opened again.
+     * <p>
+     * Successes only: a failure is recorded in {@link #historyUndecryptableAtEpoch}, because a key
+     * can reach this device later and make a message readable that was not readable before.
+     */
+    private final LruCache<Long, String> historyPlaintext = new LruCache<>(HISTORY_CACHE_MAX_ENTRIES);
+    /**
+     * Message ids no key of this device could open, mapped to the
+     * {@link ChannelKeyRegistry#keyEpoch()} of that attempt. The verdict is reused only while the
+     * epoch has not moved, so adopting a key retries every message this device could not read.
+     */
+    private final LruCache<Long, Long> historyUndecryptableAtEpoch =
+            new LruCache<>(HISTORY_CACHE_MAX_ENTRIES);
     /**
      * Normalized {@code https://host:port} of the physical server, from {@code @string/server_ip}.
      */
@@ -574,6 +601,10 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
                 }
             }
 
+            // The server dropped its whole channel set, so none of these message ids will ever be
+            // served again: keep no plaintext of them in memory.
+            clearHistoryCaches();
+
             mainHandler.post(() -> callback.onResult(null));
         });
     }
@@ -807,38 +838,86 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
                 }
 
                 final List<Message> decrypted = new ArrayList<>();
+                // Snapshot of the key state: a message written off as unreadable is retried as soon
+                // as this device gains a key, and not one poll before.
+                final long keyEpoch = channelKeys.keyEpoch();
+                int reused = 0;
+                int unreadable = 0;
+
                 for (int i = 0; i < messages.length(); i++) {
                     final JSONObject item = messages.optJSONObject(i);
                     if (item == null) {
                         continue;
                     }
 
-                    final byte[] ciphertext;
-                    try {
-                        ciphertext = Base64.decode(item.optString("ciphertext", ""), Base64.NO_WRAP);
-                    } catch (final Exception e) {
-                        continue;
-                    }
-                    if (ciphertext.length == 0) {
-                        continue;
+                    // The server's message id is the cache key: it is immutable and the ciphertext
+                    // behind it never changes. An item served without one is opened on the spot and
+                    // simply not cached.
+                    final long serverMessageId = item.optLong("id", -1L);
+
+                    String text = serverMessageId < 0
+                            ? null
+                            : historyPlaintext.get(serverMessageId);
+
+                    if (text == null) {
+                        final Long unreadableSince = serverMessageId < 0
+                                ? null
+                                : historyUndecryptableAtEpoch.get(serverMessageId);
+                        if (unreadableSince != null && unreadableSince == keyEpoch) {
+                            // No key of this device opened it, and the key set has not moved since
+                            // that attempt, so sweeping the same candidates cannot end differently.
+                            unreadable++;
+                            continue;
+                        }
+
+                        final byte[] ciphertext;
+                        try {
+                            ciphertext = Base64.decode(item.optString("ciphertext", ""), Base64.NO_WRAP);
+                        } catch (final Exception e) {
+                            continue;
+                        }
+                        if (ciphertext.length == 0) {
+                            continue;
+                        }
+
+                        final UUID keyVersion = parseUuid(item.optString("keyVersion", ""));
+                        final byte[] plaintext =
+                                decryptChatPayloadForVersion(channelId, ciphertext, keyVersion);
+                        if (plaintext == null) {
+                            if (serverMessageId >= 0) {
+                                historyUndecryptableAtEpoch.put(serverMessageId, keyEpoch);
+                            }
+                            unreadable++;
+                            continue;
+                        }
+
+                        text = new String(plaintext, StandardCharsets.UTF_8);
+                        if (serverMessageId >= 0) {
+                            historyPlaintext.put(serverMessageId, text);
+                            historyUndecryptableAtEpoch.remove(serverMessageId);
+                        }
+                    } else {
+                        ++reused;
                     }
 
-                    final UUID keyVersion = parseUuid(item.optString("keyVersion", ""));
-                    final byte[] plaintext =
-                            decryptChatPayloadForVersion(channelId, ciphertext, keyVersion);
-                    if (plaintext == null) {
-                        continue;
-                    }
-
-                    final String fallbackId =
-                            String.valueOf(item.optLong("id", System.currentTimeMillis()));
-                    final String text = new String(plaintext, StandardCharsets.UTF_8);
+                    final String fallbackId = serverMessageId >= 0
+                            ? String.valueOf(serverMessageId)
+                            : String.valueOf(System.currentTimeMillis());
                     final String sender = item.optLong("senderId", -1L) == currentUserId
                             ? "You" : "Server User";
                     final String messageId = fallbackId;
                     long timestamp = parseOffsetDateTime(item.optString("sentAt", ""));
 
                     decrypted.add(new Message(messageId, text, normalizeSenderName(sender), timestamp));
+                }
+
+                if (reused > 0 || unreadable > 0) {
+                    // One line per page instead of one per candidate key: the chat screen asks for
+                    // this page every few seconds.
+                    Log.d(TAG, "fetchMessagePage: channel " + channelId + " page " + page + " - "
+                            + decrypted.size() + " messages delivered, " + reused
+                            + " reused from cache, " + unreadable
+                            + " sealed with a key this device does not have");
                 }
 
                 java.util.Collections.reverse(decrypted);
@@ -1041,6 +1120,7 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
             }
 
             channelKeys.forget(channelId);
+            clearHistoryCaches();
 
             mainHandler.post(() -> callback.onResult(null));
         });
@@ -2226,7 +2306,18 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
         this.jwtTokenIssuer = "";
         this.activeChannelKey = null;
         this.activeChannelId = -1L;
+        clearHistoryCaches();
         webSocketClient.disconnect();
+    }
+
+    /**
+     * Drops the decrypted history of the session: the plaintext already opened and the verdicts on
+     * messages that stayed sealed. Called when the session ends and when a channel is deleted, so no
+     * plaintext of an account that is no longer signed in is left behind in this process.
+     */
+    private void clearHistoryCaches() {
+        historyPlaintext.evictAll();
+        historyUndecryptableAtEpoch.evictAll();
     }
 
     /**
