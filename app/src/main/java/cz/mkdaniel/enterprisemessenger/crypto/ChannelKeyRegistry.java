@@ -33,6 +33,12 @@ public class ChannelKeyRegistry {
      */
     public static final String HISTORY_SUFFIX = "_hist";
     /**
+     * Suffix of the per-channel map from the server's key-row versions to the key versions this
+     * device actually holds, e.g. {@code channel_42_srv}. Shares {@link #KEY_PREFIX} so a wipe of the
+     * prefix takes the map with it.
+     */
+    public static final String SERVER_MAP_SUFFIX = "_srv";
+    /**
      * How many superseded keys per channel stay readable. Every membership change re-keys the
      * channel, so this is the number of joins and leaves a member can go through and still read the
      * whole history; 256 covers years of them.
@@ -46,6 +52,11 @@ public class ChannelKeyRegistry {
     private static final String TAG = "ChannelKeyRegistry";
     private static final int KEY_LENGTH_BYTES = 32;
     private static final int UUID_LENGTH_BYTES = 16;
+    /**
+     * One entry of the server-version map: the server's key-row uuid followed by this device's key
+     * version for the same rotation.
+     */
+    private static final int MAP_ENTRY_LENGTH = 2 * UUID_LENGTH_BYTES;
 
     private final SecureBlobStore blobs;
     private final SecureRandom random = new SecureRandom();
@@ -105,6 +116,19 @@ public class ChannelKeyRegistry {
 
     private static String historyAlias(long channelId) {
         return KEY_PREFIX + channelId + HISTORY_SUFFIX;
+    }
+
+    private static String serverMapAlias(long channelId) {
+        return KEY_PREFIX + channelId + SERVER_MAP_SUFFIX;
+    }
+
+    private static UUID readUuid(byte[] source, int offset) {
+        return new UUID(readLong(source, offset), readLong(source, offset + Long.BYTES));
+    }
+
+    private static boolean isUuidAt(byte[] source, int offset, UUID uuid) {
+        return readLong(source, offset) == uuid.getMostSignificantBits()
+                && readLong(source, offset + Long.BYTES) == uuid.getLeastSignificantBits();
     }
 
     /**
@@ -194,6 +218,18 @@ public class ChannelKeyRegistry {
             return false;
         }
 
+        // A key this device already superseded is by definition older than the one it holds now, and
+        // the versions are random uuids that carry no order of their own. Making an old one current
+        // again would bury the newer key in the history and leave every message written with it
+        // unopenable, which is what happens when the server replays an envelope that was queued
+        // before a newer rotation had already been adopted.
+        if (existing != null && isSuperseded(channelId, version)) {
+            Log.w(TAG, "Ignored key " + version + " of channel " + channelId
+                    + ": this device already superseded it and adopting it would downgrade the channel");
+
+            return false;
+        }
+
         if (existing != null && !existing.version().equals(version)) {
             appendHistory(channelId, existing);
         }
@@ -251,11 +287,117 @@ public class ChannelKeyRegistry {
     }
 
     /**
-     * Forgets a channel's key and its history, e.g. after the channel was deleted.
+     * Makes a key readable on {@code channelId} without making it the current one.
+     * <p>
+     * For keys recovered from another member: history written under them has to open, while new
+     * messages must keep going out under the key the whole channel shares now. Making a recovered key
+     * current would send this device back to an older key, which is exactly what
+     * {@link #adoptChannelKey} refuses to do.
+     *
+     * @return {@code false} when this device already knows the key or it is malformed
+     */
+    public synchronized boolean addReadableKey(long channelId, UUID version, byte[] key)
+            throws KeyStoreUnavailableException {
+        if (version == null || key == null || key.length != KEY_LENGTH_BYTES) {
+            return false;
+        }
+
+        final KeyVersion current = currentKeyVersion(channelId);
+        if ((current != null && current.version().equals(version)) || isSuperseded(channelId, version)) {
+            return false;
+        }
+
+        appendHistory(channelId, new KeyVersion(version, key));
+
+        // A key this device can now open has to invalidate any cached "nothing opens that payload".
+        ++keyEpoch;
+
+        Log.d(TAG, "Added recovered key " + version + " of channel " + channelId + " as readable only");
+
+        return true;
+    }
+
+    /**
+     * Records that the server's key row {@code serverVersion} of {@code channelId} is the same
+     * rotation as the key version {@code clientVersion} this device holds.
+     * <p>
+     * The two are unrelated namespaces: the server mints its own uuid per rotation and the client's
+     * real version travels only inside the sealed envelope, so a message's {@code keyVersion} is
+     * otherwise useless and every history payload has to be tried against every key the channel has
+     * ever had. Both halves arrive together in one {@code TYPE_UNICAST_ROTATED_KEY} - the server's uuid
+     * in the header, the client's inside the envelope - which is the only moment the pairing can be
+     * learned, and the header is otherwise discarded.
+     */
+    public synchronized void rememberServerVersion(long channelId, UUID serverVersion,
+                                                   UUID clientVersion) throws KeyStoreUnavailableException {
+        if (serverVersion == null || clientVersion == null) {
+            return;
+        }
+
+        final byte[] stored = blobs.load(serverMapAlias(channelId));
+        final List<byte[]> pairs = new ArrayList<>();
+
+        if (stored != null && stored.length % MAP_ENTRY_LENGTH == 0) {
+            for (int offset = 0; offset + MAP_ENTRY_LENGTH <= stored.length; offset += MAP_ENTRY_LENGTH) {
+                if (isUuidAt(stored, offset, serverVersion)) {
+                    continue;
+                }
+
+                final byte[] pair = new byte[MAP_ENTRY_LENGTH];
+                System.arraycopy(stored, offset, pair, 0, MAP_ENTRY_LENGTH);
+                pairs.add(pair);
+            }
+        }
+
+        final byte[] fresh = new byte[MAP_ENTRY_LENGTH];
+        writeUuid(serverVersion, fresh, 0);
+        writeUuid(clientVersion, fresh, UUID_LENGTH_BYTES);
+        pairs.add(fresh);
+
+        while (pairs.size() > MAX_HISTORY) {
+            pairs.remove(0);
+        }
+
+        final byte[] packed = new byte[pairs.size() * MAP_ENTRY_LENGTH];
+        for (int i = 0; i < pairs.size(); ++i) {
+            System.arraycopy(pairs.get(i), 0, packed, i * MAP_ENTRY_LENGTH, MAP_ENTRY_LENGTH);
+        }
+
+        blobs.put(serverMapAlias(channelId), packed);
+    }
+
+    /**
+     * @return the key version this device holds for the server's key row {@code serverVersion}, or
+     * {@code null} when this device never took part in that rotation - which is precisely the case of
+     * a payload it cannot read, and the only way to name the key it is missing
+     */
+    public synchronized UUID clientVersionFor(long channelId, UUID serverVersion) {
+        if (serverVersion == null) {
+            return null;
+        }
+
+        final byte[] stored = blobs.load(serverMapAlias(channelId));
+        if (stored == null || stored.length % MAP_ENTRY_LENGTH != 0) {
+            return null;
+        }
+
+        for (int offset = 0; offset + MAP_ENTRY_LENGTH <= stored.length; offset += MAP_ENTRY_LENGTH) {
+            if (isUuidAt(stored, offset, serverVersion)) {
+                return readUuid(stored, offset + UUID_LENGTH_BYTES);
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Forgets a channel's key, its history and its server-version map, e.g. after the channel was
+     * deleted.
      */
     public synchronized void forget(long channelId) {
         blobs.remove(currentAlias(channelId));
         blobs.remove(historyAlias(channelId));
+        blobs.remove(serverMapAlias(channelId));
 
         ++keyEpoch;
     }
@@ -326,6 +468,22 @@ public class ChannelKeyRegistry {
         }
 
         return imported;
+    }
+
+    /**
+     * Whether {@code version} is one of the keys this device already replaced on {@code channelId}.
+     * Such a key stays readable through {@link #decryptCandidates(long)} but must never become the
+     * current one again, because the version uuids are random and carry no ordering that could
+     * otherwise tell a replayed envelope from a newer rotation.
+     */
+    private boolean isSuperseded(long channelId, UUID version) {
+        for (final KeyVersion superseded : readHistory(channelId)) {
+            if (superseded.version().equals(version)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private KeyVersion currentKeyVersion(long channelId) {

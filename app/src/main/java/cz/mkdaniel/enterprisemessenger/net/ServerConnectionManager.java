@@ -18,8 +18,10 @@ import java.util.LinkedHashMap;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -83,6 +85,17 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
      */
     private static final int HISTORY_CACHE_MAX_ENTRIES = 512;
     /**
+     * How many deliveries of one key envelope this device tolerates before it acknowledges the
+     * envelope and lets it go, see {@link #answerKeyEnvelopeFailure(long, byte[])}.
+     */
+    private static final int MAX_KEY_ENVELOPE_ATTEMPTS = 3;
+    /**
+     * How often one channel may ask its members for missing keys during a session, and how far apart
+     * those asks are. See {@link #requestMissingKeys(long, List)}.
+     */
+    private static final int MAX_KEY_REQUESTS_PER_SESSION = 3;
+    private static final long KEY_REQUEST_COOLDOWN_MS = 10 * 60 * 1000L;
+    /**
      * Reported when the server answers 403 to a CRUD call: the session is fine, the role is not.
      */
     private static final String ERROR_PERMISSION_DENIED = "You do not have permission to do that on this server";
@@ -131,6 +144,24 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
     private final LruCache<Long, Long> historyUndecryptableAtEpoch =
             new LruCache<>(HISTORY_CACHE_MAX_ENTRIES);
     /**
+     * Deliveries of a key envelope this device failed to open, counted per envelope fingerprint and
+     * only for the lifetime of this process. See {@link #answerKeyEnvelopeFailure(long, byte[])}.
+     */
+    private final Map<String, Integer> undeliverableKeyEnvelopes = new ConcurrentHashMap<>();
+    /**
+     * When this device last asked the other members of a channel for keys it is missing, and how often
+     * it did during this session. A request is an ordinary message stored in the channel's history, so
+     * it is rate-limited and capped: asking repeatedly for a key nobody in the channel holds would only
+     * fill the channel with handshake traffic.
+     */
+    private final Map<Long, Long> keyRequestSentAt = new ConcurrentHashMap<>();
+    private final Map<Long, Integer> keyRequestCount = new ConcurrentHashMap<>();
+    /**
+     * Offers already applied, by fingerprint, so a page of history that is re-read every few seconds
+     * does not reopen the same key blob each time.
+     */
+    private final Set<String> appliedKeyOffers = ConcurrentHashMap.newKeySet();
+    /**
      * Normalized {@code https://host:port} of the physical server, from {@code @string/server_ip}.
      */
     private final String currentServerHTTPIp;
@@ -153,12 +184,20 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
     private String lastRegisterError = "";
     private long visibleChannelId;
     /**
-     * Symmetric key of the channel the user is currently chatting in, read from
-     * {@link ChannelKeyRegistry}. Chat payloads are AES-GCM ciphertext of the raw UTF-8 message
-     * text, so the server can store and queue them without being able to read them.
+     * Channel the user is currently chatting in; chat is sent to it and received from it.
+     * <p>
+     * Its key is deliberately not cached next to the id. A key held in a field of its own outlives
+     * the channel it belongs to and gets overwritten by whichever adoption happens to arrive last,
+     * so a key adopted for the channel on screen could seal a message of the channel selected here -
+     * producing a message no member of that channel can open. {@link ChannelKeyRegistry} is the only
+     * place a key is read from, always through this id.
      */
-    private volatile byte[] activeChannelKey;
     private volatile long activeChannelId = -1L;
+    /**
+     * Identity public key this device last saw on the server, so {@link #publishIdentityKeyIfStale()}
+     * costs one request per session instead of one per call.
+     */
+    private volatile String publishedPublicKey = "";
 
     private ServerConnectionManager(Context context) {
         this.context = context.getApplicationContext();
@@ -591,7 +630,6 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
                     if (channelId >= 0) {
                         if (channelId == activeChannelId) {
                             activeChannelId = -1L;
-                            activeChannelKey = null;
                         }
                         if (channelId == visibleChannelId) {
                             visibleChannelId = -1L;
@@ -841,6 +879,7 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
                 // Snapshot of the key state: a message written off as unreadable is retried as soon
                 // as this device gains a key, and not one poll before.
                 final long keyEpoch = channelKeys.keyEpoch();
+                final List<UUID> missingRows = new ArrayList<>();
                 int reused = 0;
                 int unreadable = 0;
 
@@ -887,6 +926,14 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
                             if (serverMessageId >= 0) {
                                 historyUndecryptableAtEpoch.put(serverMessageId, keyEpoch);
                             }
+
+                            // The server's key row names the rotation this payload needs. A member
+                            // that took part in it can map that row to a key and offer it back.
+                            final UUID missingRow = parseUuid(item.optString("keyVersion", ""));
+                            if (missingRow != null && !missingRows.contains(missingRow)) {
+                                missingRows.add(missingRow);
+                            }
+
                             unreadable++;
                             continue;
                         }
@@ -900,6 +947,15 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
                         ++reused;
                     }
 
+                    if (KeyRecoveryMessage.isControl(text)) {
+                        // Handshake traffic stored as an ordinary message: never shown. An offer for
+                        // this device is still consumed, which is what recovers keys that arrived while
+                        // it was offline; requests are answered only when they arrive live, so a page
+                        // of history cannot make a channel answer itself.
+                        applyKeyRecoveryOffer(channelId, text);
+                        continue;
+                    }
+
                     final String fallbackId = serverMessageId >= 0
                             ? String.valueOf(serverMessageId)
                             : String.valueOf(System.currentTimeMillis());
@@ -909,6 +965,10 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
                     long timestamp = parseOffsetDateTime(item.optString("sentAt", ""));
 
                     decrypted.add(new Message(messageId, text, normalizeSenderName(sender), timestamp));
+                }
+
+                if (!missingRows.isEmpty()) {
+                    requestMissingKeys(channelId, missingRows);
                 }
 
                 if (reused > 0 || unreadable > 0) {
@@ -964,28 +1024,36 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
     }
 
     private byte[] decryptChatPayloadForVersion(final long channelId, final byte[] ciphertext,
-                                                 final UUID keyVersion) {
-        if (keyVersion != null) {
-            for (final ChannelKeyRegistry.KeyVersion candidate : channelKeys.decryptCandidates(channelId)) {
-                if (candidate.version().equals(keyVersion)) {
-                    try {
-                        byte[] plaintext = cryptoManager.decryptPayload(ciphertext, candidate.key());
-                        Log.d(TAG, "decryptChatPayloadForVersion: Successfully decrypted with key version " + keyVersion);
-                        return plaintext;
-                    } catch (final Exception e) {
-                        Log.w(TAG, "decryptChatPayloadForVersion: Failed to decrypt with key version " + keyVersion + ": " + e.getMessage());
-                        return null;
+                                                 final UUID serverKeyVersion) {
+        if (serverKeyVersion != null) {
+            // The message names the server's key row, which is a different namespace from this
+            // device's key versions. The pairing was recorded when that rotation's envelope was
+            // opened, so the exact key can be picked instead of trying every one the channel has.
+            final UUID clientVersion = channelKeys.clientVersionFor(channelId, serverKeyVersion);
+
+            if (clientVersion != null) {
+                for (final ChannelKeyRegistry.KeyVersion candidate : channelKeys.decryptCandidates(channelId)) {
+                    if (candidate.version().equals(clientVersion)) {
+                        try {
+                            return cryptoManager.decryptPayload(ciphertext, candidate.key());
+                        } catch (final Exception e) {
+                            // The right key and a failed tag check can only mean the payload itself.
+                            Log.w(TAG, "decryptChatPayloadForVersion: key " + clientVersion
+                                    + " of server row " + serverKeyVersion + " did not open the payload of "
+                                    + ciphertext.length + " bytes: " + e.getMessage());
+
+                            return null;
+                        }
                     }
                 }
             }
-            // Expected on every history message, so it is not a warning: the version the server
-            // reports is the uuid of its own channel_key row, which describes a different rotation
-            // than the key this device holds - that one's uuid only travels inside the encrypted
-            // envelope. The candidate sweep below is what actually opens the payload.
-            Log.v(TAG, "decryptChatPayloadForVersion: server version " + keyVersion
-                    + " is not one of this device's key versions for channel " + channelId
-                    + ", sweeping candidates instead");
+
+            // Not a warning: a device that never took part in that rotation legitimately has no
+            // pairing, and the sweep below still opens anything it can read.
+            Log.v(TAG, "decryptChatPayloadForVersion: no key of channel " + channelId + " is paired with"
+                    + " server row " + serverKeyVersion + ", sweeping candidates instead");
         }
+
         return decryptChatPayload(channelId, ciphertext);
     }
 
@@ -1113,7 +1181,6 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
             // The channel is gone for good, so is its key: keeping it would only grow the sealed store.
             if (channelId == activeChannelId) {
                 this.activeChannelId = -1L;
-                this.activeChannelKey = null;
             }
             if (channelId == visibleChannelId) {
                 visibleChannelId = -1L;
@@ -1192,17 +1259,16 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
                 // channel unreadable for good after a refused or unreachable request.
                 final ChannelKeyRegistry.KeyVersion candidate = channelKeys.newUnstoredKey();
 
+                // This device is one of the recipients of its own envelopes, so the server has to
+                // hold this device's current identity key as well before anything is sealed.
+                publishIdentityKeyIfStale();
+
                 final JSONArray envelopes = new JSONArray();
                 for (long peerId : memberIds) {
-                    byte[] peerSecret = peerSecrets.secret(peerId);
-                    if (peerSecret == null) {
-                        final RestResponse uKeyRes = executeGet(String.format(Locale.US, "/api/users/%d/key", peerId));
-                        final JSONObject uKeyJson = uKeyRes.isSuccessful() ? uKeyRes.asJson() : null;
-                        if (uKeyJson != null) {
-                            ensurePeerSecret(peerId, uKeyJson.optString("publicKey", ""));
-                            peerSecret = peerSecrets.secret(peerId);
-                        }
-                    }
+                    // Always derived from the peer's current public key, never from the cached
+                    // secret: a peer that replaced its identity key pair cannot open an envelope
+                    // sealed with the old one, and nothing announces that it did.
+                    final byte[] peerSecret = refreshPeerSecret(peerId);
                     if (peerSecret == null) {
                         postFailure(callback, "Could not establish encryption secret for member " + peerId);
                         return;
@@ -1292,17 +1358,16 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
                 // channel unreadable for good after a refused or unreachable request.
                 final ChannelKeyRegistry.KeyVersion candidate = channelKeys.newUnstoredKey();
 
+                // This device is one of the recipients of its own envelopes, so the server has to
+                // hold this device's current identity key as well before anything is sealed.
+                publishIdentityKeyIfStale();
+
                 final JSONArray envelopes = new JSONArray();
                 for (long peerId : memberIds) {
-                    byte[] peerSecret = peerSecrets.secret(peerId);
-                    if (peerSecret == null) {
-                        final RestResponse uKeyRes = executeGet(String.format(Locale.US, "/api/users/%d/key", peerId));
-                        final JSONObject uKeyJson = uKeyRes.isSuccessful() ? uKeyRes.asJson() : null;
-                        if (uKeyJson != null) {
-                            ensurePeerSecret(peerId, uKeyJson.optString("publicKey", ""));
-                            peerSecret = peerSecrets.secret(peerId);
-                        }
-                    }
+                    // Always derived from the peer's current public key, never from the cached
+                    // secret: a peer that replaced its identity key pair cannot open an envelope
+                    // sealed with the old one, and nothing announces that it did.
+                    final byte[] peerSecret = refreshPeerSecret(peerId);
                     if (peerSecret == null) {
                         postFailure(callback, "Could not establish encryption secret for member " + peerId);
                         return;
@@ -1348,10 +1413,8 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
         try {
             channelKeys.adoptChannelKey(channelId, key.version(), key.key());
 
-            if (channelId == activeChannelId) {
-                this.activeChannelKey = key.key();
-            }
-
+            // Nothing else to update: the key is read back from the registry through the channel id,
+            // so an adoption takes effect for the next message of that channel immediately.
             Log.d(TAG, "Adopted the key the server just distributed for channel " + channelId);
         } catch (final Exception exception) {
             Log.e(TAG, "The server accepted the new key of channel " + channelId
@@ -1549,7 +1612,6 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
         Log.w(TAG, "Authentication error (" + statusCode + "): " + message + ". Clearing session and disconnecting.");
         this.jwtToken = "";
         this.jwtTokenIssuer = "";
-        this.activeChannelKey = null;
         AccountStore accountStore = new AccountStore(context);
         accountStore.clearSession();
         webSocketClient.disconnect();
@@ -1780,8 +1842,6 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
         try {
             final byte[] key = channelKeys.currentKey(id);
 
-            this.activeChannelKey = key;
-
             if (key == null) {
                 // Not a failure to report here: a channel the administrator just created legitimately
                 // has no key until a second member is added, and the user is told when he is actually
@@ -1793,6 +1853,11 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
                 if (!ensureJwt().isEmpty()) {
                     Log.d(TAG, "Selected channel " + id + "; membership is provided by the server");
                 }
+
+                // Before anyone is asked to hand a key over: peers seal envelopes for the public key
+                // the server holds, so a stale copy of this device's key leaves this channel
+                // permanently unreadable here.
+                publishIdentityKeyIfStale();
 
                 final RestResponse membership = executeGet(
                         String.format(Locale.US, "/api/channels/%d/members", id));
@@ -1822,7 +1887,6 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
             // No usable KeyStore means no channel key can be persisted, so chat cannot be secured here.
             // The old (publicly recomputable) key is used for reading only; nothing is sent.
             Log.e(TAG, "No channel key available for channel " + id, exception);
-            this.activeChannelKey = null;
             notifyError("Encryption keys are unavailable - open a channel after restarting the app");
         }
     }
@@ -1887,8 +1951,16 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
      * {@code senderUserId} and adopts the channel key inside it. The {@code channelId} and the key
      * version are read from the <i>decrypted</i> payload, so neither can be forged by whoever the
      * server claims sent the packet.
+     *
+     * @return {@code true} when the queue may move past this envelope - the key inside it is now this
+     * device's key, it already was, or the envelope is too malformed for any retry to open it.
+     * {@code false} when only a transient reason stopped it, in which case the caller withholds the
+     * acknowledgement so that the server keeps the envelope queued instead of deleting the key.
      */
-    private void adoptUnicastChannelKey(final long senderUserId, final byte[] cipher_text) {
+    private boolean adoptUnicastChannelKey(final long senderUserId, final UUID serverKeyVersion,
+                                           final byte[] cipher_text) {
+        final String fingerprint = envelopeFingerprint(cipher_text);
+
         try {
             byte[] peerSecret = peerSecrets.secret(senderUserId);
             byte[] plain = null;
@@ -1907,16 +1979,22 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
                             : CryptoManager.decodePeerKey(senderKeyJson.optString("publicKey", ""));
 
                     if (senderKey == null) {
-                        Log.w(TAG, "No shared ECDH secret with peer " + senderUserId + " (could not fetch public key), dropping rotated key");
+                        // The peer's public key is one REST call away and may come back at any time, so
+                        // this is worth another delivery rather than throwing the key away.
+                        Log.w(TAG, "No shared ECDH secret with peer " + senderUserId
+                                + " and no public key to derive one (envelope " + fingerprint + ")");
 
-                        return;
+                        return false;
                     }
 
                     peerSecrets.store(senderUserId, cryptoManager.deriveSharedSecret(senderKey));
                     peerSecret = peerSecrets.secret(senderUserId);
 
                     if (peerSecret == null) {
-                        return;
+                        Log.w(TAG, "The secret derived with peer " + senderUserId
+                                + " could not be sealed (envelope " + fingerprint + ")");
+
+                        return false;
                     }
                 }
 
@@ -1928,16 +2006,26 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
                         Log.w(TAG, "Failed to decrypt unicast from peer " + senderUserId + " with cached secret (peer may have rotated identity key). Retrying with fresh public key from server.");
                         peerSecret = null; // force fetch on next iteration
                     } else {
-                        Log.w(TAG, "Failed to decrypt unicast from peer " + senderUserId + " even after fetching fresh public key: " + e.getMessage());
-                        return;
+                        // Either the envelope was sealed for an identity key this device no longer has,
+                        // or it is not an envelope at all. A wrong secret is not cleared by retrying,
+                        // but the attempt counter still has to see it before it is dropped.
+                        Log.w(TAG, "Failed to decrypt unicast from peer " + senderUserId
+                                + " even after fetching fresh public key (envelope " + fingerprint
+                                + "): " + e.getMessage());
+
+                        return false;
                     }
                 }
             }
 
             if (plain == null || plain.length < Long.BYTES + 2 * Long.BYTES + 32) {
-                Log.w(TAG, "A key rotation unicast carried an incomplete envelope, ignoring it");
+                // Structurally incomplete: no delivery of this packet can open it, so the queue is
+                // told to move on rather than stall behind it forever.
+                Log.e(TAG, "A key rotation unicast from peer " + senderUserId + " carried an incomplete"
+                        + " envelope of " + (plain == null ? 0 : plain.length) + " bytes (envelope "
+                        + fingerprint + "), dropping it");
 
-                return;
+                return true;
             }
 
             final ByteBuffer plainBuffer = ByteBuffer.wrap(plain);
@@ -1948,19 +2036,349 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
             final byte[] key = new byte[32];
             plainBuffer.get(key);
 
+            // Pair the two namespaces while both are in hand: a history message names the server's
+            // key row, and without this record the reader cannot tell which of its keys sealed it.
+            try {
+                channelKeys.rememberServerVersion(channelId, serverKeyVersion, version);
+            } catch (final Exception e) {
+                // The mapping is an optimisation and a diagnostic; losing it must not cost the key.
+                Log.w(TAG, "Could not record that server row " + serverKeyVersion + " of channel "
+                        + channelId + " is key " + version + ": " + e.getMessage());
+            }
+
             final boolean adopted = channelKeys.adoptChannelKey(channelId, version, key);
             if (!adopted) {
-                // Already this device's key (its own unicast echoed back, or a duplicate delivery).
+                // Already this device's key - its own unicast echoed back, a duplicate delivery, or a
+                // version it superseded earlier. Nothing to learn from it, so the queue advances.
+                Log.d(TAG, "Key envelope " + fingerprint + " from peer " + senderUserId + " carried key "
+                        + version + ", which channel " + channelId + " already knows");
+
+                return true;
+            }
+
+            // The adopted key is left in the registry under its own channel and is not remembered
+            // here: a unicast for one channel must never become the key another channel seals with.
+            undeliverableKeyEnvelopes.remove(fingerprint);
+            Log.d(TAG, "Adopted key " + version + " of channel " + channelId + " from peer " + senderUserId);
+
+            return true;
+        } catch (final Exception exception) {
+            // A KeyStore or REST hiccup is exactly the transient failure a retry exists for.
+            Log.w(TAG, "A key rotation unicast from peer " + senderUserId + " (envelope " + fingerprint
+                    + ") could not be opened", exception);
+
+            return false;
+        }
+    }
+
+    /**
+     * Answers a key envelope this device could not open. The server deletes a queued packet only when
+     * the recipient acknowledges it, so staying silent keeps the envelope at the head of the queue
+     * and the key is offered again on the next reconnect instead of being destroyed.
+     * <p>
+     * Silence is not free: the server sends only the head, so an envelope that never opens would
+     * stall every message queued behind it. After a few attempts in one session it is acknowledged
+     * and dropped, which costs the key of one rotation and keeps the channel usable.
+     */
+    private void answerKeyEnvelopeFailure(final long senderUserId, final byte[] envelope) {
+        final String fingerprint = envelopeFingerprint(envelope);
+        final int attempts = undeliverableKeyEnvelopes.merge(fingerprint, 1, Integer::sum);
+
+        if (attempts < MAX_KEY_ENVELOPE_ATTEMPTS) {
+            Log.w(TAG, "Key envelope " + fingerprint + " from peer " + senderUserId
+                    + " stayed sealed (attempt " + attempts + " of " + MAX_KEY_ENVELOPE_ATTEMPTS
+                    + "); leaving it queued so the server offers it again");
+
+            return;
+        }
+
+        undeliverableKeyEnvelopes.remove(fingerprint);
+        Log.e(TAG, "Key envelope " + fingerprint + " from peer " + senderUserId + " did not open after "
+                + attempts + " deliveries; acknowledging it so the rest of the queue can arrive. Messages"
+                + " sealed with that key stay unreadable until a member re-keys the channel");
+
+        sendAcknowledgement();
+    }
+
+    /**
+     * Short label identifying one key envelope, used only to count its deliveries. A digest of the
+     * ciphertext is safe to log and tells two envelopes apart without saying anything about the key.
+     */
+    private static String envelopeFingerprint(final byte[] envelope) {
+        try {
+            final byte[] digest = java.security.MessageDigest.getInstance("SHA-256").digest(envelope);
+            final StringBuilder hex = new StringBuilder(16);
+
+            for (int i = 0; i < 8; ++i) {
+                hex.append(String.format(Locale.US, "%02x", digest[i]));
+            }
+
+            return hex.toString();
+        } catch (final Exception e) {
+            return Integer.toHexString(Arrays.hashCode(envelope));
+        }
+    }
+
+    /**
+     * Handles a {@link KeyRecoveryMessage} that arrived live. Must run off the WebSocket thread: an
+     * answer needs the requester's public key, which is a REST call.
+     */
+    private void handleKeyRecoveryMessage(final long channelId, final String text) {
+        final KeyRecoveryMessage.Request request = KeyRecoveryMessage.parseRequest(text);
+
+        if (request != null) {
+            answerKeyRecoveryRequest(channelId, request);
+            return;
+        }
+
+        applyKeyRecoveryOffer(channelId, text);
+    }
+
+    /**
+     * Answers a member's request for keys this device holds. The answer is sealed with the ECDH secret
+     * shared with the requester rather than with the channel key, so a member who joins later and is
+     * not meant to read that history cannot pick the keys up off the channel.
+     */
+    private void answerKeyRecoveryRequest(final long channelId, final KeyRecoveryMessage.Request request) {
+        final long myUserId = new AccountStore(context).getUserId();
+
+        if (myUserId <= 0 || request.requesterUserId() == myUserId || !webSocketClient.isConnected()) {
+            return;
+        }
+
+        final Set<UUID> seen = new java.util.HashSet<>();
+        final List<ChannelKeyRegistry.KeyVersion> held = new ArrayList<>();
+
+        for (final UUID row : request.serverRows()) {
+            final UUID clientVersion = channelKeys.clientVersionFor(channelId, row);
+
+            if (clientVersion == null || !seen.add(clientVersion)) {
+                continue;
+            }
+
+            for (final ChannelKeyRegistry.KeyVersion candidate : channelKeys.decryptCandidates(channelId)) {
+                if (candidate.version().equals(clientVersion)) {
+                    held.add(candidate);
+                }
+            }
+        }
+
+        if (held.isEmpty()) {
+            Log.d(TAG, "Member " + request.requesterUserId() + " asks for keys of channel " + channelId
+                    + " that this device does not hold either");
+
+            return;
+        }
+
+        final byte[] secret = refreshPeerSecret(request.requesterUserId());
+
+        if (secret == null) {
+            Log.w(TAG, "Could not derive a secret with member " + request.requesterUserId()
+                    + ", so the keys of channel " + channelId + " could not be offered");
+
+            return;
+        }
+
+        try {
+            final byte[] sealed = cryptoManager.encryptPayload(KeyRecoveryMessage.packKeys(held), secret);
+
+            sendChatPayload(channelId, KeyRecoveryMessage
+                    .encodeOffer(request.requesterUserId(), myUserId, sealed)
+                    .getBytes(StandardCharsets.UTF_8));
+
+            Log.i(TAG, "Offered " + held.size() + " key(s) of channel " + channelId + " to member "
+                    + request.requesterUserId());
+        } catch (final Exception e) {
+            Log.w(TAG, "Could not offer the keys of channel " + channelId + ": " + e.getMessage());
+        }
+    }
+
+    /**
+     * Adopts the keys an offer carries, if it is addressed to this device and opens with the secret it
+     * shares with the member who sent it. Recovered keys become readable without becoming the current
+     * one, so history opens again while new messages keep going out under the shared key.
+     */
+    private void applyKeyRecoveryOffer(final long channelId, final String text) {
+        final KeyRecoveryMessage.Offer offer = KeyRecoveryMessage.parseOffer(text);
+
+        if (offer == null) {
+            // A request sitting in the history is not answered: only live requests are, or every poll
+            // of every member would answer the same page again.
+            return;
+        }
+
+        final long myUserId = new AccountStore(context).getUserId();
+        final String fingerprint = envelopeFingerprint(text.getBytes(StandardCharsets.UTF_8));
+
+        if (myUserId <= 0 || offer.targetUserId() != myUserId || !appliedKeyOffers.add(fingerprint)) {
+            return;
+        }
+
+        final byte[] secret = refreshPeerSecret(offer.responderUserId());
+
+        if (secret == null) {
+            appliedKeyOffers.remove(fingerprint);
+
+            return;
+        }
+
+        try {
+            final byte[] blob = cryptoManager.decryptPayload(offer.sealedKeys(), secret);
+            int adopted = 0;
+
+            for (final ChannelKeyRegistry.KeyVersion key : KeyRecoveryMessage.unpackKeys(blob)) {
+                if (channelKeys.addReadableKey(channelId, key.version(), key.key())) {
+                    adopted++;
+                }
+            }
+
+            Log.i(TAG, "Recovered " + adopted + " key(s) of channel " + channelId + " from member "
+                    + offer.responderUserId() + "; unreadable history is retried on the next load");
+        } catch (final Exception e) {
+            // Let a later delivery of the same offer try again.
+            appliedKeyOffers.remove(fingerprint);
+            Log.w(TAG, "A key offer for channel " + channelId + " could not be opened: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Asks the other members of {@code channelId} for the keys behind the server's key rows this device
+     * could not open. Rate-limited and capped per session: the request is an ordinary message the
+     * server stores in the channel, so repeating it forever would fill the channel with handshake.
+     */
+    private void requestMissingKeys(final long channelId, final List<UUID> rows) {
+        final long now = System.currentTimeMillis();
+        final Long sentAt = keyRequestSentAt.get(channelId);
+        final Integer sentBefore = keyRequestCount.get(channelId);
+        final int sent = sentBefore == null ? 0 : sentBefore;
+
+        if (sent >= MAX_KEY_REQUESTS_PER_SESSION
+                || (sentAt != null && now - sentAt < KEY_REQUEST_COOLDOWN_MS)
+                || !webSocketClient.isConnected()) {
+            return;
+        }
+
+        final long myUserId = new AccountStore(context).getUserId();
+
+        if (myUserId <= 0) {
+            return;
+        }
+
+        keyRequestSentAt.put(channelId, now);
+        keyRequestCount.put(channelId, sent + 1);
+
+        try {
+            sendChatPayload(channelId,
+                    KeyRecoveryMessage.encodeRequest(myUserId, rows).getBytes(StandardCharsets.UTF_8));
+
+            Log.i(TAG, "Asked the members of channel " + channelId + " for " + rows.size()
+                    + " key(s) this device is missing (attempt " + (sent + 1)
+                    + " of " + MAX_KEY_REQUESTS_PER_SESSION + ")");
+        } catch (final Exception e) {
+            Log.w(TAG, "Could not ask for the missing keys of channel " + channelId + ": " + e.getMessage());
+        }
+    }
+
+    /**
+     * Makes sure the server holds this device's current identity public key, publishing it when the
+     * server still carries an older one.
+     * <p>
+     * The key pair lives in the Android KeyStore and is regenerated whenever that entry is lost - a
+     * reset of the encryption identity, cleared app storage, a reinstall on an emulator that keeps
+     * the account. The server keeps offering whatever key was sent at registration, so every peer
+     * then seals channel-key envelopes for a key pair this device no longer owns. Nothing the
+     * recipient can do opens such an envelope - the wrong copy is the sender's - and the channel stays
+     * unreadable here forever, which is what "Failed to decrypt unicast from peer N even after
+     * fetching fresh public key" means in the log.
+     * <p>
+     * The server accepts a replacement at {@code POST /api/users/me/keys}; comparing the two keys
+     * first keeps the normal case at a single request.
+     */
+    private void publishIdentityKeyIfStale() {
+        try {
+            final String localKey = cryptoManager.getPublicKeyBase64();
+
+            if (localKey == null || localKey.isEmpty() || localKey.equals(publishedPublicKey)) {
                 return;
             }
 
-            if (channelId == activeChannelId || channelId == visibleChannelId) {
-                this.activeChannelKey = key;
+            final long myUserId = resolveUserId();
+            if (myUserId < 0) {
+                return;
             }
 
-            Log.d(TAG, "Adopted key " + version + " of channel " + channelId + " from peer " + senderUserId);
-        } catch (final Exception exception) {
-            Log.w(TAG, "A key rotation unicast from peer " + senderUserId + " could not be opened", exception);
+            final RestResponse registered = executeGet(
+                    String.format(Locale.US, "/api/users/%d/key", myUserId));
+            final JSONObject registeredJson = registered.isSuccessful() ? registered.asJson() : null;
+            final String serverKey = registeredJson == null
+                    ? ""
+                    : registeredJson.optString("publicKey", "");
+
+            if (localKey.equals(serverKey)) {
+                publishedPublicKey = localKey;
+
+                return;
+            }
+
+            final JSONObject body = new JSONObject();
+            body.put("publicKey", localKey);
+
+            final RestResponse published = executePost("/api/users/me/keys", body);
+            if (!published.isSuccessful()) {
+                Log.e(TAG, "Could not publish this device's identity public key: HTTP "
+                        + published.statusCode() + ". Peers will keep sealing keys for a key pair"
+                        + " this device may no longer own");
+
+                return;
+            }
+
+            publishedPublicKey = localKey;
+
+            // Every secret derived with the old private key is now worthless, and keeping it would
+            // only produce envelopes nobody can open.
+            peerSecrets.forgetAll();
+
+            Log.i(TAG, "Published this device's identity public key; the server had held a different"
+                    + " one, so every cached peer secret was dropped");
+        } catch (final Exception e) {
+            Log.w(TAG, "The identity public key check failed: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Re-derives and re-seals the ECDH secret with {@code peerId} from the public key the server holds
+     * for it, overwriting whatever this device cached.
+     * <p>
+     * A cached secret stays valid only while the peer keeps its identity key pair, and the server
+     * gives no signal when a peer replaces it. An envelope sealed with a stale secret is unopenable by
+     * its recipient no matter what the recipient does, so the paths that hand keys out always derive
+     * from the server's current copy instead of trusting the cache.
+     *
+     * @return the shared secret, or {@code null} when the peer has no usable public key on the server
+     */
+    private byte[] refreshPeerSecret(final long peerId) {
+        final RestResponse keyResponse = executeGet(
+                String.format(Locale.US, "/api/users/%d/key", peerId));
+        final JSONObject keyJson = keyResponse.isSuccessful() ? keyResponse.asJson() : null;
+        final byte[] decodedPeerKey = keyJson == null
+                ? null
+                : CryptoManager.decodePeerKey(keyJson.optString("publicKey", ""));
+
+        if (decodedPeerKey == null) {
+            Log.w(TAG, "Peer " + peerId + " has no usable public key on the server");
+
+            return null;
+        }
+
+        try {
+            final byte[] secret = cryptoManager.deriveSharedSecret(decodedPeerKey);
+            peerSecrets.store(peerId, secret);
+
+            return secret;
+        } catch (final Exception e) {
+            Log.w(TAG, "Could not derive a secret with peer " + peerId + ": " + e.getMessage());
+
+            return null;
         }
     }
 
@@ -2242,38 +2660,53 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
                 return;
             }
 
-            // Only this device's sealed channel key can seal an outgoing message. The legacy
-            // id-derived key is deliberately not offered here: it is recomputable by anyone who knows
-            // the channel id, including the server.
-            final byte[] key = activeChannelKey != null
-                    ? activeChannelKey
-                    : (activeChannelId >= 0 ? channelKeys.currentKey(activeChannelId) : null);
-
-            if (key == null) {
-                notifyError("This channel has no key on this device yet - an administrator has to add a member for the key to be distributed");
-                return;
-            }
-
-            this.activeChannelKey = key;
-
-            final var payloadBytes = cryptoManager.encryptPayload(text.getBytes(StandardCharsets.UTF_8), key);
-            if (activeChannelId < 0 || activeChannelId > 0xffff_ffffL) {
+            // The id is read once: the user can select another channel while this runs, and a payload
+            // sealed with one channel's key must never be stamped with another channel's id.
+            final long channelId = activeChannelId;
+            if (channelId < 0 || channelId > 0xffff_ffffL) {
                 notifyError("Invalid channel selected");
                 return;
             }
 
-            final var messagePayload = ByteBuffer.allocate(Integer.BYTES + payloadBytes.length);
-            messagePayload.putInt((int) activeChannelId);
-            messagePayload.put(payloadBytes);
+            // The key of that channel and of no other, taken from the registry. The legacy id-derived
+            // key is deliberately not offered either: it is recomputable by anyone who knows the
+            // channel id, including the server.
+            if (channelKeys.currentKey(channelId) == null) {
+                notifyError("This channel has no key on this device yet - an administrator has to add a member for the key to be distributed");
+                return;
+            }
 
-            final var messagePacket = new Packet(Packet.TYPE_CHAT_MESSAGE, messagePayload.array());
-            webSocketClient.sendPacketAsync(messagePacket);
+            sendChatPayload(channelId, text.getBytes(StandardCharsets.UTF_8));
 
-            Log.d(TAG, "Sent CHAT_MESSAGE to channel " + activeChannelId + " (" + payloadBytes.length + " bytes)");
+            Log.d(TAG, "Sent CHAT_MESSAGE to channel " + channelId);
         } catch (final Exception e) {
             Log.e(TAG, "Failed to send chat message packet", e);
             notifyError("Failed to send message: " + e.getMessage());
         }
+    }
+
+    /**
+     * Seals {@code plaintext} with the current key of {@code channelId} and sends it as a
+     * {@code CHAT_MESSAGE}: {@code [4-byte channel id][AES-GCM ciphertext]}. The server stores the
+     * bytes and queues them for the other members verbatim, never seeing the plaintext.
+     * <p>
+     * The key-recovery handshake rides on this same path, because a chat message is the only frame the
+     * server delivers to every member of a channel.
+     */
+    private void sendChatPayload(final long channelId, final byte[] plaintext) throws Exception {
+        final byte[] key = channelKeys.currentKey(channelId);
+
+        if (key == null) {
+            throw new IllegalStateException("Channel " + channelId + " has no key on this device");
+        }
+
+        final var payloadBytes = cryptoManager.encryptPayload(plaintext, key);
+
+        final var messagePayload = ByteBuffer.allocate(Integer.BYTES + payloadBytes.length);
+        messagePayload.putInt((int) channelId);
+        messagePayload.put(payloadBytes);
+
+        webSocketClient.sendPacketAsync(new Packet(Packet.TYPE_CHAT_MESSAGE, messagePayload.array()));
     }
 
     public void sendReadReceipt(long channelId, long messageId) {
@@ -2304,9 +2737,9 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
     public void clearSessionState() {
         this.jwtToken = "";
         this.jwtTokenIssuer = "";
-        this.activeChannelKey = null;
         this.activeChannelId = -1L;
         clearHistoryCaches();
+        undeliverableKeyEnvelopes.clear();
         webSocketClient.disconnect();
     }
 
@@ -2322,8 +2755,9 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 
     /**
      * Decrypts a broadcast chat payload. A message can arrive before the user opened that
-     * channel (or while browsing another one), so the active channel key is tried first and the
-     * currently visible channel key second; a wrong key only fails the GCM tag check.
+     * channel (or while browsing another one), so the keys of the message's channel, of the selected
+     * channel and of the channel on screen are all tried, each current version first. A wrong key
+     * only fails the GCM tag check, so trying them in order is safe.
      *
      * @return the plaintext envelope, or {@code null} when no known key opens the payload
      */
@@ -2332,10 +2766,6 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
         // once. ByteBuffer hashes and compares the bytes it wraps without copying them, which keeps
         // this linear now that a channel can carry a long key history.
         final LinkedHashMap<ByteBuffer, byte[]> candidates = new LinkedHashMap<>();
-
-        if (activeChannelKey != null) {
-            candidates.put(ByteBuffer.wrap(activeChannelKey), activeChannelKey);
-        }
 
         for (final long chId : new long[]{channelId, activeChannelId, visibleChannelId}) {
             if (chId < 0) {
@@ -2370,7 +2800,17 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
             }
         }
 
-        Log.w(TAG, "decryptChatPayload: Failed to decrypt message for channel " + channelId + " with " + candidates.size() + " candidate keys");
+        final StringBuilder held = new StringBuilder();
+        for (final ChannelKeyRegistry.KeyVersion version : channelKeys.decryptCandidates(channelId)) {
+            if (held.length() > 0) {
+                held.append(", ");
+            }
+            held.append(version.version());
+        }
+
+        Log.w(TAG, "decryptChatPayload: no key of channel " + channelId + " opens this payload of "
+                + ciphertext.length + " bytes; this device holds " + candidates.size()
+                + " candidate keys, versions [" + held + "]");
         return null;
     }
 
@@ -2434,6 +2874,13 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 
                     final String messageText = new String(plaintext, StandardCharsets.UTF_8);
 
+                    if (KeyRecoveryMessage.isControl(messageText)) {
+                        // Handshake traffic that rides on the chat channel: it never reaches the
+                        // message list, and answering it may call REST, so it is not done here.
+                        executor.execute(() -> handleKeyRecoveryMessage(packetChannelId, messageText));
+                        break;
+                    }
+
                     notifyMessageReceived(new Message(
                             messageId,
                             messageText,
@@ -2488,17 +2935,23 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
                     }
 
                     final var peerId = wrappedPayload.getLong();
-                    wrappedPayload.getLong(); // skip server version MSB
-                    wrappedPayload.getLong(); // skip server version LSB
+                    // The header carries the server's own key-row uuid. It is not the version of the
+                    // key inside the envelope - the two namespaces are unrelated - but this packet is
+                    // the only place they ever appear together, so the pair is worth keeping.
+                    final UUID serverKeyVersion =
+                            new UUID(wrappedPayload.getLong(), wrappedPayload.getLong());
 
                     final var ciphertextrcv = new byte[wrappedPayload.remaining()];
                     wrappedPayload.get(ciphertextrcv);
 
                     executor.execute(() -> {
-                        try {
-                            adoptUnicastChannelKey(peerId, ciphertextrcv);
-                        } finally {
+                        // The acknowledgement is what deletes the envelope from the server's queue, so
+                        // it is sent only once the key inside it is safely stored. A failure leaves
+                        // the envelope queued for another delivery instead of destroying the key.
+                        if (adoptUnicastChannelKey(peerId, serverKeyVersion, ciphertextrcv)) {
                             sendAcknowledgement();
+                        } else {
+                            answerKeyEnvelopeFailure(peerId, ciphertextrcv);
                         }
                     });
                     acknowledgementDeferred = true;

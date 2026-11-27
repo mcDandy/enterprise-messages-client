@@ -250,4 +250,88 @@ public class ChannelKeyRegistryTest {
         registry.forgetAll();
         assertTrue(registry.keyEpoch() > previous);
     }
+
+    @Test
+    public void replayedEnvelopeOfASupersededKeyDoesNotDowngradeTheChannel() throws Exception {
+        final UUID firstVersion = registry.ensureChannelKey(CHANNEL).version();
+        final byte[] firstKey = registry.currentKey(CHANNEL);
+
+        final byte[] fromPeer = new byte[KEY_LENGTH];
+        java.util.Arrays.fill(fromPeer, (byte) 0x5A);
+        final UUID newerVersion = UUID.randomUUID();
+        assertTrue(registry.adoptChannelKey(CHANNEL, newerVersion, fromPeer));
+
+        // The server re-offers a key envelope until it is acknowledged, so an old envelope can arrive
+        // after a newer rotation had already been adopted. The version uuids are random and carry no
+        // order, so the history is the only evidence of which key is the newer one.
+        assertFalse(registry.adoptChannelKey(CHANNEL, firstVersion, firstKey));
+
+        assertArrayEquals(fromPeer, registry.currentKey(CHANNEL));
+        assertEquals(newerVersion, registry.currentVersion(CHANNEL));
+
+        // The superseded key stays readable, which is all a replay has left to offer: newest first.
+        final List<ChannelKeyRegistry.KeyVersion> candidates = registry.decryptCandidates(CHANNEL);
+        assertEquals(2, candidates.size());
+        assertEquals(newerVersion, candidates.get(0).version());
+        assertEquals(firstVersion, candidates.get(1).version());
+    }
+
+    @Test
+    public void serverRowMapNamesTheKeyVersionThatSealedAMessage() throws Exception {
+        final UUID ownVersion = registry.ensureChannelKey(CHANNEL).version();
+        final UUID serverRow = UUID.randomUUID();
+
+        assertNull(registry.clientVersionFor(CHANNEL, serverRow));
+
+        registry.rememberServerVersion(CHANNEL, serverRow, ownVersion);
+        assertEquals(ownVersion, registry.clientVersionFor(CHANNEL, serverRow));
+
+        // A later rotation reported under the same row replaces the pairing instead of leaving a
+        // stale one behind.
+        final byte[] fromPeer = new byte[KEY_LENGTH];
+        java.util.Arrays.fill(fromPeer, (byte) 0x7C);
+        final UUID peerVersion = UUID.randomUUID();
+        assertTrue(registry.adoptChannelKey(CHANNEL, peerVersion, fromPeer));
+
+        registry.rememberServerVersion(CHANNEL, serverRow, peerVersion);
+        assertEquals(peerVersion, registry.clientVersionFor(CHANNEL, serverRow));
+
+        // A rotation this device never took part in has no key to name - the precise answer for a
+        // payload it cannot read.
+        assertNull(registry.clientVersionFor(CHANNEL, UUID.randomUUID()));
+
+        registry.forget(CHANNEL);
+        assertNull(registry.clientVersionFor(CHANNEL, serverRow));
+    }
+
+    @Test
+    public void recoveredKeyBecomesReadableWithoutBecomingCurrent() throws Exception {
+        registry.ensureChannelKey(CHANNEL);
+
+        final byte[] fromPeer = new byte[KEY_LENGTH];
+        java.util.Arrays.fill(fromPeer, (byte) 0x39);
+        final UUID currentVersion = UUID.randomUUID();
+        assertTrue(registry.adoptChannelKey(CHANNEL, currentVersion, fromPeer));
+
+        final long epochBefore = registry.keyEpoch();
+        final byte[] recovered = new byte[KEY_LENGTH];
+        java.util.Arrays.fill(recovered, (byte) 0x51);
+        final UUID recoveredVersion = UUID.randomUUID();
+
+        // A key recovered from a peer has to open old messages without sending this device back to an
+        // older key for new ones.
+        assertTrue(registry.addReadableKey(CHANNEL, recoveredVersion, recovered));
+        assertEquals(currentVersion, registry.currentVersion(CHANNEL));
+        assertTrue(registry.keyEpoch() > epochBefore);
+
+        final List<ChannelKeyRegistry.KeyVersion> candidates = registry.decryptCandidates(CHANNEL);
+        assertEquals(3, candidates.size());
+        assertEquals(currentVersion, candidates.get(0).version());
+        assertEquals(recoveredVersion, candidates.get(1).version());
+
+        // Known keys are refused, including the current one and a wrong length.
+        assertFalse(registry.addReadableKey(CHANNEL, recoveredVersion, recovered));
+        assertFalse(registry.addReadableKey(CHANNEL, currentVersion, fromPeer));
+        assertFalse(registry.addReadableKey(CHANNEL, UUID.randomUUID(), new byte[KEY_LENGTH - 1]));
+    }
 }

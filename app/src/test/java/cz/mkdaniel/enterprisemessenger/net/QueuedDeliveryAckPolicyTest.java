@@ -11,6 +11,13 @@ import org.junit.Test;
  * → {@code pgmq.delete} of the oldest message). An {@code ACK} carries no packet id, so the client
  * has to acknowledge queued deliveries and nothing else: acknowledging a directly-sent packet deletes
  * an unrelated pending frame, and staying silent about a queued one stalls that user's queue.
+ * <p>
+ * The acknowledgement of a {@code UNICAST_ROTATED_KEY} is the one deliberate exception to "always
+ * answer a queued delivery": the ACK is what deletes the row, and the envelope in that row is the
+ * only copy of a channel key this device will ever receive. Acknowledging one that could not be
+ * opened destroys the key and leaves every message sealed with it unreadable forever, so
+ * {@code ServerConnectionManager} answers a key unicast only once its key is stored or already known
+ * to this device, and bounds the retries so an envelope that never opens cannot stall the queue.
  */
 public class QueuedDeliveryAckPolicyTest {
 
