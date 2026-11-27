@@ -126,8 +126,8 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
     private long visibleChannelId;
     /**
      * Symmetric key of the channel the user is currently chatting in, read from
-     * {@link ChannelKeyRegistry}. Chat payloads are AES-GCM ciphertext of a small JSON envelope, so
-     * the server can store and echo them without being able to read them.
+     * {@link ChannelKeyRegistry}. Chat payloads are AES-GCM ciphertext of the raw UTF-8 message
+     * text, so the server can store and queue them without being able to read them.
      */
     private volatile byte[] activeChannelKey;
     private volatile long activeChannelId = -1L;
@@ -774,6 +774,12 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
                     return;
                 }
 
+                final long currentUserId = resolveUserId();
+                if (currentUserId < 0) {
+                    postFailure(callback, "Could not identify your account while loading messages");
+                    return;
+                }
+
                 final List<Message> decrypted = new ArrayList<>();
                 for (int i = 0; i < messages.length(); i++) {
                     final JSONObject item = messages.optJSONObject(i);
@@ -800,21 +806,11 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 
                     final String fallbackId =
                             String.valueOf(item.optLong("id", System.currentTimeMillis()));
-                    String messageId = fallbackId;
-                    String sender = "Server User";
-                    String text = new String(plaintext, StandardCharsets.UTF_8);
+                    final String text = new String(plaintext, StandardCharsets.UTF_8);
+                    final String sender = item.optLong("senderId", -1L) == currentUserId
+                            ? "You" : "Server User";
+                    final String messageId = fallbackId;
                     long timestamp = parseOffsetDateTime(item.optString("sentAt", ""));
-
-                    if (text.startsWith("{")) {
-                        try {
-                            final JSONObject envelope = new JSONObject(text);
-                            messageId = envelope.optString("id", fallbackId);
-                            sender = envelope.optString("sender", sender);
-                            text = envelope.optString("text", text);
-                            timestamp = envelope.optLong("timestamp", timestamp);
-                        } catch (final Exception ignored) {
-                        }
-                    }
 
                     decrypted.add(new Message(messageId, text, normalizeSenderName(sender), timestamp));
                 }
@@ -2000,14 +1996,11 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
     /**
      * Encrypts and transmits a chat message packet to the server.
      * <p>
-     * The payload is the AES-GCM ciphertext ({@code [12-byte IV][ciphertext+tag]}) of a JSON
-     * envelope carrying the message id, sender and text. The server treats it as opaque bytes and
-     * broadcasts it verbatim to every session in the channel (including ours), which is how the
-     * sender's own bubble is reconciled by {@code messageId} on the way back.
-     *
-     * @param messageId stable id used to deduplicate our own echo
+     * The payload is the AES-GCM ciphertext ({@code [12-byte IV][ciphertext+tag]}) of the raw
+     * UTF-8 message text. The server treats it as opaque bytes and queues it verbatim for other
+     * channel members.
      */
-    public void sendChatMessage(String messageId, String text, String senderUsername) {
+    public void sendChatMessage(String text) {
         try {
             if (!webSocketClient.isConnected()) {
                 Log.w(TAG, "Cannot send message: Not connected to WebSocket server");
@@ -2015,12 +2008,6 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 
                 return;
             }
-
-            final var envelope = new JSONObject();
-            envelope.put("id", messageId);
-            envelope.put("sender", senderUsername == null || senderUsername.isEmpty() ? "You" : senderUsername);
-            envelope.put("text", text);
-            envelope.put("timestamp", System.currentTimeMillis());
 
             // Only this device's sealed channel key can seal an outgoing message. The legacy
             // id-derived key is deliberately not offered here: it is recomputable by anyone who knows
@@ -2036,7 +2023,7 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 
             this.activeChannelKey = key;
 
-            final var payloadBytes = cryptoManager.encryptPayload(envelope.toString().getBytes(StandardCharsets.UTF_8), key);
+            final var payloadBytes = cryptoManager.encryptPayload(text.getBytes(StandardCharsets.UTF_8), key);
             if (activeChannelId < 0 || activeChannelId > 0xffff_ffffL) {
                 notifyError("Invalid channel selected");
                 return;
@@ -2131,8 +2118,9 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
      */
     @Override
     public void onPacketReceived(final Packet packet) {
+        final byte type = packet.getType();
+        boolean acknowledgementDeferred = false;
         try {
-            final var type = packet.getType();
             final var wrappedPayload = ByteBuffer.wrap(packet.getPayload());
 
             Log.d(TAG, "Incoming packet type: 0x" + Integer.toHexString(type) + ", payload size: " + packet.getPayload().length);
@@ -2156,10 +2144,9 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
                         break;
                     }
 
-                    String messageText;
-                    String senderName = "Server User";
-                    String messageId = String.valueOf(System.currentTimeMillis());
-                    long sentAt = System.currentTimeMillis();
+                    final long receivedAt = System.currentTimeMillis();
+                    String messageId = String.valueOf(receivedAt);
+                    final String senderName = "Server User";
 
                     final ByteBuffer chatPayload = ByteBuffer.wrap(payload);
                     final long packetChannelId = chatPayload.getInt() & 0xffff_ffffL;
@@ -2177,24 +2164,13 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
                         break;
                     }
 
-                    messageText = new String(plaintext, StandardCharsets.UTF_8);
-
-                    if (messageText.startsWith("{")) {
-                        try {
-                            JSONObject jsonMsg = new JSONObject(messageText);
-                            messageText = jsonMsg.optString("text", messageText);
-                            senderName = jsonMsg.optString("sender", senderName);
-                            messageId = jsonMsg.optString("id", messageId);
-                            sentAt = jsonMsg.optLong("timestamp", sentAt);
-                        } catch (Exception ignored) {
-                        }
-                    }
+                    final String messageText = new String(plaintext, StandardCharsets.UTF_8);
 
                     notifyMessageReceived(new Message(
                             messageId,
                             messageText,
                             normalizeSenderName(senderName),
-                            sentAt));
+                            receivedAt));
 
                     if (!isChannelVisible(visibleChannelId)) {
                         NotificationHelper.showChannelMessageNotification(context, visibleChannelId, null);
@@ -2233,7 +2209,14 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
                     // The server's version identifies a row of its own channel_key table and says nothing
                     // about the key we are about to invent, so it is logged and ignored; the version that
                     // travels to the other members is ours, inside the encrypted envelope.
-                    executor.execute(() -> rotateAndDistributeChannelKey(channelId));
+                    executor.execute(() -> {
+                        try {
+                            rotateAndDistributeChannelKey(channelId);
+                        } finally {
+                            sendAcknowledgement();
+                        }
+                    });
+                    acknowledgementDeferred = true;
                 }
 
                 break;
@@ -2256,7 +2239,14 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
                     final var ciphertextrcv = new byte[wrappedPayload.remaining()];
                     wrappedPayload.get(ciphertextrcv);
 
-                    executor.execute(() -> adoptUnicastChannelKey(peerId, ciphertextrcv));
+                    executor.execute(() -> {
+                        try {
+                            adoptUnicastChannelKey(peerId, ciphertextrcv);
+                        } finally {
+                            sendAcknowledgement();
+                        }
+                    });
+                    acknowledgementDeferred = true;
                 }
 
                 break;
@@ -2269,7 +2259,21 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 
         } catch (final Exception exception) {
             Log.e(TAG, exception.toString());
+        } finally {
+            if (!acknowledgementDeferred && isQueuedDeliveryPacket(type)) {
+                sendAcknowledgement();
+            }
         }
+    }
+
+    private boolean isQueuedDeliveryPacket(final byte type) {
+        return type == Packet.TYPE_CHAT_MESSAGE
+                || type == Packet.TYPE_KEY_ROTATION
+                || type == Packet.TYPE_UNICAST_ROTATED_KEY;
+    }
+
+    private void sendAcknowledgement() {
+        webSocketClient.sendPacketAsync(new Packet(Packet.TYPE_ACK, new byte[0]));
     }
 
     @Override
