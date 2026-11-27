@@ -1644,6 +1644,12 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
         visibleChannelId = channelId;
     }
 
+    /**
+     * Whether {@code channelId} is the channel the user is looking at. No channel is on screen
+     * while {@link #visibleChannelId} is negative, so nothing counts as visible then - that is the
+     * state {@code MessagesFragment} leaves behind in {@code onPause()}, and it is exactly when a
+     * message of any channel deserves a notification.
+     */
     public boolean isChannelVisible(long channelId) {
         return channelId >= 0 && channelId == visibleChannelId;
     }
@@ -2969,8 +2975,13 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
                         trackForServerId(liveMessage, receivedAt);
                     }
 
-                    if (!isChannelVisible(visibleChannelId)) {
-                        NotificationHelper.showChannelMessageNotification(context, visibleChannelId, null);
+                    // The test is against the channel the message belongs to, not against
+                    // visibleChannelId: asking whether the channel on screen is visible is always
+                    // true while the user is in a chat, so no notification was ever posted. Keying
+                    // the notification to packetChannelId is what lets MessagesFragment cancel the
+                    // right one when it opens that channel.
+                    if (!isChannelVisible(packetChannelId)) {
+                        NotificationHelper.showChannelMessageNotification(context, packetChannelId, null);
                     }
 
                     break;
