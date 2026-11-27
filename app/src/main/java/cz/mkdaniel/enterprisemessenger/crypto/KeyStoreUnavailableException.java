@@ -12,6 +12,8 @@ import java.security.GeneralSecurityException;
  */
 public class KeyStoreUnavailableException extends GeneralSecurityException {
 
+    private static final long serialVersionUID = 1L;
+
     /**
      * Creates an exception that describes a KeyStore failure and retains its underlying cause.
      *

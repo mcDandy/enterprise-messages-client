@@ -28,7 +28,10 @@ public class TransformViewModel extends AndroidViewModel {
         super(application);
         mItems = new MutableLiveData<>();
         mErrorMessage = new MutableLiveData<>();
-        loadServers();
+
+        // Not loadServers() here: it hands 'this' to a callback, and the constructor has not run
+        // yet, so a fast response could observe the ViewModel before it is built. TransformFragment
+        // calls loadServers() in onResume(), which covers the first load and every return.
     }
 
     /**

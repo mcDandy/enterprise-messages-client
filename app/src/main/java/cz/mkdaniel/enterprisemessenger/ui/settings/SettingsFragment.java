@@ -64,25 +64,14 @@ public class SettingsFragment extends Fragment {
      * PBKDF2 cost makes derivation slow, so the work must never touch the main thread.
      */
     private final ExecutorService backupExecutor = Executors.newSingleThreadExecutor();
-    private final ActivityResultLauncher<String> createDocumentLauncher =
-            registerForActivityResult(new ActivityResultContracts.CreateDocument(BACKUP_MIME_TYPE),
-                    uri -> {
-                        if (uri == null) {
-                            return;
-                        }
-
-                        askForPassphrase(R.string.dialog_backup_passphrase_title, true,
-                                passphrase -> exportKeys(uri, passphrase));
-                    });
-    private final ActivityResultLauncher<String[]> openDocumentLauncher =
-            registerForActivityResult(new ActivityResultContracts.OpenDocument(), uri -> {
-                if (uri == null) {
-                    return;
-                }
-
-                askForPassphrase(R.string.dialog_restore_passphrase_title, false,
-                        passphrase -> importKeys(uri, passphrase));
-            });
+    /**
+     * Both launchers are registered in {@link #onViewCreated} rather than as field initializers.
+     * Registering during construction leaks {@code this} into the fragment's activity-result state
+     * before the fragment is built, where a restart replaying a pending result would reach a
+     * half-constructed fragment and run its callbacks against fields that are still null.
+     */
+    private ActivityResultLauncher<String> createDocumentLauncher;
+    private ActivityResultLauncher<String[]> openDocumentLauncher;
     private FragmentSettingsBinding binding;
 
     /**
@@ -171,6 +160,25 @@ public class SettingsFragment extends Fragment {
     @Override
     public void onViewCreated(@NonNull View view, @Nullable Bundle savedInstanceState) {
         super.onViewCreated(view, savedInstanceState);
+
+        createDocumentLauncher = registerForActivityResult(
+                new ActivityResultContracts.CreateDocument(BACKUP_MIME_TYPE), uri -> {
+                    if (uri == null) {
+                        return;
+                    }
+
+                    askForPassphrase(R.string.dialog_backup_passphrase_title, true,
+                            passphrase -> exportKeys(uri, passphrase));
+                });
+        openDocumentLauncher = registerForActivityResult(
+                new ActivityResultContracts.OpenDocument(), uri -> {
+                    if (uri == null) {
+                        return;
+                    }
+
+                    askForPassphrase(R.string.dialog_restore_passphrase_title, false,
+                            passphrase -> importKeys(uri, passphrase));
+                });
 
         AccountStore accountStore = new AccountStore(requireContext());
         if (accountStore.isLoggedIn()) {

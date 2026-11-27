@@ -387,6 +387,8 @@ public class KeyBackup {
      */
     public static class BackupFormatException extends Exception {
 
+        private static final long serialVersionUID = 1L;
+
         private final boolean wrongPassphrase;
 
         BackupFormatException(String message, boolean wrongPassphrase) {
