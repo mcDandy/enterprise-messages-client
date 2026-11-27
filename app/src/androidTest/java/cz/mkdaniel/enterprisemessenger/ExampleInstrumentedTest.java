@@ -4,6 +4,8 @@ import cz.mkdaniel.enterprisemessenger.net.AccountStore;
 
 import org.junit.Before;
 
+import androidx.test.espresso.NoMatchingViewException;
+
 import android.content.Context;
 import androidx.test.platform.app.InstrumentationRegistry;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
@@ -180,7 +182,7 @@ public class ExampleInstrumentedTest {
 	onView(withText(requiredArg("channelName"))).perform(click());
 	onView(withId(R.id.recyclerview_messages)).check(matches(isDisplayed()));
     }
-
+   
     private void sendMessage(String message) {
 	onView(withId(R.id.edittext_message_input))
 	    .perform(replaceText(message), closeSoftKeyboard());
@@ -203,9 +205,31 @@ public class ExampleInstrumentedTest {
 	onView(withText(message)).check(matches(isDisplayed()));
     }
 
+    private boolean isDisplayed0(int viewId) {
+	try {
+	    onView(withId(viewId)).check(matches(isDisplayed()));
+	    return true;
+	} catch (NoMatchingViewException | AssertionError notVisible) {
+	    return false;
+	}
+    }
+
+    private void loginIfNeeded() {
+	if (isDisplayed0(R.id.button_login)) {
+	    onView(withId(R.id.edittext_username))
+		.perform(replaceText(requiredArg("username")), closeSoftKeyboard());
+	    onView(withId(R.id.edittext_password))
+		.perform(replaceText(requiredArg("password")), closeSoftKeyboard());
+	    onView(withId(R.id.button_login)).perform(click());
+	}
+
+	// Already signed in, or login just completed.
+	onView(withId(R.id.recyclerview_transform))
+	    .check(matches(isDisplayed()));
+    }
     @Test
     public void twoEmulatorMessageFlow() {
-	login();
+	loginIfNeeded();
 
 	String role = requiredArg("role");
 	String runId = requiredArg("runId");
