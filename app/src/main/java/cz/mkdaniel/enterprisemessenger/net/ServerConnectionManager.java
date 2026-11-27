@@ -1024,30 +1024,200 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
             return;
         }
         executor.execute(() -> {
-            if (ensureJwt().isEmpty()) {
-                postFailure(callback, "Not signed in");
-
-                return;
-            }
-            if (!verifyChannelAdmin(channelId, callback)) {
-                return;
-            }
-
             try {
-                final JSONObject body = new JSONObject();
-                body.put("userId", userId);
+                if (ensureJwt().isEmpty()) {
+                    postFailure(callback, "Not signed in");
+                    return;
+                }
+                if (!verifyChannelAdmin(channelId, callback)) {
+                    return;
+                }
 
-                final RestResponse response = executePost(
-                        String.format(Locale.US, "/api/channels/%d/members", channelId), body);
+                final RestResponse membersResponse = executeGet(
+                        String.format(Locale.US, "/api/channels/%d/members", channelId));
+                final JSONArray members = membersResponse.asJsonArray();
+                if (!membersResponse.isSuccessful() || members == null) {
+                    failRest(membersResponse, callback, "Fetching channel members");
+                    return;
+                }
+
+                final Set<Long> memberIds = new java.util.HashSet<>();
+                for (int i = 0; i < members.length(); i++) {
+                    JSONObject m = members.optJSONObject(i);
+                    if (m != null) {
+                        memberIds.add(m.optLong("userId", -1L));
+                    }
+                }
+                memberIds.add(userId);
+
+                final RestResponse keysResponse = executeGet(
+                        String.format(Locale.US, "/api/channels/%d/keys", channelId));
+                final JSONArray peerKeys = keysResponse.isSuccessful() ? keysResponse.asJsonArray() : null;
+
+                if (peerKeys != null) {
+                    for (int i = 0; i < peerKeys.length(); i++) {
+                        JSONObject peer = peerKeys.optJSONObject(i);
+                        if (peer != null) {
+                            long peerId = peer.optLong("userId", -1L);
+                            if (memberIds.contains(peerId)) {
+                                ensurePeerSecret(peerId, peer.optString("publicKey", ""));
+                            }
+                        }
+                    }
+                }
+                if (!peerSecrets.knows(userId)) {
+                    final RestResponse userKeyResponse = executeGet(
+                            String.format(Locale.US, "/api/users/%d/key", userId));
+                    final JSONObject userKeyJson = userKeyResponse.isSuccessful() ? userKeyResponse.asJson() : null;
+                    if (userKeyJson != null) {
+                        ensurePeerSecret(userId, userKeyJson.optString("publicKey", ""));
+                    }
+                }
+
+                final ChannelKeyRegistry.GenerationResult rotated = channelKeys.rotateChannelKey(channelId);
+                if (channelId == activeChannelId) {
+                    this.activeChannelKey = rotated.key();
+                }
+
+                final JSONArray envelopes = new JSONArray();
+                for (long peerId : memberIds) {
+                    byte[] peerSecret = peerSecrets.secret(peerId);
+                    if (peerSecret == null) {
+                        final RestResponse uKeyRes = executeGet(String.format(Locale.US, "/api/users/%d/key", peerId));
+                        final JSONObject uKeyJson = uKeyRes.isSuccessful() ? uKeyRes.asJson() : null;
+                        if (uKeyJson != null) {
+                            ensurePeerSecret(peerId, uKeyJson.optString("publicKey", ""));
+                            peerSecret = peerSecrets.secret(peerId);
+                        }
+                    }
+                    if (peerSecret == null) {
+                        postFailure(callback, "Could not establish encryption secret for member " + peerId);
+                        return;
+                    }
+
+                    final var plainBuffer = ByteBuffer.allocate(Long.BYTES + 2 * Long.BYTES + rotated.key().length);
+                    plainBuffer.putLong(channelId);
+                    plainBuffer.putLong(rotated.version().getMostSignificantBits());
+                    plainBuffer.putLong(rotated.version().getLeastSignificantBits());
+                    plainBuffer.put(rotated.key());
+
+                    final byte[] ciphertext = cryptoManager.encryptPayload(plainBuffer.array(), peerSecret);
+                    final String ciphertextBase64 = Base64.encodeToString(ciphertext, Base64.NO_WRAP);
+
+                    final JSONObject envelope = new JSONObject();
+                    envelope.put("userId", peerId);
+                    envelope.put("ciphertext", ciphertextBase64);
+                    envelopes.put(envelope);
+                }
+
+                final RestResponse response = executePostArray(
+                        String.format(Locale.US, "/api/channels/%d/members", channelId), envelopes);
                 if (!response.isSuccessful()) {
                     failRest(response, callback, "Adding the channel member");
-
                     return;
                 }
 
                 mainHandler.post(() -> callback.onResult(null));
             } catch (final Exception e) {
                 postFailure(callback, "Could not add channel member: " + e.getMessage());
+            }
+        });
+    }
+
+    public void removeChannelMember(final long channelId, final long userId, final Callback<Void> callback) {
+        if (channelId < 0 || userId <= 0) {
+            mainHandler.post(() -> callback.onFailure("Invalid channel or user id"));
+            return;
+        }
+        executor.execute(() -> {
+            try {
+                if (ensureJwt().isEmpty()) {
+                    postFailure(callback, "Not signed in");
+                    return;
+                }
+                if (!verifyChannelAdmin(channelId, callback)) {
+                    return;
+                }
+
+                final RestResponse membersResponse = executeGet(
+                        String.format(Locale.US, "/api/channels/%d/members", channelId));
+                final JSONArray members = membersResponse.asJsonArray();
+                if (!membersResponse.isSuccessful() || members == null) {
+                    failRest(membersResponse, callback, "Fetching channel members");
+                    return;
+                }
+
+                final Set<Long> memberIds = new java.util.HashSet<>();
+                for (int i = 0; i < members.length(); i++) {
+                    JSONObject m = members.optJSONObject(i);
+                    if (m != null) {
+                        memberIds.add(m.optLong("userId", -1L));
+                    }
+                }
+                memberIds.remove(userId);
+
+                final RestResponse keysResponse = executeGet(
+                        String.format(Locale.US, "/api/channels/%d/keys", channelId));
+                final JSONArray peerKeys = keysResponse.isSuccessful() ? keysResponse.asJsonArray() : null;
+
+                if (peerKeys != null) {
+                    for (int i = 0; i < peerKeys.length(); i++) {
+                        JSONObject peer = peerKeys.optJSONObject(i);
+                        if (peer != null) {
+                            long peerId = peer.optLong("userId", -1L);
+                            if (memberIds.contains(peerId)) {
+                                ensurePeerSecret(peerId, peer.optString("publicKey", ""));
+                            }
+                        }
+                    }
+                }
+
+                final ChannelKeyRegistry.GenerationResult rotated = channelKeys.rotateChannelKey(channelId);
+                if (channelId == activeChannelId) {
+                    this.activeChannelKey = rotated.key();
+                }
+
+                final JSONArray envelopes = new JSONArray();
+                for (long peerId : memberIds) {
+                    byte[] peerSecret = peerSecrets.secret(peerId);
+                    if (peerSecret == null) {
+                        final RestResponse uKeyRes = executeGet(String.format(Locale.US, "/api/users/%d/key", peerId));
+                        final JSONObject uKeyJson = uKeyRes.isSuccessful() ? uKeyRes.asJson() : null;
+                        if (uKeyJson != null) {
+                            ensurePeerSecret(peerId, uKeyJson.optString("publicKey", ""));
+                            peerSecret = peerSecrets.secret(peerId);
+                        }
+                    }
+                    if (peerSecret == null) {
+                        postFailure(callback, "Could not establish encryption secret for member " + peerId);
+                        return;
+                    }
+
+                    final var plainBuffer = ByteBuffer.allocate(Long.BYTES + 2 * Long.BYTES + rotated.key().length);
+                    plainBuffer.putLong(channelId);
+                    plainBuffer.putLong(rotated.version().getMostSignificantBits());
+                    plainBuffer.putLong(rotated.version().getLeastSignificantBits());
+                    plainBuffer.put(rotated.key());
+
+                    final byte[] ciphertext = cryptoManager.encryptPayload(plainBuffer.array(), peerSecret);
+                    final String ciphertextBase64 = Base64.encodeToString(ciphertext, Base64.NO_WRAP);
+
+                    final JSONObject envelope = new JSONObject();
+                    envelope.put("userId", peerId);
+                    envelope.put("ciphertext", ciphertextBase64);
+                    envelopes.put(envelope);
+                }
+
+                final RestResponse response = executePostArray(
+                        String.format(Locale.US, "/api/channels/%d/members/%d/remove", channelId, userId), envelopes);
+                if (!response.isSuccessful()) {
+                    failRest(response, callback, "Removing the channel member");
+                    return;
+                }
+
+                mainHandler.post(() -> callback.onResult(null));
+            } catch (final Exception e) {
+                postFailure(callback, "Could not remove channel member: " + e.getMessage());
             }
         });
     }
@@ -1841,6 +2011,33 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
 
     private RestResponse executePost(final String endpoint, final JSONObject body) {
         return executeRequest("POST", endpoint, body);
+    }
+
+    private RestResponse executePostArray(final String endpoint, final JSONArray body) {
+        final RequestBody requestBody = body == null ? null
+                : RequestBody.create(body.toString(), MediaType.parse("application/json; charset=utf-8"));
+
+        final Request request = new Request
+                .Builder()
+                .url(String.format(Locale.US, "%s%s", deployBaseUrl(), endpoint))
+                .addHeader("Authorization", String.format(Locale.US, "Bearer %s", jwtToken))
+                .method("POST", requestBody)
+                .build();
+
+        try (final var response = httpClient.newCall(request).execute()) {
+            final String resStr = response.body() != null ? response.body().string() : "";
+
+            if (!response.isSuccessful()) {
+                Log.w(TAG, String.format(Locale.US, "POST %s failed with HTTP %d: %s", endpoint,
+                        response.code(), resStr));
+            }
+
+            return new RestResponse(response.code(), resStr);
+        } catch (final Exception exception) {
+            Log.e(TAG, String.format(Locale.US, "POST %s failed", endpoint), exception);
+
+            return new RestResponse(0, "");
+        }
     }
 
     private RestResponse executePut(final String endpoint, final JSONObject body) {
