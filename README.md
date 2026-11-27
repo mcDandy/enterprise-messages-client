@@ -133,6 +133,39 @@ This project is designed around secure messaging and includes cryptographic key 
 side. The client stores and manages account configuration locally and prepares encrypted messaging flows using EC-based
 key management.
 
+### Group Encryption Integration
+
+The client implements the sender-key idea described in Trail of Bits' article
+[Better Encrypted Group Chat](https://blog.trailofbits.com/2019/08/06/better-encrypted-group-chat/), with a direct
+channel-key distribution design rather than the full MLS/TreeKEM ratchet-tree protocol.
+
+1. **Device identity.** On first use, `CryptoManager` creates an EC P-256 (`secp256r1`) identity key pair in Android
+   KeyStore. The private key remains in Android KeyStore; the X.509-encoded public key is published to the server.
+2. **Peer secrets.** For each other member of a channel, the client performs ECDH with that member's public key and
+   hashes the agreement with SHA-256 to obtain a 256-bit shared AES key. `PeerSecretRegistry` keeps these secrets sealed
+   on the device.
+3. **Channel sender keys.** Each channel has a random 32-byte AES-GCM key and a UUID version. `ChannelKeyRegistry`
+   stores the current key and a bounded history of superseded keys. An old key remains in the history so previously
+   received messages stay readable after a rotation.
+4. **Membership rotations.** When an administrator adds or removes a member, the client generates a new, not-yet-stored
+   channel key and seals `[key UUID][32-byte key]` separately for every current member using their peer ECDH secret.
+   The REST request carries only these AES-GCM ciphertexts; the server sees neither the channel key nor the plaintext
+   envelopes.
+5. **Envelope delivery.** The server queues the resulting `TYPE_UNICAST_ROTATED_KEY` frames. The recipient decrypts the
+   envelope with the sender's ECDH secret, validates and adopts the channel key, and records the mapping between the
+   server key-row UUID and the client's key UUID.
+6. **Application messages.** Once a device has the channel key, `sendChatPayload` seals the message once with AES-GCM.
+   The WebSocket frame contains the channel id and ciphertext, and every recipient opens it with the channel-key
+   candidate matching the channel and key version where available. There is no channel key derived from the channel id:
+   all live and historical keys are read from `ChannelKeyRegistry`.
+
+This integration follows the article's central tradeoff: application messages require one encryption rather than one
+per recipient, while channel membership changes distribute the new random key to every remaining member. Because the
+app uses direct peer-key envelopes instead of a balanced ratchet tree, a membership update is `O(N)` in the number of
+remaining or targeted members, not `O(log N)` as a complete MLS/TreeKEM implementation would aim for. The server is an
+untrusted transport for ciphertext and queued envelopes, but key distribution and membership policy still follow the
+server-mediated REST/WebSocket protocol.
+
 ## License
 
 To be added. This repository is a University course credit task. Please do not redistribute, or modify it.
