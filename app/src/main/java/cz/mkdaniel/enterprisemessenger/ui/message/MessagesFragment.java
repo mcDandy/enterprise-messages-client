@@ -559,49 +559,55 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
         if (!accepted) {
             return solid;
         }
-        // A channel of one other member goes solid on their first acknowledgement; a channel of
-        // ten climbs one tenth of the way per recipient. Clamped in case a cursor arrives for a
-        // member the listing did not include, which would otherwise divide by zero or overshoot.
-        final int steps = Math.max(peerCount, 1);
-        final float fraction = Math.min(1f, Math.max(0f, (float) recipients / steps));
-        final int alpha = (int) (0xFF * fraction);
-        return (alpha << 24) | (solid & 0x00FFFFFF);
+        return (bubbleAlpha(recipients, peerCount) << 24) | (solid & 0x00FFFFFF);
     }
 
-    private static class MessageAdapter extends ListAdapter<Message, RecyclerView.ViewHolder> {
+    /**
+     * How opaque a sent bubble is, on its own so the diff can compare it without resolving a
+     * colour resource. A channel of one other member goes solid on their first acknowledgement; a
+     * channel of ten climbs one tenth of the way per recipient. Clamped in case a cursor arrives
+     * for a member the listing did not include, which would otherwise divide by zero or overshoot.
+     */
+    private static int bubbleAlpha(int recipients, int peerCount) {
+        final int steps = Math.max(peerCount, 1);
+        final float fraction = Math.min(1f, Math.max(0f, (float) recipients / steps));
+        return (int) (0xFF * fraction);
+    }
 
-        private static final int VIEW_TYPE_SENT = 1;
-        private static final int VIEW_TYPE_RECEIVED = 2;
-        private final SimpleDateFormat dateFormat = new SimpleDateFormat("HH:mm", Locale.getDefault());
+    /**
+     * Decides when a row has to be redrawn, and holds the peer delivery cursors that decide it.
+     * <p>
+     * The cursors live here rather than on the adapter because the diff runs against this object,
+     * and a message's rendered opacity depends on them: two {@link Message} instances that are
+     * equal in every field must still count as different content when the number of recipients
+     * reaching them has moved, or a re-submitted list would diff as unchanged and the bubbles
+     * would keep their old opacity.
+     */
+    private static class MessageDeliveryCallback extends DiffUtil.ItemCallback<Message> {
+
         /**
          * Each other member's user id mapped to the highest message id their client has
          * acknowledged. Counting the entries that reach a given message gives how many recipients
          * have it, which drives the bubble's opacity.
          */
-        private Map<Long, Long> peerCursors = new HashMap<>();
+        private volatile Map<Long, Long> peerCursors = new HashMap<>();
         /**
          * How many other members the channel has. Not derivable from {@link #peerCursors}, because
          * a member who has acknowledged nothing has no entry, and would otherwise be counted as
          * having left the channel.
          */
-        private int peerCount = 0;
+        private volatile int peerCount = 0;
 
-        /**
-         * Replaces the peer delivery state and repaints. A full repaint rather than a diff: the
-         * cursors are not part of {@link Message}, so {@code areContentsTheSame} cannot see them
-         * change, and the list is short enough that rebinding it is cheaper than threading the
-         * state through the model.
-         */
         void setPeerDelivery(Map<Long, Long> cursors, int peerCount) {
             this.peerCursors = new HashMap<>(cursors);
             this.peerCount = peerCount;
-            notifyDataSetChanged();
         }
 
-        /**
-         * How many of the channel's other members have this message on their device.
-         */
-        private int recipientsOf(Message message) {
+        int peerCount() {
+            return peerCount;
+        }
+
+        int recipientsOf(Message message) {
             final long id = message.getServerId();
             if (id <= 0) {
                 return 0;
@@ -615,25 +621,73 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
             return reached;
         }
 
-        protected MessageAdapter() {
-            super(new DiffUtil.ItemCallback<Message>() {
-                @Override
-                public boolean areItemsTheSame(@NonNull Message oldItem, @NonNull Message newItem) {
-                    return oldItem.getId().equals(newItem.getId());
-                }
+        @Override
+        public boolean areItemsTheSame(@NonNull Message oldItem, @NonNull Message newItem) {
+            return oldItem.getId().equals(newItem.getId());
+        }
 
-                @Override
-                public boolean areContentsTheSame(@NonNull Message oldItem, @NonNull Message newItem) {
-                    return oldItem.getText().equals(newItem.getText())
-                            && oldItem.getSender().equals(newItem.getSender())
-                            && oldItem.getTimestamp() == newItem.getTimestamp()
-                            // A message the user wrote changes colour and mark when the server
-                            // accepts it, so that has to count as a content change or the row
-                            // never repaints from grey to normal.
-                            && oldItem.isDelivered() == newItem.isDelivered()
-                            && oldItem.isPeerDelivered() == newItem.isPeerDelivered();
-                }
-            });
+        @Override
+        public boolean areContentsTheSame(@NonNull Message oldItem, @NonNull Message newItem) {
+            return oldItem.getText().equals(newItem.getText())
+                    && oldItem.getSender().equals(newItem.getSender())
+                    && oldItem.getTimestamp() == newItem.getTimestamp()
+                    // A message the user wrote changes colour and mark when the server accepts it,
+                    // so that has to count as a content change or the row never repaints from
+                    // grey to normal.
+                    && oldItem.isDelivered() == newItem.isDelivered()
+                    // The opacity a row renders with, recomputed for both sides. Comparing the
+                    // recipient count alone is not enough: in a channel whose size just changed,
+                    // the same count can map to a different opacity.
+                    && bubbleAlpha(recipientsOf(oldItem), peerCount)
+                    == bubbleAlpha(recipientsOf(newItem), peerCount);
+        }
+    }
+
+    private static class MessageAdapter extends ListAdapter<Message, RecyclerView.ViewHolder> {
+
+        private static final int VIEW_TYPE_SENT = 1;
+        private static final int VIEW_TYPE_RECEIVED = 2;
+        private final SimpleDateFormat dateFormat = new SimpleDateFormat("HH:mm", Locale.getDefault());
+        /**
+         * The callback the {@code ListAdapter} diffs with, kept as a field because it also holds
+         * the delivery cursors the bind reads. It is handed to {@code super} rather than created
+         * alongside: a second instance would receive the cursors while the diff consulted an empty
+         * one, and no row would ever repaint.
+         */
+        private final MessageDeliveryCallback deliveryCallback;
+
+        /**
+         * Replaces the peer delivery state and repaints by re-submitting the current list.
+         * <p>
+         * Not {@code notifyDataSetChanged()}: that throws when it lands while the RecyclerView is
+         * laying out or scrolling, and a delivery cursor arrives from a posted handler that can
+         * coincide with either - most visibly on a slow emulator, where the window is wider. Going
+         * through {@code submitList} puts the repaint on the same path the message list already
+         * uses, so it is serialised against the diff instead of cutting across it.
+         * <p>
+         * The list is handed back as a new instance because {@code ListAdapter} ignores a
+         * submission of the list it already holds; the cursors are not part of {@link Message}, so
+         * a diff of identical items would otherwise compute no change and nothing would repaint.
+         */
+        void setPeerDelivery(Map<Long, Long> cursors, int peerCount) {
+            deliveryCallback.setPeerDelivery(cursors, peerCount);
+            submitList(new ArrayList<>(getCurrentList()));
+        }
+
+        /**
+         * How many of the channel's other members have this message on their device.
+         */
+        private int recipientsOf(Message message) {
+            return deliveryCallback.recipientsOf(message);
+        }
+
+        protected MessageAdapter() {
+            this(new MessageDeliveryCallback());
+        }
+
+        private MessageAdapter(MessageDeliveryCallback deliveryCallback) {
+            super(deliveryCallback);
+            this.deliveryCallback = deliveryCallback;
         }
 
         @Override
@@ -685,7 +739,7 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
                 // channel's member count rather than a fixed number is what makes a two-member
                 // channel reach solid rather than crawling towards it.
                 sentHolder.binding.cardMessageBubble.setCardBackgroundColor(
-                        bubbleColor(context, accepted, recipients, peerCount));
+                        bubbleColor(context, accepted, recipients, deliveryCallback.peerCount()));
 
                 final int statusText = recipients > 0 ? R.string.message_status_delivered
                         : accepted ? R.string.message_status_sent
