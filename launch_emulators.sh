@@ -70,11 +70,21 @@ then
 
     $adb -s emulator-5554 shell am instrument -w \
 	-e class cz.mkdaniel.enterprisemessenger.ExampleInstrumentedTest#twoEmulatorMessageFlow \
-	-e role sender -e runId run-001 \
+	-e role sender \
+	-e runId run-001 \
+	-e username android_user2 \
+    	-e password secret \
+	-e serverName "test_servver" \
+	-e channelName "test" \
 	cz.mkdaniel.enterprisemessenger.test/androidx.test.runner.AndroidJUnitRunner
     $adb -s emulator-5556 shell am instrument -w \
 	-e class cz.mkdaniel.enterprisemessenger.ExampleInstrumentedTest#twoEmulatorMessageFlow \
-	-e role receiver -e runId run-001 \
+	-e username android_user3 \
+    	-e password secret \
+	-e serverName "test_servver" \
+	-e role receiver \
+    	-e runId run-001 \
+	-e channelName "test" \
 	cz.mkdaniel.enterprisemessenger.test/androidx.test.runner.AndroidJUnitRunner
 fi
 
@@ -82,16 +92,29 @@ if [[ $1 == "logcats" ]];
 then
     TERM_EMU=$2
 
-    echo "starting logcats with xterm as background jobs"
+    echo "starting logcats with $TERM_EMU as background jobs"
 
-    $TERM_EMU -e bash -c "$adb -s emulator-5554 logcat *:S WebSocketClient:* CryptoManager:* ServerConnectionManager:* -T 1" &
-    $TERM_EMU -e bash -c "$adb -s emulator-5556 logcat *:S WebSocketClient:* CryptoManager:* ServerConnectionManager:* -T 1" &
+    #$TERM_EMU -e bash -c 'export ANDROID_HOME=./Android/Sdk; export ANDROID_SDK_ROOT=$ANDROID_HOME; ./Android/Sdk/platform-tools/adb -s emulator-5554 logcat *:S WebSocketClient:* CryptoManager:* ServerConnectionManager:* -T 1' &
+    #$TERM_EMU -e bash -c 'pwd; ping ::1' &
+    #$TERM_EMU -e bash -c "pwd; ping ::1" &
+    #$TERM_EMU -e bash -c 'export ANDROID_HOME=./Android/Sdk; export ANDROID_SDK_ROOT=$ANDROID_HOME; ./Android/Sdk/platform-tools/adb -s emulator-5556 logcat *:S WebSocketClient:* CryptoManager:* ServerConnectionManager:* -T 1' &
+fi
+
+if [[ $1 == "goal:logcat:create:emu1" ]];
+then
+    $adb -s emulator-5554 logcat *:S WebSocketClient:* ServerConnectionManager:* CryptoManager:* -T 1
+fi
+
+if [[ $1 == "goal:logcat:create:emu2" ]];
+then
+    $adb -s emulator-5556 logcat *:S WebSocketClient:* ServerConnectionManager:* CryptoManager:* -T 1
 fi
 
 echo "reverting gradlew"
 chmod 0666 gradlew
 
-if [[ $2 == "destroyEmus" ]];
+#if [[ $2 == "destroyEmus" ]];
+if [[ $2 == "goal:emu:destroy" ]];
 then
     echo "attempting to close 2 emulators"
 
