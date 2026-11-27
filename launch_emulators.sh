@@ -62,14 +62,14 @@ if [[ $1 == "goal:test:multi" ]];
 then
     echo "launching multi-emulator tests"
 
-    #$adb -s emulator-5554 shell am instrument -w -e class cz.mkdaniel.enterprisemessenger.ExampleInstrumentedTest#twoEmulatorMessageFlow -e role sender -e runId run-001 -e username sender_test -e password test-password -e serverName "E2E Test Server" -e channelName "e2e-test" your.test.package/androidx.test.runner.AndroidJUnitRunner
+    #$adb -s emulator-5554 shell am instrument -w -e class cz.mkdaniel.enterprisemessenger.E2EInstrumentedTest#twoEmulatorMessageFlow -e role sender -e runId run-001 -e username sender_test -e password test-password -e serverName "E2E Test Server" -e channelName "e2e-test" cz.mkdaniel.enterprisemessenger.test/androidx.test.runner.AndroidJUnitRunner
 
-    #$adb -s emulator-5556 shell am instrument -w -e class cz.mkdaniel.enterprisemessenger.ExampleInstrumentedTest#twoEmulatorMessageFlow -e role receiver -e runId run-001 -e username receiver_test -e password test-password -e serverName "E2E Test Server" -e channelName "e2e-test" your.test.package/androidx.test.runner.AndroidJUnitRunner
+    #$adb -s emulator-5556 shell am instrument -w -e class cz.mkdaniel.enterprisemessenger.E2EInstrumentedTest#twoEmulatorMessageFlow -e role receiver -e runId run-001 -e username receiver_test -e password test-password -e serverName "E2E Test Server" -e channelName "e2e-test" cz.mkdaniel.enterprisemessenger.test/androidx.test.runner.AndroidJUnitRunner
 
     ./gradlew installDebugAndroidTest
 
     $adb -s emulator-5554 shell am instrument -w \
-	-e class cz.mkdaniel.enterprisemessenger.ExampleInstrumentedTest#twoEmulatorMessageFlow \
+	-e class cz.mkdaniel.enterprisemessenger.E2EInstrumentedTest#twoEmulatorMessageFlow \
 	-e role sender \
 	-e runId run-001 \
 	-e username android_user2 \
@@ -78,7 +78,7 @@ then
 	-e channelName "test" \
 	cz.mkdaniel.enterprisemessenger.test/androidx.test.runner.AndroidJUnitRunner
     $adb -s emulator-5556 shell am instrument -w \
-	-e class cz.mkdaniel.enterprisemessenger.ExampleInstrumentedTest#twoEmulatorMessageFlow \
+	-e class cz.mkdaniel.enterprisemessenger.E2EInstrumentedTest#twoEmulatorMessageFlow \
 	-e username android_user3 \
     	-e password secret \
 	-e serverName "test_servver" \
@@ -86,6 +86,37 @@ then
     	-e runId run-001 \
 	-e channelName "test" \
 	cz.mkdaniel.enterprisemessenger.test/androidx.test.runner.AndroidJUnitRunner
+fi
+
+if [[ $1 == "goal:test:keyRotation" ]];
+then
+    echo "launching the two-emulator channel key rotation test"
+
+    ./gradlew installDebugAndroidTest
+
+    $adb -s emulator-5554 shell am instrument -w \
+	-e class cz.mkdaniel.enterprisemessenger.E2EInstrumentedTest#twoEmulatorChannelKeyRotation \
+	-e role administrator \
+	-e runId key-rotation-001 \
+	-e username android_user2 \
+	-e password secret \
+	-e serverName "test_servver" \
+	-e channelName "test" \
+	-e memberUserId 2 \
+	cz.mkdaniel.enterprisemessenger.test/androidx.test.runner.AndroidJUnitRunner &
+
+    $adb -s emulator-5556 shell am instrument -w \
+	-e class cz.mkdaniel.enterprisemessenger.E2EInstrumentedTest#twoEmulatorChannelKeyRotation \
+	-e role member \
+	-e runId key-rotation-001 \
+	-e username android_user3 \
+	-e password secret \
+	-e serverName "test_servver" \
+	-e channelName "test" \
+	-e memberUserId 2 \
+	cz.mkdaniel.enterprisemessenger.test/androidx.test.runner.AndroidJUnitRunner &
+
+    wait
 fi
 
 if [[ $1 == "logcats" ]];
