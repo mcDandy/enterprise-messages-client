@@ -1661,34 +1661,49 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
     private void adoptUnicastChannelKey(final long senderUserId, final byte[] cipher_text) {
         try {
             byte[] peerSecret = peerSecrets.secret(senderUserId);
+            byte[] plain = null;
 
-            if (peerSecret == null) {
-                // The server's offline queue replays queued unicasts after a restart, when the secret has
-                // to be re-derived from the sender's public key first.
-                final RestResponse senderKeyResponse = executeGet(
-                        String.format(Locale.US, "/api/users/%d/key", senderUserId));
-                final JSONObject senderKeyJson = senderKeyResponse.isSuccessful()
-                        ? senderKeyResponse.asJson()
-                        : null;
-                final byte[] senderKey = senderKeyJson == null
-                        ? null
-                        : CryptoManager.decodePeerKey(senderKeyJson.optString("publicKey", ""));
+            for (int attempt = 0; attempt < 2; attempt++) {
+                if (peerSecret == null) {
+                    // The server's offline queue replays queued unicasts after a restart, or when the peer
+                    // reinstalled/rotated their identity key, requiring re-deriving the secret from the server.
+                    final RestResponse senderKeyResponse = executeGet(
+                            String.format(Locale.US, "/api/users/%d/key", senderUserId));
+                    final JSONObject senderKeyJson = senderKeyResponse.isSuccessful()
+                            ? senderKeyResponse.asJson()
+                            : null;
+                    final byte[] senderKey = senderKeyJson == null
+                            ? null
+                            : CryptoManager.decodePeerKey(senderKeyJson.optString("publicKey", ""));
 
-                if (senderKey == null) {
-                    Log.w(TAG, "No shared ECDH secret with peer " + senderUserId + " yet, dropping rotated key");
+                    if (senderKey == null) {
+                        Log.w(TAG, "No shared ECDH secret with peer " + senderUserId + " (could not fetch public key), dropping rotated key");
 
-                    return;
+                        return;
+                    }
+
+                    peerSecrets.store(senderUserId, cryptoManager.deriveSharedSecret(senderKey));
+                    peerSecret = peerSecrets.secret(senderUserId);
+
+                    if (peerSecret == null) {
+                        return;
+                    }
                 }
 
-                peerSecrets.store(senderUserId, cryptoManager.deriveSharedSecret(senderKey));
-                peerSecret = peerSecrets.secret(senderUserId);
-
-                if (peerSecret == null) {
-                    return;
+                try {
+                    plain = cryptoManager.decryptPayload(cipher_text, peerSecret);
+                    break;
+                } catch (final Exception e) {
+                    if (attempt == 0) {
+                        Log.w(TAG, "Failed to decrypt unicast from peer " + senderUserId + " with cached secret (peer may have rotated identity key). Retrying with fresh public key from server.");
+                        peerSecret = null; // force fetch on next iteration
+                    } else {
+                        Log.w(TAG, "Failed to decrypt unicast from peer " + senderUserId + " even after fetching fresh public key: " + e.getMessage());
+                        return;
+                    }
                 }
             }
 
-            final byte[] plain = cryptoManager.decryptPayload(cipher_text, peerSecret);
             if (plain == null || plain.length < Long.BYTES + 2 * Long.BYTES + 32) {
                 Log.w(TAG, "A key rotation unicast carried an incomplete envelope, ignoring it");
 
