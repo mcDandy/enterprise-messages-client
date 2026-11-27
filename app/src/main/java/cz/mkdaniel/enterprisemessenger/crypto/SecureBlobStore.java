@@ -49,11 +49,9 @@ public class SecureBlobStore {
      * Seals {@code value} under {@code key} with a fresh IV handed out by the provider of the master
      * key, so no value is ever sealed twice under the same nonce.
      *
-     * @throws KeyStoreUnavailableException when the master key cannot be created or used
-     *
      * @param key the encryption key to use
-     * @param value the value to process
-     * @throws InvalidAlgorithmParameterException if the put operation cannot be completed.
+     * @param value the value to seal
+     * @throws KeyStoreUnavailableException when the master key cannot be created or used
      */
     public synchronized void put(String key, byte[] value) throws KeyStoreUnavailableException {
         if (value == null) {

@@ -56,7 +56,7 @@ import cz.mkdaniel.enterprisemessenger.ui.transform.ServerViewItem;
  *       - channel (Room)                GET /api/servers/{id}/channels/my
  *         - messages                    WebSocket /wss packets
  * </pre>
- * Flow: REST login/register -> WebSocket {@code /wss} with {@code Authorization: Bearer <jwt>} ->
+ * Flow: REST login/register -> WebSocket {@code /wss} with {@code Authorization: Bearer &lt;jwt&gt;} ->
  * select a channel through {@link #joinChannel(String)} -> end-to-end encrypted {@code CHAT_MESSAGE}
  * packets.
  * <p>
