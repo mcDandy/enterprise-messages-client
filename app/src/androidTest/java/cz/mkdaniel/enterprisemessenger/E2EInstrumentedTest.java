@@ -302,7 +302,7 @@ public class E2EInstrumentedTest {
      * Logs in when the app starts on the login screen.
      */
     private void loginIfNeeded() {
-        if (isDisplayed(R.id.button_login)) {
+        if (isViewDisplayed(R.id.button_login)) {
             replaceInto(R.id.edittext_username, requiredArg("username"));
             replaceInto(R.id.edittext_password, requiredArg("password"));
             onView(withId(R.id.button_login)).perform(click());
@@ -346,7 +346,7 @@ public class E2EInstrumentedTest {
      * @param viewId resource ID of the view
      * @return {@code true} when the view is displayed
      */
-    private boolean isDisplayed(int viewId) {
+    private boolean isViewDisplayed(int viewId) {
         try {
             onView(withId(viewId)).check(matches(isDisplayed()));
             return true;
