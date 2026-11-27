@@ -73,8 +73,7 @@ enterprise-messages-client/
 ├── gradle.properties
 ├── gradle/
 ├── README.md
-├── .gitignore
-└── te
+└── .gitignore
 ```
 
 ## Technology Stack

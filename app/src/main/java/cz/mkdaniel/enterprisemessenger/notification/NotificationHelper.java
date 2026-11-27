@@ -123,8 +123,8 @@ public class NotificationHelper {
     }
 
     /**
-     * Shows (or updates) the "N new messages" notification of a channel, used for pushes
-     * that arrive while the app is in the foreground.
+     * Shows (or updates) the "N new messages" notification of a channel, for a chat frame that
+     * arrives over the WebSocket while that channel is not the one on screen.
      */
     public static void showChannelMessageNotification(Context context, long channelId, String channelName) {
         // Keyed by channel id so cancelNotificationForChannel() finds it again

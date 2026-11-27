@@ -232,7 +232,8 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
     public void onResume() {
         super.onResume();
         long channelId = ServerConnectionManager.parseChannelId(roomId);
-        // Suppress push notifications for the channel being looked at and clear the pending one
+        // The channel on screen is the one whose messages are read, so it must not notify, and the
+        // notification it left behind while the user was elsewhere is now obsolete
         if (connectionManager != null) {
             connectionManager.setVisibleChannel(channelId);
             // The server reports a member's cursor only when it moves, so messages delivered
