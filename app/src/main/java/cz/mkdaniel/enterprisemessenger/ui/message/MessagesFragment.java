@@ -410,6 +410,27 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
                 binding.recyclerviewMessages.smoothScrollToPosition(updated.size() - 1);
             }
         });
+        sendReadReceiptForLatest();
+    }
+
+    @Override
+    public void onMemberInfoReceived(long channelId, long userId, long lastDeliveredMessageId, long lastReadMessageId) {
+        if (!isAdded()) return;
+        long currentChannelId = ServerConnectionManager.parseChannelId(roomId);
+        if (channelId == currentChannelId) {
+            sendReadReceiptForLatest();
+        }
+    }
+
+    private void sendReadReceiptForLatest() {
+        if (connectionManager == null || roomId == null || roomId.isEmpty()) return;
+        if (adapter != null && !adapter.getCurrentList().isEmpty()) {
+            Message lastMsg = adapter.getCurrentList().get(adapter.getCurrentList().size() - 1);
+            try {
+                long msgId = Long.parseLong(lastMsg.getId());
+                connectionManager.sendReadReceipt(ServerConnectionManager.parseChannelId(roomId), msgId);
+            } catch (NumberFormatException ignored) {}
+        }
     }
 
     @Override

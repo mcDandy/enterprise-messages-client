@@ -2259,6 +2259,20 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
         }
     }
 
+    public void sendReadReceipt(long channelId, long messageId) {
+        if (!webSocketClient.isConnected()) {
+            return;
+        }
+        try {
+            ByteBuffer payload = ByteBuffer.allocate(Long.BYTES);
+            payload.putLong(messageId);
+            webSocketClient.sendPacketAsync(new Packet(Packet.TYPE_READ, payload.array()));
+            Log.d(TAG, "Sent READ receipt for message " + messageId + " in channel " + channelId);
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to send read receipt", e);
+        }
+    }
+
     public void disconnect() {
         webSocketClient.disconnect();
     }
@@ -2423,6 +2437,29 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
                     notifyError(errorMsg);
 
                     break;
+
+                case Packet.TYPE_CHANNEL_MEMBER_INFO: {
+                    byte[] infoPayload = packet.getPayload();
+                    if (infoPayload == null || infoPayload.length < 4 * Long.BYTES) {
+                        Log.w(TAG, "Received invalid CHANNEL_MEMBER_INFO payload");
+                        break;
+                    }
+                    ByteBuffer infoBuffer = ByteBuffer.wrap(infoPayload);
+                    long channelId = infoBuffer.getLong();
+                    long userId = infoBuffer.getLong();
+                    long lastDelivered = infoBuffer.getLong();
+                    long lastRead = infoBuffer.getLong();
+
+                    Log.d(TAG, "Received CHANNEL_MEMBER_INFO: channel=" + channelId + ", user=" + userId
+                            + ", delivered=" + lastDelivered + ", read=" + lastRead);
+
+                    mainHandler.post(() -> {
+                        for (ConnectionListener l : listeners) {
+                            l.onMemberInfoReceived(channelId, userId, lastDelivered, lastRead);
+                        }
+                    });
+                    break;
+                }
 
                 case Packet.TYPE_KEY_ROTATION: {
                     Log.d(TAG, "Key rotation initiated by the server");
@@ -2594,6 +2631,9 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
         void onError(String errorMessage);
 
         default void onAuthRequired() {
+        }
+
+        default void onMemberInfoReceived(long channelId, long userId, long lastDeliveredMessageId, long lastReadMessageId) {
         }
     }
 

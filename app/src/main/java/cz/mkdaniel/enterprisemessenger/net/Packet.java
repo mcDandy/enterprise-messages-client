@@ -36,8 +36,10 @@ public class Packet {
     public static final byte TYPE_UNKNOWN = 0x0;
     public static final byte TYPE_CHAT_MESSAGE = 0x1;
     public static final byte TYPE_ACK = 0x2;
+    public static final byte TYPE_READ = 0x3;
     public static final byte TYPE_KEY_ROTATION = 0xa;
     public static final byte TYPE_UNICAST_ROTATED_KEY = 0xd;
+    public static final byte TYPE_CHANNEL_MEMBER_INFO = 0x0e;
 
     private final byte type;
     private final int payloadLength;
@@ -98,8 +100,12 @@ public class Packet {
                 return "ACK";
             case TYPE_KEY_ROTATION:
                 return "KEY_ROTATION";
+            case TYPE_READ:
+                return "READ";
             case TYPE_UNICAST_ROTATED_KEY:
                 return "UNICAST_ROTATED_KEY";
+            case TYPE_CHANNEL_MEMBER_INFO:
+                return "CHANNEL_MEMBER_INFO";
             default:
                 return String.format("0x%02x", type);
         }
