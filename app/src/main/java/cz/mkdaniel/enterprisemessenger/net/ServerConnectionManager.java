@@ -864,14 +864,18 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
             for (final ChannelKeyRegistry.KeyVersion candidate : channelKeys.decryptCandidates(channelId)) {
                 if (candidate.version().equals(keyVersion)) {
                     try {
-                        return cryptoManager.decryptPayload(ciphertext, candidate.key());
-                    } catch (final Exception ignored) {
+                        byte[] plaintext = cryptoManager.decryptPayload(ciphertext, candidate.key());
+                        Log.d(TAG, "decryptChatPayloadForVersion: Successfully decrypted with key version " + keyVersion);
+                        return plaintext;
+                    } catch (final Exception e) {
+                        Log.w(TAG, "decryptChatPayloadForVersion: Failed to decrypt with key version " + keyVersion + ": " + e.getMessage());
                         return null;
                     }
                 }
             }
+            Log.w(TAG, "decryptChatPayloadForVersion: Key version " + keyVersion + " not found in candidates for channel " + channelId);
         }
-        return decryptChatPayload(ciphertext);
+        return decryptChatPayload(channelId, ciphertext);
     }
 
     /**
@@ -2069,40 +2073,63 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
      *
      * @return the plaintext envelope, or {@code null} when no known key opens the payload
      */
-    private byte[] decryptChatPayload(final byte[] ciphertext) {
+    private byte[] decryptChatPayload(final long channelId, final byte[] ciphertext) {
         final java.util.List<byte[]> candidates = new ArrayList<>();
 
         if (activeChannelKey != null) {
             candidates.add(activeChannelKey);
         }
 
-        for (final long channelId : new long[]{activeChannelId, visibleChannelId}) {
-            if (channelId < 0) {
+        for (final long chId : new long[]{channelId, activeChannelId, visibleChannelId}) {
+            if (chId < 0) {
                 continue;
             }
 
-            for (final ChannelKeyRegistry.KeyVersion version : channelKeys.decryptCandidates(channelId)) {
-                candidates.add(version.key());
+            for (final ChannelKeyRegistry.KeyVersion version : channelKeys.decryptCandidates(chId)) {
+                boolean alreadyPresent = false;
+                for (byte[] existing : candidates) {
+                    if (java.util.Arrays.equals(existing, version.key())) {
+                        alreadyPresent = true;
+                        break;
+                    }
+                }
+                if (!alreadyPresent) {
+                    candidates.add(version.key());
+                }
             }
         }
 
         // Last resort: the key of the scheme used before channel keys were random, so messages an
         // older build wrote remain readable. Read-only by construction.
-        for (final long channelId : new long[]{activeChannelId, visibleChannelId}) {
-            final byte[] legacyKey = legacyReadKey(channelId);
+        for (final long chId : new long[]{channelId, activeChannelId, visibleChannelId}) {
+            final byte[] legacyKey = legacyReadKey(chId);
             if (legacyKey != null) {
-                candidates.add(legacyKey);
+                boolean alreadyPresent = false;
+                for (byte[] existing : candidates) {
+                    if (java.util.Arrays.equals(existing, legacyKey)) {
+                        alreadyPresent = true;
+                        break;
+                    }
+                }
+                if (!alreadyPresent) {
+                    candidates.add(legacyKey);
+                }
             }
         }
 
+        int index = 0;
         for (final byte[] key : candidates) {
             try {
-                return cryptoManager.decryptPayload(ciphertext, key);
-            } catch (final Exception ignored) {
-                // Wrong channel key - try the next one. A bad GCM tag is the normal signal here.
+                byte[] plaintext = cryptoManager.decryptPayload(ciphertext, key);
+                Log.d(TAG, "decryptChatPayload: Successfully decrypted message for channel " + channelId + " using candidate key #" + index);
+                return plaintext;
+            } catch (final Exception e) {
+                Log.d(TAG, "decryptChatPayload: candidate key #" + index + " failed: " + e.getMessage());
             }
+            index++;
         }
 
+        Log.w(TAG, "decryptChatPayload: Failed to decrypt message for channel " + channelId + " with " + candidates.size() + " candidate keys");
         return null;
     }
 
@@ -2158,7 +2185,7 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
                     final byte[] ciphertext = new byte[chatPayload.remaining()];
                     chatPayload.get(ciphertext);
 
-                    byte[] plaintext = decryptChatPayload(ciphertext);
+                    byte[] plaintext = decryptChatPayload(packetChannelId, ciphertext);
                     if (plaintext == null) {
                         Log.w(TAG, "CHAT_MESSAGE could not be decrypted with the active channel key");
                         break;
