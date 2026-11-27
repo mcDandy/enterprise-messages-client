@@ -37,15 +37,37 @@
                     android:textSize="15sp"
                     tools:text="Hello, this is a sent message!"/>
 
-            <TextView
-                    android:id="@+id/text_message_time"
+            <LinearLayout
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_gravity="end"
                     android:layout_marginTop="4dp"
-                    android:textColor="#B3FFFFFF"
-                    android:textSize="11sp"
-                    tools:text="12:45 PM"/>
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                <TextView
+                        android:id="@+id/text_message_time"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:textColor="#B3FFFFFF"
+                        android:textSize="11sp"
+                        tools:text="12:45 PM"/>
+
+                <!-- Delivery state of a message this device wrote: a clock while the server has
+                     not confirmed it, a single check once it has. Gone for anything received,
+                     which is why the view is hidden rather than absent from the layout. -->
+                <TextView
+                        android:id="@+id/text_message_status"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="5dp"
+                        android:textColor="#B3FFFFFF"
+                        android:textSize="11sp"
+                        android:visibility="gone"
+                        tools:text="\u2713"
+                        tools:visibility="visible"/>
+
+            </LinearLayout>
 
         </LinearLayout>
 

@@ -31,6 +31,9 @@
 
     <color name="msg_bubble_sent">#4F46E5</color>
     <color name="msg_text_sent">#FFFFFF</color>
+    <!-- A message the server has not accepted yet. Still legible on the indigo bubble, but
+         visibly dimmer than a sent one. -->
+    <color name="msg_text_unsent">#80FFFFFF</color>
 
     <color name="msg_bubble_received">#F1F5F9</color>
     <color name="msg_text_received">#0F172A</color>

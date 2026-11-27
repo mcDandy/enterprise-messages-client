@@ -23,9 +23,11 @@ import androidx.recyclerview.widget.RecyclerView;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
@@ -53,6 +55,11 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
      */
     private static final long DROP_EXPLAINED_MILLIS = 2_000L;
     private static final long PENDING_RECONCILIATION_WINDOW_MILLIS = 60_000L;
+    /**
+     * Opacity a sent bubble has as soon as the first recipient has the message. Below this the
+     * white text stops being readable against the page background.
+     */
+    private static final float BUBBLE_MIN_ALPHA = 0.2f;
     /**
      * Android 17 (targetSdk 37) blocks every socket to a LAN address until the user grants
      * ACCESS_LOCAL_NETWORK; without it connect() just times out. Requested before connecting.
@@ -233,6 +240,10 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
         // Suppress push notifications for the channel being looked at and clear the pending one
         if (connectionManager != null) {
             connectionManager.setVisibleChannel(channelId);
+            // The server reports a member's cursor only when it moves, so messages delivered
+            // before this screen opened would stay unmarked until someone sent something. One
+            // listing fills in what is already true; live frames take over afterwards.
+            connectionManager.fetchPeerDeliveryCursors(channelId);
         }
         NotificationHelper.cancelNotificationForChannel(requireContext(), channelId);
         pollHandler.postDelayed(pollRunnable, 3_000L);
@@ -357,7 +368,8 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
                             message.getText(),
                             message.getSender(),
                             message.getTimestamp(),
-                            false));
+                            false,
+                            true));
                     break;
                 }
             }
@@ -431,11 +443,18 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
     }
 
     /**
-     * Swaps in the copy of a message that arrived later carrying its server id, in place so the
-     * row keeps its position and the list does not jump. A live message enters the list before the
-     * server names its position, and without this it would stay nameless in the list even after
-     * the poll returned it, so the receipt could never reach it.
+     * Peer delivery cursors moved. The bubble's background opacity is derived at bind time from
+     * these cursors rather than stored per message, so no list has to be rebuilt - the rows are
+     * repainted and re-read the new state.
      */
+    @Override
+    public void onPeerDeliveryProgress(Map<Long, Long> cursors, int peerCount) {
+        if (!isAdded() || adapter == null) {
+            return;
+        }
+        adapter.setPeerDelivery(cursors, peerCount);
+    }
+
     @Override
     public void onMessageReplaced(Message message) {
         if (!isAdded() || adapter == null) return;
@@ -527,11 +546,81 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
 
     // ---------- adapter & view holder ----------
 
+    /**
+     * Background of a bubble the user wrote, fading in as the message reaches more recipients.
+     * <p>
+     * Not yet accepted by the server: the solid bubble colour, so an unsent message is still
+     * unmistakably a message. Accepted but not yet picked up by anyone: fully transparent, so the
+     * text sits on the page with no bubble at all. From the first recipient onwards the bubble
+     * returns, starting at {@link #BUBBLE_MIN_ALPHA} so the text stays legible against it, and
+     * reaching full opacity when every other member of the channel has the message.
+     */
+    private static int bubbleColor(android.content.Context context, boolean accepted,
+                                   int recipients, int peerCount) {
+        final int solid = androidx.core.content.ContextCompat.getColor(context,
+                R.color.msg_bubble_sent);
+        if (!accepted) {
+            return solid;
+        }
+        if (recipients <= 0) {
+            return solid & 0x00FFFFFF;
+        }
+        // A channel of one other member goes solid on their first acknowledgement; a channel of
+        // ten climbs one tenth of the way per recipient. Clamped in case a cursor arrives for a
+        // member the listing did not include, which would otherwise divide by zero or overshoot.
+        final int steps = Math.max(peerCount, 1);
+        final float fraction = Math.min(1f, (float) recipients / steps);
+        final int alpha = (int) (0xFF * (BUBBLE_MIN_ALPHA
+                + fraction * (1f - BUBBLE_MIN_ALPHA)));
+        return (Math.min(0xFF, Math.max(0, alpha)) << 24) | (solid & 0x00FFFFFF);
+    }
+
     private static class MessageAdapter extends ListAdapter<Message, RecyclerView.ViewHolder> {
 
         private static final int VIEW_TYPE_SENT = 1;
         private static final int VIEW_TYPE_RECEIVED = 2;
         private final SimpleDateFormat dateFormat = new SimpleDateFormat("HH:mm", Locale.getDefault());
+        /**
+         * Each other member's user id mapped to the highest message id their client has
+         * acknowledged. Counting the entries that reach a given message gives how many recipients
+         * have it, which drives the bubble's opacity.
+         */
+        private Map<Long, Long> peerCursors = new HashMap<>();
+        /**
+         * How many other members the channel has. Not derivable from {@link #peerCursors}, because
+         * a member who has acknowledged nothing has no entry, and would otherwise be counted as
+         * having left the channel.
+         */
+        private int peerCount = 0;
+
+        /**
+         * Replaces the peer delivery state and repaints. A full repaint rather than a diff: the
+         * cursors are not part of {@link Message}, so {@code areContentsTheSame} cannot see them
+         * change, and the list is short enough that rebinding it is cheaper than threading the
+         * state through the model.
+         */
+        void setPeerDelivery(Map<Long, Long> cursors, int peerCount) {
+            this.peerCursors = new HashMap<>(cursors);
+            this.peerCount = peerCount;
+            notifyDataSetChanged();
+        }
+
+        /**
+         * How many of the channel's other members have this message on their device.
+         */
+        private int recipientsOf(Message message) {
+            final long id = message.getServerId();
+            if (id <= 0) {
+                return 0;
+            }
+            int reached = 0;
+            for (final Long cursor : peerCursors.values()) {
+                if (cursor >= id) {
+                    reached++;
+                }
+            }
+            return reached;
+        }
 
         protected MessageAdapter() {
             super(new DiffUtil.ItemCallback<Message>() {
@@ -544,7 +633,12 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
                 public boolean areContentsTheSame(@NonNull Message oldItem, @NonNull Message newItem) {
                     return oldItem.getText().equals(newItem.getText())
                             && oldItem.getSender().equals(newItem.getSender())
-                            && oldItem.getTimestamp() == newItem.getTimestamp();
+                            && oldItem.getTimestamp() == newItem.getTimestamp()
+                            // A message the user wrote changes colour and mark when the server
+                            // accepts it, so that has to count as a content change or the row
+                            // never repaints from grey to normal.
+                            && oldItem.isDelivered() == newItem.isDelivered()
+                            && oldItem.isPeerDelivered() == newItem.isPeerDelivered();
                 }
             });
         }
@@ -580,6 +674,37 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
                 SentMessageViewHolder sentHolder = (SentMessageViewHolder) holder;
                 sentHolder.binding.textMessageBody.setText(message.getText());
                 sentHolder.binding.textMessageTime.setText(timeStr);
+
+                final boolean accepted = message.isDelivered();
+                final int recipients = recipientsOf(message);
+                final var context = holder.itemView.getContext();
+
+                // A message the server has not accepted yet is greyed to match its mark, so the
+                // two read as one state rather than a bright bubble claiming a send that has not
+                // landed. Colour and background are set on every bind because rows are recycled.
+                sentHolder.binding.textMessageBody.setTextColor(
+                        androidx.core.content.ContextCompat.getColor(context,
+                                accepted ? R.color.msg_text_sent : R.color.msg_text_unsent));
+
+                // The bubble fills in as recipients pick the message up: fully transparent until
+                // the first one has it, then opaque enough to read the text against, up to fully
+                // solid once every other member of the channel has it. Interpolating against the
+                // channel's member count rather than a fixed number is what makes a two-member
+                // channel reach solid rather than crawling towards it.
+                sentHolder.binding.cardMessageBubble.setCardBackgroundColor(
+                        bubbleColor(context, accepted, recipients, peerCount));
+
+                final int statusText = recipients > 0 ? R.string.message_status_delivered
+                        : accepted ? R.string.message_status_sent
+                                : R.string.message_status_unsent;
+                sentHolder.binding.textMessageStatus.setVisibility(View.VISIBLE);
+                sentHolder.binding.textMessageStatus.setText(statusText);
+                sentHolder.binding.textMessageStatus.setContentDescription(
+                        context.getString(recipients > 0
+                                ? R.plurals.message_status_delivered_description
+                                : accepted ? R.string.message_status_sent_description
+                                        : R.string.message_status_unsent_description,
+                                recipients));
             } else if (holder instanceof ReceivedMessageViewHolder) {
                 ReceivedMessageViewHolder receivedHolder = (ReceivedMessageViewHolder) holder;
                 receivedHolder.binding.textMessageSender.setText(message.getSender());

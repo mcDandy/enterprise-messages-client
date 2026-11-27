@@ -139,6 +139,23 @@
     <string name="subtitle_server_item">Workspace</string>
     <string name="channel_hash">#</string>
 
+    <!-- Delivery state of a message the user wrote, shown beside its time.
+         The server confirms a message only by returning it in the channel's history, so between
+         sending and the next poll it reads as not yet accepted, and the bubble is greyed to match.
+         A third state - another member's client having it - has no glyph yet because nothing on
+         the wire reports it; see Message#peerDelivered.
+         Content descriptions say what the marks mean, since a glyph alone is not announceable to
+         a screen reader. -->
+    <string name="message_status_unsent">\u25CC</string>
+    <string name="message_status_sent">\u2713</string>
+    <string name="message_status_delivered">\u2713\u2713</string>
+    <string name="message_status_unsent_description">Not sent yet</string>
+    <string name="message_status_sent_description">Sent</string>
+    <plurals name="message_status_delivered_description">
+        <item quantity="one">Delivered to %1$d recipient</item>
+        <item quantity="other">Delivered to %1$d recipients</item>
+    </plurals>
+
     <string name="action_admin_panel">Admin Panel</string>
     <string name="dialog_admin_panel_title">Server Admin Panel: %1$s</string>
     <string name="action_ban_user">Ban User</string>

@@ -15,6 +15,7 @@ import org.json.JSONArray;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Arrays;
 import java.util.List;
@@ -161,6 +162,25 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
      * arrived since.
      */
     private volatile long highestKnownMessageId = -1L;
+    /**
+     * Furthest message each <i>other</i> member of the channel has had their client acknowledge,
+     * keyed by user id. The server broadcasts one member's cursors to every online member of the
+     * channel, and the {@code userId} in the frame names the member the cursors belong to, not the
+     * recipient - so a frame about anyone but this device is a delivery confirmation for messages
+     * this device sent.
+     * <p>
+     * Only the maximum across members is kept, because the UI has one delivered state rather than
+     * one per member. This device's own id is never stored here: acknowledging a message the
+     * device itself wrote would mark it delivered the instant it was sent.
+     */
+    private final Map<Long, Long> peerDeliveredCursors = new ConcurrentHashMap<>();
+    /**
+     * How many other members the channel had when the cursors were last listed. The server only
+     * reports a member's cursor when it moves, so a peer who has acknowledged nothing is absent
+     * from every frame and from the snapshot; this is what tells the UI a count of two out of an
+     * unknown total is really two out of five.
+     */
+    private volatile int peerCount = 0;
 
     /**
      * A sent message still waiting for its server id, with the instant it was sent so a stale one
@@ -2977,11 +2997,23 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
                     Log.d(TAG, "Received CHANNEL_MEMBER_INFO: channel=" + channelId + ", user=" + userId
                             + ", delivered=" + lastDelivered + ", read=" + lastRead);
 
-                    if (lastDelivered > highestKnownMessageId) {
-                        highestKnownMessageId = lastDelivered;
-                    }
-                    if (channelId == visibleChannelId) {
-                        assignServerIds(lastDelivered);
+                    final long myUserId = resolveUserId();
+                    Log.d(TAG, "CHANNEL_MEMBER_INFO describes member " + userId
+                            + (userId == myUserId ? " (this device)" : " (a peer)"));
+
+                    if (userId == myUserId) {
+                        // This device's own row: it says what this device has received, which is
+                        // how a message this device wrote gets its id. It says nothing about any
+                        // peer, and treating it as one would mark a message delivered the moment
+                        // it was sent.
+                        if (lastDelivered > highestKnownMessageId) {
+                            highestKnownMessageId = lastDelivered;
+                        }
+                        if (channelId == visibleChannelId) {
+                            assignServerIds(lastDelivered);
+                        }
+                    } else if (channelId == visibleChannelId) {
+                        recordPeerDelivery(userId, lastDelivered);
                     }
 
                     mainHandler.post(() -> {
@@ -3168,6 +3200,86 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
                 message.getTimestamp(), message.isPending());
     }
 
+    /**
+     * Records that {@code userId}'s client has acknowledged everything up to {@code lastDelivered},
+     * and tells the UI so messages at or below it can be marked delivered.
+     * <p>
+     * Monotonic per member: the server's own update is monotonic, but frames can arrive out of
+     * order across a reconnect, and a stale frame must not un-deliver a message already shown as
+     * delivered.
+     */
+    private void recordPeerDelivery(final long userId, final long lastDelivered) {
+        final long previous = peerDeliveredCursors.merge(userId, lastDelivered, Math::max);
+        if (previous >= lastDelivered) {
+            return;
+        }
+        mainHandler.post(this::notifyPeerDelivery);
+    }
+
+    /**
+     * Publishes the whole peer cursor map, so the UI can count how many recipients acknowledged
+     * any given message. The map is sent rather than a single high-water mark because the number
+     * of recipients is what the UI shows: one member having read up to 90 and five members having
+     * read up to 90 are different states.
+     */
+    private void notifyPeerDelivery() {
+        if (listeners.isEmpty()) {
+            return;
+        }
+        final Map<Long, Long> snapshot = new HashMap<>(peerDeliveredCursors);
+        final int peers = peerCount;
+        mainHandler.post(() -> {
+            for (ConnectionListener l : listeners) {
+                l.onPeerDeliveryProgress(snapshot, peers);
+            }
+        });
+    }
+
+    /**
+     * Loads each member's delivered cursor once ({@code GET /api/channels/{id}/members}) so
+     * messages already delivered before this device opened the channel are marked as such rather
+     * than waiting for a frame that will not come. Live updates arrive afterwards over
+     * {@code CHANNEL_MEMBER_INFO}.
+     */
+    public void fetchPeerDeliveryCursors(final long channelId) {
+        if (channelId < 0) {
+            return;
+        }
+        executor.execute(() -> {
+            if (ensureJwt().isEmpty()) {
+                return;
+            }
+            final long myUserId = resolveUserId();
+            final RestResponse response = executeGet(
+                    String.format(Locale.US, "/api/channels/%d/members", channelId));
+            final JSONArray members = response.asJsonArray();
+            if (!response.isSuccessful() || members == null) {
+                // Not worth surfacing: delivery marks are an enhancement, and the live frames
+                // still fill them in for anything sent from now on.
+                Log.d(TAG, "Could not load member delivery cursors for channel " + channelId);
+                return;
+            }
+            int peers = 0;
+            for (int i = 0; i < members.length(); i++) {
+                final JSONObject member = members.optJSONObject(i);
+                if (member == null) {
+                    continue;
+                }
+                final long memberId = member.optLong("userId", -1L);
+                if (memberId < 0 || memberId == myUserId) {
+                    continue;
+                }
+                peers++;
+                recordPeerDelivery(memberId, member.optLong("lastDeliveredMessageId", 0L));
+            }
+            // This listing is the only place the channel's size is knowable: a member who has
+            // acknowledged nothing has no cursor to broadcast, so without a total the UI cannot
+            // tell one recipient out of two from one recipient out of twenty.
+            peerCount = peers;
+            mainHandler.post(this::notifyPeerDelivery);
+        });
+    }
+
     private void notifyError(String error) {
         mainHandler.post(() -> {
             for (ConnectionListener l : listeners) {
@@ -3199,6 +3311,17 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
          * that only shows notifications need not care.
          */
         default void onMessageReplaced(Message message) {
+        }
+
+        /**
+         * Peer delivery cursors changed. {@code cursors} maps each other member's user id to the
+         * highest message id their client has acknowledged, so a message is delivered to that many
+         * recipients when its own id is at or below the entry. {@code peerCount} is how many other
+         * members the channel has, which is not derivable from {@code cursors} because a member
+         * who has acknowledged nothing has no entry. Called on the main thread; the default does
+         * nothing.
+         */
+        default void onPeerDeliveryProgress(Map<Long, Long> cursors, int peerCount) {
         }
 
         void onError(String errorMessage);
