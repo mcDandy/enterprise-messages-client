@@ -759,7 +759,7 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
                 }
 
                 final String endpoint = String.format(Locale.US,
-                        "/api/channels/%d/messages?page=%d&size=%d&sort=sentAt,desc&sort=id,desc",
+                        "/api/channels/%d/messages?page=%d&size=%d&sort=sentAt,desc",
                         channelId, page, size);
                 final RestResponse response = executeGet(endpoint);
                 final JSONObject result = response.asJson();
