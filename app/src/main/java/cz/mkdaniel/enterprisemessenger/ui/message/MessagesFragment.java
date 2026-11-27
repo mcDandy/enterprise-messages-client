@@ -56,11 +56,6 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
     private static final long DROP_EXPLAINED_MILLIS = 2_000L;
     private static final long PENDING_RECONCILIATION_WINDOW_MILLIS = 60_000L;
     /**
-     * Opacity a sent bubble has as soon as the first recipient has the message. Below this the
-     * white text stops being readable against the page background.
-     */
-    private static final float BUBBLE_MIN_ALPHA = 0.2f;
-    /**
      * Android 17 (targetSdk 37) blocks every socket to a LAN address until the user grants
      * ACCESS_LOCAL_NETWORK; without it connect() just times out. Requested before connecting.
      */
@@ -550,10 +545,12 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
      * Background of a bubble the user wrote, fading in as the message reaches more recipients.
      * <p>
      * Not yet accepted by the server: the solid bubble colour, so an unsent message is still
-     * unmistakably a message. Accepted but not yet picked up by anyone: fully transparent, so the
-     * text sits on the page with no bubble at all. From the first recipient onwards the bubble
-     * returns, starting at {@link #BUBBLE_MIN_ALPHA} so the text stays legible against it, and
-     * reaching full opacity when every other member of the channel has the message.
+     * unmistakably a message. From there the bubble fades in linearly with the share of the
+     * channel's other members that have it - fully transparent while nobody has pulled it,
+     * completely solid once everybody has.
+     * <p>
+     * The ramp starts at nothing rather than at some visible minimum, so the first recipient
+     * produces a small but real change instead of a jump from invisible to a fixed opacity.
      */
     private static int bubbleColor(android.content.Context context, boolean accepted,
                                    int recipients, int peerCount) {
@@ -562,17 +559,13 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
         if (!accepted) {
             return solid;
         }
-        if (recipients <= 0) {
-            return solid & 0x00FFFFFF;
-        }
         // A channel of one other member goes solid on their first acknowledgement; a channel of
         // ten climbs one tenth of the way per recipient. Clamped in case a cursor arrives for a
         // member the listing did not include, which would otherwise divide by zero or overshoot.
         final int steps = Math.max(peerCount, 1);
-        final float fraction = Math.min(1f, (float) recipients / steps);
-        final int alpha = (int) (0xFF * (BUBBLE_MIN_ALPHA
-                + fraction * (1f - BUBBLE_MIN_ALPHA)));
-        return (Math.min(0xFF, Math.max(0, alpha)) << 24) | (solid & 0x00FFFFFF);
+        final float fraction = Math.min(1f, Math.max(0f, (float) recipients / steps));
+        final int alpha = (int) (0xFF * fraction);
+        return (alpha << 24) | (solid & 0x00FFFFFF);
     }
 
     private static class MessageAdapter extends ListAdapter<Message, RecyclerView.ViewHolder> {
