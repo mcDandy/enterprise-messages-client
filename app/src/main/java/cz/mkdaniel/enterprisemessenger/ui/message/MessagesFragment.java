@@ -1,6 +1,5 @@
 package cz.mkdaniel.enterprisemessenger.ui.message;
 
-import android.content.res.ColorStateList;
 import android.graphics.Color;
 import android.os.Bundle;
 import android.util.Log;
@@ -9,7 +8,6 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.EditText;
 import android.widget.ImageButton;
-import android.widget.TextView;
 import android.widget.Toast;
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
@@ -58,17 +56,13 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
     /**
      * Android 17 (targetSdk 37) blocks every socket to a LAN address until the user grants
      * ACCESS_LOCAL_NETWORK; without it connect() just times out. Requested before connecting.
+     * <p>
+     * Registered in {@link #onViewCreated} rather than as a field initializer, because registering
+     * during construction leaks {@code this} into the fragment's activity-result state before the
+     * fragment is built, where a restart replaying a pending result would reach a half-constructed
+     * fragment.
      */
-    private final ActivityResultLauncher<String> localNetworkPermissionLauncher =
-            registerForActivityResult(new ActivityResultContracts.RequestPermission(), isGranted -> {
-                if (isGranted) {
-                    Log.d(TAG, "ACCESS_LOCAL_NETWORK granted, connecting to the deployment server");
-                    startConnection();
-                } else {
-                    Log.w(TAG, "ACCESS_LOCAL_NETWORK denied - cannot reach the deployment server");
-                    updateInputUnderline(false);
-                }
-            });
+    private ActivityResultLauncher<String> localNetworkPermissionLauncher;
     private FragmentMessagesBinding binding;
     private MessageAdapter adapter;
     private ServerConnectionManager connectionManager;
@@ -241,6 +235,17 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
     @Override
     public void onViewCreated(@NonNull View view, Bundle savedInstanceState) {
         super.onViewCreated(view, savedInstanceState);
+
+        localNetworkPermissionLauncher = registerForActivityResult(
+                new ActivityResultContracts.RequestPermission(), isGranted -> {
+                    if (isGranted) {
+                        Log.d(TAG, "ACCESS_LOCAL_NETWORK granted, connecting to the deployment server");
+                        startConnection();
+                    } else {
+                        Log.w(TAG, "ACCESS_LOCAL_NETWORK denied - cannot reach the deployment server");
+                        updateInputUnderline(false);
+                    }
+                });
 
         // --- Arguments setup (virtual server and channel) ---
         // No key travels in the arguments: the channel's key is read from the sealed registry when
