@@ -98,7 +98,25 @@ public abstract class BaseInstrumentedTest {
                     argumentOrDefault("password", DEFAULT_PASSWORD));
             onView(withId(R.id.button_login)).perform(click());
         }
-        onView(withId(R.id.recyclerview_transform)).check(matches(isDisplayed()));
+        waitForViewDisplayed(R.id.recyclerview_transform);
+    }
+
+    /**
+     * Waits for a view to become visible while asynchronous UI work completes.
+     *
+     * @param viewId resource ID of the view
+     */
+    protected void waitForViewDisplayed(int viewId) {
+        long deadline = SystemClock.elapsedRealtime() + WAIT_TIMEOUT_MS;
+
+        while (SystemClock.elapsedRealtime() < deadline) {
+            if (isViewDisplayed(viewId)) {
+                return;
+            }
+            SystemClock.sleep(250);
+        }
+
+        onView(withId(viewId)).check(matches(isDisplayed()));
     }
 
     /**
