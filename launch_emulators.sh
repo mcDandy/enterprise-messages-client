@@ -35,6 +35,13 @@ run_instrumented_test() {
         "$test_component"
 }
 
+if [[ $1 == "goal:test:all" ]];
+then
+    echo "running all JVM unit and integration tests (excluding instrumentation tests)"
+    ./gradlew testDebugUnitTest
+    exit "$?"
+fi
+
 echo "verify tools"
 $android --version
 $adb --version
@@ -143,11 +150,6 @@ case "$1" in
         ;;
     "goal:test:networkHostnamePermission")
         run_instrumented_test "LocalNetworkPermissionInstrumentedTest" "treatsHostnamesConservativelyButIgnoresBlankInput" "$2" ||
-            script_status=1
-        ;;
-    "goal:test:all")
-        echo "running all JVM unit and connected Android instrumented tests"
-        ./gradlew testDebugUnitTest connectedDebugAndroidTest ||
             script_status=1
         ;;
 esac
