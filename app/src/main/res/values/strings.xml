@@ -156,6 +156,18 @@
         <item quantity="other">Delivered to %1$d recipients</item>
     </plurals>
 
+    <!-- Per-recipient breakdown of one message the user wrote, opened by long-pressing its
+         bubble. The three sections are the three states a member can be in for that message, and
+         they are always all present so an empty one reads as "nobody yet" rather than as a section
+         the app forgot to fill. -->
+    <string name="dialog_delivery_status_title">Message status</string>
+    <string name="delivery_status_section_read">Read by</string>
+    <string name="delivery_status_section_delivered">Delivered to</string>
+    <string name="delivery_status_section_pending">Pending</string>
+    <string name="delivery_status_nobody">Nobody yet</string>
+    <string name="delivery_status_no_server_id">This message has not reached the server yet</string>
+    <string name="delivery_status_action_close">Close</string>
+
     <string name="action_admin_panel">Admin Panel</string>
     <string name="dialog_admin_panel_title">Server Admin Panel: %1$s</string>
     <string name="action_ban_user">Ban User</string>
