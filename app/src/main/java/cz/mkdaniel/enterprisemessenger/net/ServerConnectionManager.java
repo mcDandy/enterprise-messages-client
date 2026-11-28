@@ -197,6 +197,45 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
         volatile int peerCount = 0;
 
         /**
+         * Each other member's user id mapped to the highest message id their client has reported as
+         * read. The server's {@code CHANNEL_MEMBER_INFO} frame carries a read cursor next to the
+         * delivery one, and the REST member listing carries {@code lastReadMessageId} next to
+         * {@code lastDeliveredMessageId}; both land here.
+         * <p>
+         * Kept apart from {@link #cursors} rather than folded into it, because the two answer
+         * different questions: a member whose device pulled the message into its database has it,
+         * while a member who opened the channel has read it. A message can sit in the first group
+         * and not the second, and the delivery dialog has to tell them apart.
+         * <p>
+         * A member who has read nothing is absent, exactly as with {@link #cursors}, so
+         * {@link #peerCount} stays the only total.
+         */
+        final Map<Long, Long> readCursors = new ConcurrentHashMap<>();
+
+        /**
+         * Raises {@code userId}'s read cursor to {@code lastRead}, never lowering it.
+         * <p>
+         * Monotonic for the same reason {@link #raiseCursor(long, long)} is: frames can arrive out
+         * of order across a reconnect, and a stale frame must not un-read a message already shown
+         * as read.
+         *
+         * @param userId the identifier of the user
+         * @param lastRead the highest message ID the peer reported as read
+         * @return {@code true} when the cursor actually moved, so the caller knows a repaint is due
+         */
+        boolean raiseReadCursor(final long userId, final long lastRead) {
+            final Long before = readCursors.putIfAbsent(userId, lastRead);
+            if (before == null) {
+                return true;
+            }
+            if (before >= lastRead) {
+                return false;
+            }
+
+            return readCursors.replace(userId, before, lastRead);
+        }
+
+        /**
          * Raises {@code userId}'s cursor to {@code lastDelivered}, never lowering it.
          *
          * @return {@code true} when the cursor actually moved, so the caller knows a repaint is due
@@ -233,8 +272,29 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
             this.peerCount = peerCount;
         }
 
+        /**
+         * Replaces the whole state with one fresh member listing, including each member's read
+         * cursor. {@code readCursors} may hold fewer entries than {@code cursors} - a member who
+         * has received messages but never opened the channel has a delivery cursor and no read one -
+         * and an absent member is simply treated as having read nothing.
+         *
+         * @param cursors the listed delivery cursors, this device's own row already excluded
+         * @param readCursors the listed read cursors, likewise without this device's own row
+         * @param peerCount how many other members the listing contains
+         */
+        void replaceWith(final Map<Long, Long> cursors, final Map<Long, Long> readCursors,
+                         final int peerCount) {
+            replaceWith(cursors, peerCount);
+            this.readCursors.clear();
+            this.readCursors.putAll(readCursors);
+        }
+
         Map<Long, Long> cursorsSnapshot() {
             return new HashMap<>(cursors);
+        }
+
+        Map<Long, Long> readCursorsSnapshot() {
+            return new HashMap<>(readCursors);
         }
     }
 
@@ -3521,6 +3581,7 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
                         }
                     } else if (channelId == visibleChannelId) {
                         recordPeerDelivery(channelId, userId, lastDelivered);
+                        recordPeerRead(channelId, userId, lastRead);
                     }
 
                     mainHandler.post(() -> {
@@ -3774,6 +3835,26 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
     }
 
     /**
+     * Records that {@code userId}'s client, in {@code channelId}, has read everything up to
+     * {@code lastRead}.
+     * <p>
+     * Deliberately does not repaint the bubbles: the bubble's opacity tracks the delivery cursor,
+     * because that is the state a sender can act on while the chat is open. The read cursor only
+     * ever feeds the delivery dialog, which reads it on demand, so a read receipt arriving while
+     * the user types would otherwise repaint the whole list for no visible change.
+     *
+     * @param channelId the channel the cursor belongs to
+     * @param userId the identifier of the user
+     * @param lastRead the highest message ID the peer reported as read
+     */
+    private void recordPeerRead(final long channelId, final long userId, final long lastRead) {
+        if (channelId < 0 || lastRead <= 0) {
+            return;
+        }
+        deliveryState(channelId).raiseReadCursor(userId, lastRead);
+    }
+
+    /**
      * Publishes {@code channelId}'s peer cursor map, so the UI can count how many recipients
      * acknowledged any given message. The map is sent rather than a single high-water mark because
      * the number of recipients is what the UI shows: one member having read up to 90 and five
@@ -3847,6 +3928,7 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
                 return;
             }
             final Map<Long, Long> listedCursors = new HashMap<>();
+            final Map<Long, Long> listedReadCursors = new HashMap<>();
             for (int i = 0; i < members.length(); i++) {
                 final JSONObject member = members.optJSONObject(i);
                 if (member == null) {
@@ -3857,13 +3939,197 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
                     continue;
                 }
                 listedCursors.put(memberId, member.optLong("lastDeliveredMessageId", 0L));
+                // The same row carries the read cursor. A member who has never opened the channel
+                // reports 0, which is exactly "has read nothing" and needs no entry of its own.
+                final long lastRead = member.optLong("lastReadMessageId", 0L);
+                if (lastRead > 0) {
+                    listedReadCursors.put(memberId, lastRead);
+                }
             }
             // This listing is the only place the channel's size is knowable: a member who has
             // acknowledged nothing has no cursor to broadcast, so without a total the UI cannot
             // tell one recipient out of two from one recipient out of twenty.
-            deliveryState(channelId).replaceWith(listedCursors, listedCursors.size());
+            deliveryState(channelId).replaceWith(listedCursors, listedReadCursors,
+                    listedCursors.size());
             mainHandler.post(() -> notifyPeerDelivery(channelId));
         });
+    }
+
+    /**
+     * Per-recipient state of one message this device wrote, as the delivery dialog shows it.
+     * <p>
+     * The three lists are mutually exclusive and together cover every other member of the channel:
+     * a member is in {@link #readBy} when his read cursor reaches the message, in
+     * {@link #deliveredTo} when only his delivery cursor does, and in {@link #pending} when neither
+     * does (which includes a member who has been in the channel all along but has never come back
+     * online). Names are resolved best-effort - see {@link #getDeliveryStatus(long, long, Callback)}
+     * - and a name that could not be resolved is rendered as its user id, so no recipient ever
+     * disappears from the dialog.
+     */
+    public static final class MessageDeliveryStatus {
+        /**
+         * Members who reported the message as read.
+         */
+        public final List<String> readBy;
+        /**
+         * Members whose client holds the message but has not reported it as read.
+         */
+        public final List<String> deliveredTo;
+        /**
+         * Members the server has not confirmed as holding the message.
+         */
+        public final List<String> pending;
+
+        MessageDeliveryStatus(final List<String> readBy, final List<String> deliveredTo,
+                              final List<String> pending) {
+            this.readBy = readBy;
+            this.deliveredTo = deliveredTo;
+            this.pending = pending;
+        }
+
+        /**
+         * Total number of other members the status covers.
+         *
+         * @return the recipient count result
+         */
+        public int recipientCount() {
+            return readBy.size() + deliveredTo.size() + pending.size();
+        }
+    }
+
+    /**
+     * Reports, for one message this device wrote, which of the channel's other members have read
+     * it, which merely have it, and which have neither.
+     * <p>
+     * The channel's member listing is always re-read, because the listing is the only place the
+     * channel's membership is knowable: the live cursors say how far a member got but never that he
+     * joined or left, and a dialog that listed only cursor holders would silently drop every member
+     * who has acknowledged nothing. The cached cursors are used as they stand, so the dialog is
+     * correct for anything received since the channel was opened and for everything the last
+     * listing reported.
+     * <p>
+     * Names come from the member row when the server includes them, and otherwise from
+     * {@code GET /api/users/{id}}, one request per member the dialog has to name. A name that
+     * cannot be resolved falls back to {@code User <id>}: an unresolved name is a cosmetic gap, and
+     * failing the whole dialog over it would hide the one thing the user asked about.
+     *
+     * @param channelId the channel the message lives in
+     * @param messageId the server-assigned id of the message, see {@link Message#getServerId()}
+     * @param callback the callback that receives the status, on the main thread
+     */
+    public void getDeliveryStatus(final long channelId, final long messageId,
+                                  final Callback<MessageDeliveryStatus> callback) {
+        if (channelId < 0 || messageId <= 0) {
+            postFailure(callback, "This message has no server id yet, so no member can have it");
+            return;
+        }
+        executor.execute(() -> {
+            if (ensureJwt().isEmpty()) {
+                postFailure(callback, "Not signed in");
+                return;
+            }
+            final long myUserId = resolveUserId();
+            final RestResponse response = executeGet(
+                    String.format(Locale.US, "/api/channels/%d/members", channelId));
+            final JSONArray members = response.asJsonArray();
+            if (!response.isSuccessful() || members == null) {
+                failRest(response, callback, "Fetching channel members");
+                return;
+            }
+
+            final ChannelDeliveryState state = deliveryByChannel.get(channelId);
+            final Map<Long, Long> cursors =
+                    state == null ? new HashMap<>() : state.cursorsSnapshot();
+            final Map<Long, Long> readCursors =
+                    state == null ? new HashMap<>() : state.readCursorsSnapshot();
+
+            final List<Long> readIds = new ArrayList<>();
+            final List<Long> deliveredIds = new ArrayList<>();
+            final List<Long> pendingIds = new ArrayList<>();
+            final Map<Long, String> names = new HashMap<>();
+            for (int i = 0; i < members.length(); i++) {
+                final JSONObject member = members.optJSONObject(i);
+                if (member == null) {
+                    continue;
+                }
+                final long memberId = member.optLong("userId", -1L);
+                if (memberId < 0 || memberId == myUserId) {
+                    continue;
+                }
+                final String listedName = member.isNull("displayName")
+                        ? ""
+                        : member.optString("displayName", "");
+                final String listedUsername = member.isNull("username")
+                        ? ""
+                        : member.optString("username", "");
+                if (!listedName.isEmpty()) {
+                    names.put(memberId, listedName);
+                } else if (!listedUsername.isEmpty()) {
+                    names.put(memberId, listedUsername);
+                }
+
+                final Long read = readCursors.get(memberId);
+                final Long delivered = cursors.get(memberId);
+                if (read != null && read >= messageId) {
+                    readIds.add(memberId);
+                } else if (delivered != null && delivered >= messageId) {
+                    deliveredIds.add(memberId);
+                } else {
+                    pendingIds.add(memberId);
+                }
+            }
+
+            final List<String> readBy = new ArrayList<>();
+            final List<String> deliveredTo = new ArrayList<>();
+            final List<String> pending = new ArrayList<>();
+            for (long id : readIds) {
+                readBy.add(resolveMemberName(id, names.get(id)));
+            }
+            for (long id : deliveredIds) {
+                deliveredTo.add(resolveMemberName(id, names.get(id)));
+            }
+            for (long id : pendingIds) {
+                pending.add(resolveMemberName(id, names.get(id)));
+            }
+
+            final MessageDeliveryStatus status =
+                    new MessageDeliveryStatus(readBy, deliveredTo, pending);
+            mainHandler.post(() -> callback.onResult(status));
+        });
+    }
+
+    /**
+     * Name to show for a member of a delivery list: what the member listing carried, otherwise what
+     * {@code GET /api/users/{id}} says, otherwise the id itself. The last fallback is deliberate -
+     * a member the app cannot name is still a member who has not read the message, and leaving him
+     * out would understate the pending list.
+     *
+     * @param userId the identifier of the user
+     * @param knownName the name from the member listing, or {@code null} when it carried none
+     * @return the member name result
+     */
+    private String resolveMemberName(final long userId, final String knownName) {
+        if (knownName != null && !knownName.isEmpty()) {
+            return knownName;
+        }
+
+        final RestResponse response = executeGet(
+                String.format(Locale.US, "/api/users/%d", userId));
+        final JSONObject user = response.isSuccessful() ? response.asJson() : null;
+        if (user != null) {
+            final String displayName = user.isNull("displayName")
+                    ? ""
+                    : user.optString("displayName", "");
+            if (!displayName.isEmpty()) {
+                return displayName;
+            }
+            final String username = user.isNull("username") ? "" : user.optString("username", "");
+            if (!username.isEmpty()) {
+                return username;
+            }
+        }
+
+        return "User " + userId;
     }
 
     /**

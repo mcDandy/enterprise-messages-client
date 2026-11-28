@@ -18,6 +18,8 @@ import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.ListAdapter;
 import androidx.recyclerview.widget.RecyclerView;
 
+import com.google.android.material.dialog.MaterialAlertDialogBuilder;
+
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
@@ -265,6 +267,9 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
 
         binding.recyclerviewMessages.setLayoutManager(messageLayoutManager);
         binding.recyclerviewMessages.setAdapter(adapter);
+        // The adapter is built here, so this is the one place it can be handed the callback that
+        // opens the per-message delivery dialog.
+        adapter.setOnSentMessageLongClickListener(this::showDeliveryStatusDialog);
         binding.recyclerviewMessages.addOnScrollListener(new RecyclerView.OnScrollListener() {
             /**
              * Handles scrolling in the message list.
@@ -693,6 +698,111 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
     }
 
     /**
+     * Shows who has read, who merely has, and who is still missing the message the user
+     * long-pressed.
+     * <p>
+     * The status is fetched rather than read off the adapter's cursors, because the cursors say how
+     * far a member got but never that he is still in the channel - only the member listing knows
+     * that, and without it a member who has acknowledged nothing would vanish from the dialog
+     * instead of showing up as pending. The fetch is on the network, so the dialog opens only once
+     * the answer lands; a failure is a toast rather than an empty dialog, because an empty list of
+     * readers cannot be told apart from a channel where nobody has read it.
+     *
+     * @param message the message whose delivery state to show
+     */
+    private void showDeliveryStatusDialog(final Message message) {
+        if (!isAdded() || connectionManager == null || roomId == null || roomId.isEmpty()) {
+            return;
+        }
+        if (message.getServerId() <= 0) {
+            // No server id means the server has never seen the message, so no member can have it
+            // and there is nothing to ask about.
+            Toast.makeText(requireContext(), R.string.delivery_status_no_server_id,
+                    Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        final long channelId = ServerConnectionManager.parseChannelId(roomId);
+        connectionManager.getDeliveryStatus(channelId, message.getServerId(),
+                new ServerConnectionManager.Callback<>() {
+                    /**
+                     * Handles the successful result of the asynchronous operation.
+                     *
+                     * @param status the per-recipient delivery state to display
+                     */
+                    @Override
+                    public void onResult(ServerConnectionManager.MessageDeliveryStatus status) {
+                        if (!isAdded()) {
+                            return;
+                        }
+                        new MaterialAlertDialogBuilder(requireContext())
+                                .setTitle(R.string.dialog_delivery_status_title)
+                                .setMessage(buildDeliveryStatusText(status))
+                                .setPositiveButton(R.string.delivery_status_action_close, null)
+                                .show();
+                    }
+
+                    /**
+                     * Handles a failure from the asynchronous operation.
+                     *
+                     * @param error the error message explaining the failure
+                     */
+                    @Override
+                    public void onFailure(String error) {
+                        if (!isAdded()) {
+                            return;
+                        }
+                        Log.w(TAG, "Could not load delivery status of message "
+                                + message.getServerId() + ": " + error);
+                        Toast.makeText(requireContext(), error, Toast.LENGTH_LONG).show();
+                    }
+                });
+    }
+
+    /**
+     * Renders the three sections of the delivery dialog. Every section is always present, empty
+     * ones included, so "nobody has read it" reads as an answer rather than as a missing feature.
+     *
+     * @param status the per-recipient delivery state
+     * @return the delivery status text collection
+     */
+    private CharSequence buildDeliveryStatusText(
+            ServerConnectionManager.MessageDeliveryStatus status) {
+        final StringBuilder text = new StringBuilder();
+        appendDeliverySection(text, getString(R.string.delivery_status_section_read), status.readBy);
+        appendDeliverySection(text, getString(R.string.delivery_status_section_delivered),
+                status.deliveredTo);
+        appendDeliverySection(text, getString(R.string.delivery_status_section_pending),
+                status.pending);
+
+        return text;
+    }
+
+    /**
+     * Appends one {@code Section\nname\nname} block, or {@code Section\nNobody yet} when the list
+     * is empty, and a blank line after it to separate it from the next section.
+     *
+     * @param text the builder to append to
+     * @param title the section heading
+     * @param names the members in this section
+     */
+    private void appendDeliverySection(final StringBuilder text, final String title,
+                                       final List<String> names) {
+        text.append(title).append('\n');
+        if (names.isEmpty()) {
+            text.append(getString(R.string.delivery_status_nobody));
+        } else {
+            for (int i = 0; i < names.size(); i++) {
+                if (i > 0) {
+                    text.append('\n');
+                }
+                text.append(names.get(i));
+            }
+        }
+        text.append("\n\n");
+    }
+
+    /**
      * Handles the error event.
      *
      * @param errorMessage the error message to display or report
@@ -924,6 +1034,34 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
          * one, and no row would ever repaint.
          */
         private final MessageDeliveryCallback deliveryCallback;
+        /**
+         * Opens the delivery dialog for the message the user long-pressed. Held as a field rather
+         * than reached through {@code itemView.getContext()} because the holder is static and has
+         * no reference to the fragment, and a cast there would break the moment the list is shown
+         * somewhere other than {@code MessagesFragment}.
+         */
+        private OnSentMessageLongClickListener onSentMessageLongClickListener;
+
+        /**
+         * Called when the user long-presses a bubble this device wrote.
+         */
+        interface OnSentMessageLongClickListener {
+            /**
+             * Handles the long click on a sent message.
+             *
+             * @param message the message that was long-pressed
+             */
+            void onSentMessageLongClick(Message message);
+        }
+
+        /**
+         * Sets the listener. Sets on sent message long click.
+         *
+         * @param listener the listener to register, or {@code null} to disable the gesture
+         */
+        void setOnSentMessageLongClickListener(OnSentMessageLongClickListener listener) {
+            this.onSentMessageLongClickListener = listener;
+        }
 
         /**
          * Replaces the peer delivery state and repaints by re-submitting the current list.
@@ -1046,6 +1184,20 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
                                 : accepted ? R.string.message_status_sent_description
                                         : R.string.message_status_unsent_description,
                                 recipients));
+
+                // Long-pressing the bubble asks the server who has it. Set on every bind because
+                // rows are recycled and the lambda captures this row's message; the bubble itself
+                // is made clickable so the gesture is announced as such to a touch exploration
+                // service.
+                sentHolder.binding.cardMessageBubble.setClickable(true);
+                sentHolder.binding.cardMessageBubble.setLongClickable(true);
+                sentHolder.binding.cardMessageBubble.setOnLongClickListener(v -> {
+                    if (onSentMessageLongClickListener == null) {
+                        return false;
+                    }
+                    onSentMessageLongClickListener.onSentMessageLongClick(message);
+                    return true;
+                });
             } else if (holder instanceof ReceivedMessageViewHolder) {
                 ReceivedMessageViewHolder receivedHolder = (ReceivedMessageViewHolder) holder;
                 receivedHolder.binding.textMessageSender.setText(message.getSender());
