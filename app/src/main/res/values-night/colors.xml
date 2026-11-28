@@ -10,6 +10,7 @@
     <color name="text_secondary">#94A3B8</color>
 
     <color name="msg_bubble_sent">#4F46E5</color>
+    <color name="msg_bubble_sent_unack">#334155</color>
     <color name="msg_text_sent">#FFFFFF</color>
     <!-- Same dimming as the light theme; the bubble colour does not change between themes. -->
     <color name="msg_text_unsent">#80FFFFFF</color>
