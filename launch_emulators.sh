@@ -21,6 +21,20 @@ test_runner="androidx.test.runner.AndroidJUnitRunner"
 test_component="${test_package}/${test_runner}"
 script_status=0
 
+run_instrumented_test() {
+    local class_name="$1"
+    local method_name="$2"
+    local device="${3:-emulator-5554}"
+
+    if ! ./gradlew installDebug installDebugAndroidTest; then
+        return 1
+    fi
+
+    "$adb" -s "$device" shell am instrument -w \
+        -e class "cz.mkdaniel.enterprisemessenger.${class_name}#${method_name}" \
+        "$test_component"
+}
+
 echo "verify tools"
 $android --version
 $adb --version
@@ -61,6 +75,49 @@ then
 
     ./gradlew connectedDebugAndroidTest
 fi
+
+case "$1" in
+    "goal:test:appContext")
+        run_instrumented_test "AppContextInstrumentedTest" "useAppContext" "$2" ||
+            script_status=1
+        ;;
+    "goal:test:login")
+        run_instrumented_test "AuthenticationInstrumentedTest" "login_success" "$2" ||
+            script_status=1
+        ;;
+    "goal:test:registerScreen")
+        run_instrumented_test "AuthenticationInstrumentedTest" "register_screen_opens" "$2" ||
+            script_status=1
+        ;;
+    "goal:test:navigation")
+        run_instrumented_test "NavigationInstrumentedTest" "select_channel_success" "$2" ||
+            script_status=1
+        ;;
+    "goal:test:sendMessage")
+        run_instrumented_test "MessagingInstrumentedTest" "send_message_success" "$2" ||
+            script_status=1
+        ;;
+    "goal:test:createServer")
+        run_instrumented_test "ServerManagementInstrumentedTest" "create_server_success" "$2" ||
+            script_status=1
+        ;;
+    "goal:test:createChannel")
+        run_instrumented_test "ChannelManagementInstrumentedTest" "create_channel_success" "$2" ||
+            script_status=1
+        ;;
+    "goal:test:addChannelMember")
+        run_instrumented_test "ChannelManagementInstrumentedTest" "add_member_to_channel_success" "$2" ||
+            script_status=1
+        ;;
+    "goal:test:changeDisplayName")
+        run_instrumented_test "AccountSettingsInstrumentedTest" "change_display_name_success" "$2" ||
+            script_status=1
+        ;;
+    "goal:test:logout")
+        run_instrumented_test "AccountSettingsInstrumentedTest" "logout_success" "$2" ||
+            script_status=1
+        ;;
+esac
 
 if [[ $1 == "goal:test:multi" ]];
 then
