@@ -26,13 +26,18 @@ public class TwoEmulatorMessageFlowTest extends BaseInstrumentedTest {
         loginIfNeeded();
 
         String role = requiredArg("role");
-        String message = "E2E message " + requiredArg("runId");
+        String runId = requiredArg("runId");
+        String readyMessage = "E2E receiver ready " + runId;
+        String message = "E2E message " + runId;
         openTestChannel();
 
         if ("sender".equals(role)) {
+            waitForMessage(readyMessage);
             sendMessage(message);
             onView(withText(message)).check(matches(isDisplayed()));
         } else if ("receiver".equals(role)) {
+            sendMessage(readyMessage);
+            onView(withText(readyMessage)).check(matches(isDisplayed()));
             waitForMessage(message);
         } else {
             throw new AssertionError("role must be 'sender' or 'receiver', got: " + role);

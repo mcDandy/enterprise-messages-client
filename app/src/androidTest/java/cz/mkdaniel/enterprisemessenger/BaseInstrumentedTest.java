@@ -8,12 +8,15 @@ import androidx.test.ext.junit.rules.ActivityScenarioRule;
 import androidx.test.platform.app.InstrumentationRegistry;
 import androidx.test.rule.GrantPermissionRule;
 
-import org.junit.Before;
 import org.junit.Rule;
+import org.junit.rules.ExternalResource;
+import org.junit.rules.RuleChain;
+import org.junit.rules.TestRule;
 
 import cz.mkdaniel.enterprisemessenger.net.AccountStore;
 
 import static androidx.test.espresso.Espresso.onView;
+import static androidx.test.espresso.Espresso.openActionBarOverflowOrOptionsMenu;
 import static androidx.test.espresso.action.ViewActions.click;
 import static androidx.test.espresso.action.ViewActions.closeSoftKeyboard;
 import static androidx.test.espresso.action.ViewActions.replaceText;
@@ -28,24 +31,22 @@ import static androidx.test.espresso.matcher.ViewMatchers.withText;
  */
 public abstract class BaseInstrumentedTest {
     private static final long WAIT_TIMEOUT_MS = 30_000L;
+    protected static final String DEFAULT_USERNAME = "android_user2";
+    protected static final String DEFAULT_PASSWORD = "secret";
 
     @Rule
-    public final ActivityScenarioRule<MainActivity> activityScenarioRule =
-            new ActivityScenarioRule<>(MainActivity.class);
-
-    @Rule
-    public final GrantPermissionRule runtimePermissionRule =
-            GrantPermissionRule.grant(android.Manifest.permission.POST_NOTIFICATIONS);
-
-    /**
-     * Clears persisted session data before each test.
-     */
-    @Before
-    public void setUp() {
-        activityScenarioRule.getScenario();
-        new AccountStore(InstrumentationRegistry.getInstrumentation().getTargetContext())
-                .clearSession();
-    }
+    public final TestRule appRule = RuleChain
+            .outerRule(new ExternalResource() {
+                @Override
+                protected void before() {
+                    new AccountStore(
+                            InstrumentationRegistry.getInstrumentation().getTargetContext())
+                            .clearSession();
+                }
+            })
+            .around(GrantPermissionRule.grant(
+                    android.Manifest.permission.POST_NOTIFICATIONS))
+            .around(new ActivityScenarioRule<>(MainActivity.class));
 
     /**
      * Opens the server and channel configured by instrumentation arguments.
@@ -65,12 +66,36 @@ public abstract class BaseInstrumentedTest {
     }
 
     /**
+     * Opens the first server in the server list.
+     */
+    protected void openFirstServer() {
+        onView(withId(R.id.image_view_item_transform)).perform(click());
+    }
+
+    /**
+     * Opens the first channel in the current rooms list.
+     */
+    protected void openFirstChannel() {
+        onView(withId(R.id.textview_room_name)).perform(click());
+    }
+
+    /**
+     * Opens the activity overflow menu.
+     */
+    protected void openOptionsMenu() {
+        openActionBarOverflowOrOptionsMenu(
+                InstrumentationRegistry.getInstrumentation().getTargetContext());
+    }
+
+    /**
      * Logs in when the app starts on the login screen.
      */
     protected void loginIfNeeded() {
         if (isViewDisplayed(R.id.button_login)) {
-            replaceInto(R.id.edittext_username, requiredArg("username"));
-            replaceInto(R.id.edittext_password, requiredArg("password"));
+            replaceInto(R.id.edittext_username,
+                    argumentOrDefault("username", DEFAULT_USERNAME));
+            replaceInto(R.id.edittext_password,
+                    argumentOrDefault("password", DEFAULT_PASSWORD));
             onView(withId(R.id.button_login)).perform(click());
         }
         onView(withId(R.id.recyclerview_transform)).check(matches(isDisplayed()));
@@ -135,6 +160,18 @@ public abstract class BaseInstrumentedTest {
             throw new AssertionError("Missing instrumentation argument: " + key);
         }
         return value.trim();
+    }
+
+    /**
+     * Reads an instrumentation argument, using a local test default when it is absent.
+     *
+     * @param key argument name
+     * @param defaultValue fallback value
+     * @return trimmed argument value or the fallback
+     */
+    protected String argumentOrDefault(String key, String defaultValue) {
+        String value = InstrumentationRegistry.getArguments().getString(key);
+        return value == null || value.trim().isEmpty() ? defaultValue : value.trim();
     }
 
     /**

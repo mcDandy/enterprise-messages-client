@@ -16,6 +16,7 @@ export ANDROID_SDK_ROOT=$ANDROID_HOME
 echo "setup tool aliases"
 android="./Library/Android/sdk/cmdline-tools/latest/bin/android"
 adb="./Android/Sdk/platform-tools/adb"
+script_status=0
 
 echo "verify tools"
 $android --version
@@ -68,24 +69,33 @@ then
 
     ./gradlew installDebugAndroidTest
 
-    $adb -s emulator-5554 shell am instrument -w \
-	-e class cz.mkdaniel.enterprisemessenger.TwoEmulatorMessageFlowTest#twoEmulatorMessageFlow \
-	-e role sender \
-	-e runId run-001 \
-	-e username android_user2 \
-    	-e password secret \
-	-e serverName "test_servver" \
-	-e channelName "test" \
-	cz.mkdaniel.enterprisemessenger.test/androidx.test.runner.AndroidJUnitRunner
     $adb -s emulator-5556 shell am instrument -w \
 	-e class cz.mkdaniel.enterprisemessenger.TwoEmulatorMessageFlowTest#twoEmulatorMessageFlow \
+	-e role receiver \
+	-e runId run-001 \
 	-e username android_user3 \
     	-e password secret \
 	-e serverName "test_servver" \
-	-e role receiver \
+	-e channelName "test" \
+	cz.mkdaniel.enterprisemessenger.test/androidx.test.runner.AndroidJUnitRunner &
+    receiver_pid=$!
+    $adb -s emulator-5554 shell am instrument -w \
+	-e class cz.mkdaniel.enterprisemessenger.TwoEmulatorMessageFlowTest#twoEmulatorMessageFlow \
+	-e username android_user2 \
+    	-e password secret \
+	-e serverName "test_servver" \
+	-e role sender \
     	-e runId run-001 \
 	-e channelName "test" \
 	cz.mkdaniel.enterprisemessenger.test/androidx.test.runner.AndroidJUnitRunner
+    sender_status=$?
+    wait "$receiver_pid"
+    receiver_status=$?
+    if [[ $sender_status -ne 0 || $receiver_status -ne 0 ]];
+    then
+        echo "two-emulator message flow failed"
+        script_status=1
+    fi
 fi
 
 if [[ $1 == "goal:test:keyRotation" ]];
@@ -104,6 +114,7 @@ then
 	-e channelName "test" \
 	-e memberUserId 2 \
 	cz.mkdaniel.enterprisemessenger.test/androidx.test.runner.AndroidJUnitRunner &
+    administrator_pid=$!
 
     $adb -s emulator-5556 shell am instrument -w \
 	-e class cz.mkdaniel.enterprisemessenger.ChannelKeyRotationTest#channelKeyRotationAfterAddAndRemove \
@@ -116,7 +127,16 @@ then
 	-e memberUserId 2 \
 	cz.mkdaniel.enterprisemessenger.test/androidx.test.runner.AndroidJUnitRunner &
 
-    wait
+    member_pid=$!
+    wait "$administrator_pid"
+    administrator_status=$?
+    wait "$member_pid"
+    member_status=$?
+    if [[ $administrator_status -ne 0 || $member_status -ne 0 ]];
+    then
+        echo "two-emulator key rotation test failed"
+        script_status=1
+    fi
 fi
 
 if [[ $1 == "logcats" ]];
@@ -154,3 +174,4 @@ then
 fi
 
 echo "done, exiting"
+exit "$script_status"
