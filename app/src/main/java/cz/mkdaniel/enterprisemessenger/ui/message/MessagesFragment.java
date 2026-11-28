@@ -727,14 +727,32 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
 
     /**
      * Background of a bubble the user wrote, fading in as the message reaches more recipients.
-     * <p>
-     * Not yet accepted by the server: the solid bubble colour, so an unsent message is still
-     * unmistakably a message. From there the bubble fades in linearly with the share of the
-     * channel's other members that have it - fully transparent while nobody has pulled it,
-     * completely solid once everybody has.
-     * <p>
-     * The ramp starts at nothing rather than at some visible minimum, so the first recipient
-     * produces a small but real change instead of a jump from invisible to a fixed opacity.
+    /**
+     * Interpolates between a lighter tint and the full solid bubble color based on delivery progress.
+     *
+     * @param color1 starting color
+     * @param color2 ending color
+     * @param fraction interpolation fraction between 0 and 1
+     * @return the interpolated color
+     */
+    private static int interpolateColor(int color1, int color2, float fraction) {
+        int r1 = (color1 >> 16) & 0xFF;
+        int g1 = (color1 >> 8) & 0xFF;
+        int b1 = color1 & 0xFF;
+
+        int r2 = (color2 >> 16) & 0xFF;
+        int g2 = (color2 >> 8) & 0xFF;
+        int b2 = color2 & 0xFF;
+
+        int r = (int) (r1 + fraction * (r2 - r1));
+        int g = (int) (g1 + fraction * (g2 - g1));
+        int b = (int) (b1 + fraction * (b2 - b1));
+
+        return 0xFF000000 | (r << 16) | (g << 8) | b;
+    }
+
+    /**
+     * Returns the bubble color for sent messages, tinted lighter when unacknowledged and full solid when acknowledged by all.
      *
      * @param context the Android context used to access application resources and services
      * @param accepted whether the operation was accepted
@@ -749,14 +767,17 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
         if (!accepted) {
             return solid;
         }
-        return (bubbleAlpha(recipients, peerCount) << 24) | (solid & 0x00FFFFFF);
+        final int lightTint = androidx.core.content.ContextCompat.getColor(context,
+                R.color.msg_bubble_sent_unack);
+
+        final int steps = Math.max(peerCount, 1);
+        final float fraction = Math.min(1f, Math.max(0f, (float) recipients / steps));
+
+        return interpolateColor(lightTint, solid, fraction);
     }
 
     /**
-     * How opaque a sent bubble is, on its own so the diff can compare it without resolving a
-     * colour resource. A channel of one other member goes solid on their first acknowledgement; a
-     * channel of ten climbs one tenth of the way per recipient. Clamped in case a cursor arrives
-     * for a member the listing did not include, which would otherwise divide by zero or overshoot.
+     * Computes a progress step representing the bubble color state for diff comparisons.
      *
      * @param recipients the recipients associated with the message
      * @param peerCount the number of other members in the channel
@@ -765,7 +786,7 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
     private static int bubbleAlpha(int recipients, int peerCount) {
         final int steps = Math.max(peerCount, 1);
         final float fraction = Math.min(1f, Math.max(0f, (float) recipients / steps));
-        return (int) (0xFF * fraction);
+        return (int) (100 * fraction);
     }
 
     /**

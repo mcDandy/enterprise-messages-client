@@ -30,6 +30,7 @@
     <color name="text_secondary">#64748B</color>
 
     <color name="msg_bubble_sent">#4F46E5</color>
+    <color name="msg_bubble_sent_unack">#E0E7FF</color>
     <color name="msg_text_sent">#FFFFFF</color>
     <!-- A message the server has not accepted yet. Still legible on the indigo bubble, but
          visibly dimmer than a sent one. -->

@@ -48,6 +48,7 @@
                     android:background="@null"
                     android:hint="@string/hint_type_message"
                     android:imeOptions="actionSend"
+                    android:importantForAutofill="no"
                     android:inputType="textShortMessage|textMultiLine"
                     android:maxLines="4"
                     android:paddingTop="10dp"
