@@ -3,6 +3,7 @@ package cz.mkdaniel.enterprisemessenger;
 import android.os.Bundle;
 import android.os.SystemClock;
 
+import androidx.recyclerview.widget.RecyclerView;
 import androidx.test.espresso.NoMatchingViewException;
 import androidx.test.ext.junit.rules.ActivityScenarioRule;
 import androidx.test.platform.app.InstrumentationRegistry;
@@ -52,8 +53,9 @@ public abstract class BaseInstrumentedTest {
      * Opens the server and channel configured by instrumentation arguments.
      */
     protected void openTestChannel() {
+        waitForRecyclerViewItem(R.id.recyclerview_transform);
         onView(withText(requiredArg("serverName"))).perform(click());
-        onView(withId(R.id.recyclerview_rooms)).check(matches(isDisplayed()));
+        waitForRecyclerViewItem(R.id.recyclerview_rooms);
         openChannelInRooms();
     }
 
@@ -61,6 +63,7 @@ public abstract class BaseInstrumentedTest {
      * Opens the configured channel while the rooms list is displayed.
      */
     protected void openChannelInRooms() {
+        waitForRecyclerViewItem(R.id.recyclerview_rooms);
         onView(withText(requiredArg("channelName"))).perform(click());
         onView(withId(R.id.recyclerview_messages)).check(matches(isDisplayed()));
     }
@@ -69,14 +72,60 @@ public abstract class BaseInstrumentedTest {
      * Opens the first server in the server list.
      */
     protected void openFirstServer() {
-        onView(withId(R.id.image_view_item_transform)).perform(click());
+        waitForRecyclerViewItem(R.id.recyclerview_transform);
+        onView(withId(R.id.recyclerview_transform))
+                .perform(androidx.test.espresso.contrib.RecyclerViewActions
+                        .actionOnItemAtPosition(0, click()));
     }
 
     /**
      * Opens the first channel in the current rooms list.
      */
     protected void openFirstChannel() {
-        onView(withId(R.id.textview_room_name)).perform(click());
+        waitForRecyclerViewItem(R.id.recyclerview_rooms);
+        onView(withId(R.id.recyclerview_rooms))
+                .perform(androidx.test.espresso.contrib.RecyclerViewActions
+                        .actionOnItemAtPosition(0, click()));
+    }
+
+    /**
+     * Waits for a RecyclerView adapter to contain at least one item.
+     *
+     * @param recyclerViewId resource ID of the RecyclerView
+     */
+    protected void waitForRecyclerViewItem(int recyclerViewId) {
+        long deadline = SystemClock.elapsedRealtime() + WAIT_TIMEOUT_MS;
+
+        while (SystemClock.elapsedRealtime() < deadline) {
+            if (recyclerViewHasItems(recyclerViewId)) {
+                return;
+            }
+            SystemClock.sleep(250);
+        }
+
+        throw new AssertionError(
+                "RecyclerView " + recyclerViewId + " has no items after waiting");
+    }
+
+    private boolean recyclerViewHasItems(int recyclerViewId) {
+        try {
+            onView(withId(recyclerViewId)).check((view, noViewFoundException) -> {
+                if (noViewFoundException != null) {
+                    throw noViewFoundException;
+                }
+                if (!(view instanceof RecyclerView)) {
+                    throw new AssertionError("View is not a RecyclerView");
+                }
+
+                RecyclerView.Adapter<?> adapter = ((RecyclerView) view).getAdapter();
+                if (adapter == null || adapter.getItemCount() == 0) {
+                    throw new AssertionError("RecyclerView has no items yet");
+                }
+            });
+            return true;
+        } catch (NoMatchingViewException | AssertionError notReady) {
+            return false;
+        }
     }
 
     /**
