@@ -41,8 +41,13 @@ run_instrumented_test() {
 if [[ $1 == "goal:test:all" ]];
 then
     echo "running all JVM unit and integration tests (excluding instrumentation tests)"
-    ./gradlew testDebugUnitTest
-    exit "$?"
+    ./gradlew :app:testDebugUnitTest --rerun-tasks
+    test_status=$?
+
+    echo "reverting gradlew"
+    chmod 0666 gradlew
+
+    exit "$test_status"
 fi
 
 echo "verify tools"
