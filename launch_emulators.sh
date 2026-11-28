@@ -21,6 +21,9 @@ test_runner="androidx.test.runner.AndroidJUnitRunner"
 test_component="${test_package}/${test_runner}"
 script_status=0
 
+echo "preparing gradlew"
+chmod 0766 gradlew
+
 run_instrumented_test() {
     local class_name="$1"
     local method_name="$2"
@@ -45,9 +48,6 @@ fi
 echo "verify tools"
 $android --version
 $adb --version
-
-echo "preparing gradlew"
-chmod 0766 gradlew
 
 if [[ $1 == "gradleTasks" ]];
 then
