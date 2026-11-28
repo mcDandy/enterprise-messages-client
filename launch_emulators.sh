@@ -21,6 +21,9 @@ test_runner="androidx.test.runner.AndroidJUnitRunner"
 test_component="${test_package}/${test_runner}"
 script_status=0
 
+echo "preparing gradlew"
+chmod 0766 gradlew
+
 run_instrumented_test() {
     local class_name="$1"
     local method_name="$2"
@@ -35,14 +38,23 @@ run_instrumented_test() {
         "$test_component"
 }
 
+if [[ $1 == "goal:test:all" ]];
+then
+    echo "running all JVM unit and integration tests (excluding instrumentation tests)"
+    ./gradlew :app:testDebugUnitTest --rerun-tasks
+    test_status=$?
+
+    echo "reverting gradlew"
+    chmod 0666 gradlew
+
+    exit "$test_status"
+fi
+
 echo "verify tools"
 $android --version
 $adb --version
 
-echo "preparing gradlew"
-chmod 0766 gradlew
-
-if [[ $1 == "gradleTasks" ]];
+if [[ $1 == "goal:list:tasks" ]];
 then
     echo "listing gradlew tasks"
     ./gradlew tasks
@@ -61,7 +73,7 @@ $android emulator start small_phone
 $android emulator start medium_phone
 #fi
 
-if [[ $1 == "gradleInstall" ]];
+if [[ $1 == "goal:build" ]];
 then
     echo "building, installing, and testing the appliction code"
 
@@ -69,7 +81,7 @@ then
     ./gradlew installDebugAndroidTest
 fi
 
-if [[ $1 == "androidTests" ]];
+if [[ $1 == "goal:test:android" ]];
 then
     echo "launching androidTests"
 
@@ -227,7 +239,7 @@ then
     fi
 fi
 
-if [[ $1 == "logcats" ]];
+if [[ $1 == "goal:logcats:term" ]];
 then
     TERM_EMU=$2
 
