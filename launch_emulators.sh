@@ -117,6 +117,34 @@ case "$1" in
         run_instrumented_test "AccountSettingsInstrumentedTest" "logout_success" "$2" ||
             script_status=1
         ;;
+    "goal:test:androidStorageLegacyType")
+        run_instrumented_test "AndroidStorageIntegrationTest" "sharedPreferencesSinkDropsLegacyTypeMismatches" "$2" ||
+            script_status=1
+        ;;
+    "goal:test:androidStorageKeyStore")
+        run_instrumented_test "AndroidStorageIntegrationTest" "sealedValueCanBeOpenedByANewStoreUsingTheAndroidKeyStore" "$2" ||
+            script_status=1
+        ;;
+    "goal:test:notificationChannel")
+        run_instrumented_test "NotificationHelperInstrumentedTest" "createsTheExpectedNotificationChannel" "$2" ||
+            script_status=1
+        ;;
+    "goal:test:notificationUnreadCount")
+        run_instrumented_test "NotificationHelperInstrumentedTest" "channelUnreadCountIncrementsAndResetsWhenOpened" "$2" ||
+            script_status=1
+        ;;
+    "goal:test:localNetworkPermission")
+        run_instrumented_test "LocalNetworkPermissionInstrumentedTest" "classifiesPrivateAndLinkLocalAddressesAsLocal" "$2" ||
+            script_status=1
+        ;;
+    "goal:test:publicNetworkPermission")
+        run_instrumented_test "LocalNetworkPermissionInstrumentedTest" "doesNotRequestLocalAccessForPublicAddressesOrLoopback" "$2" ||
+            script_status=1
+        ;;
+    "goal:test:networkHostnamePermission")
+        run_instrumented_test "LocalNetworkPermissionInstrumentedTest" "treatsHostnamesConservativelyButIgnoresBlankInput" "$2" ||
+            script_status=1
+        ;;
 esac
 
 if [[ $1 == "goal:test:multi" ]];
