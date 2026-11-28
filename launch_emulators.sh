@@ -145,6 +145,11 @@ case "$1" in
         run_instrumented_test "LocalNetworkPermissionInstrumentedTest" "treatsHostnamesConservativelyButIgnoresBlankInput" "$2" ||
             script_status=1
         ;;
+    "goal:test:all")
+        echo "running all JVM unit and connected Android instrumented tests"
+        ./gradlew testDebugUnitTest connectedDebugAndroidTest ||
+            script_status=1
+        ;;
 esac
 
 if [[ $1 == "goal:test:multi" ]];
