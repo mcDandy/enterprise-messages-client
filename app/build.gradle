@@ -10,6 +10,7 @@ android {
 
     defaultConfig {
         applicationId "cz.mkdaniel.enterprisemessenger"
+        testApplicationId "cz.mkdaniel.enterprisemessenger.test"
         minSdk 35
         targetSdk 37
         versionCode 1
