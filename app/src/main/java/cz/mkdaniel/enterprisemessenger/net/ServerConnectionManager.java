@@ -157,6 +157,14 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
      */
     private final ArrayDeque<UnassignedMessage> awaitingServerIds = new ArrayDeque<>();
     /**
+     * Highest message position {@link #assignServerIds(long)} has named, or -1 while it has named
+     * none. The deque of unnamed messages is emptied as soon as ids are handed out, so a later frame
+     * reporting the same cursor describes messages that are already named and must not be matched
+     * against whatever has arrived since - doing that stamps a position a message already carries
+     * onto a different one, and two rows sharing an id is what crashes the {@code RecyclerView}.
+     */
+    private volatile long highestAssignedServerId = -1L;
+    /**
      * Newest message position this device has seen, from history or from a read cursor. It is the
      * baseline the next {@code CHANNEL_MEMBER_INFO} is compared against to tell how many messages
      * arrived since.
@@ -1241,9 +1249,20 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
                         text,
                         normalizeSenderName(sender),
                         timestamp,
-                        false));
+                        false,
+                        // The server is serving this row, so it holds it - that is the confirmation
+                        // a message this device wrote gets from history, since the socket never
+                        // echoes a CHAT_MESSAGE back to its sender.
+                        true));
+
                 if (serverMessageId > highestKnownMessageId) {
                     highestKnownMessageId = serverMessageId;
+                }
+                if (serverMessageId > highestAssignedServerId) {
+                    // The page names these positions authoritatively, so a cursor that stops at or
+                    // below one of them describes messages already on screen and must not be
+                    // matched against the messages still waiting for an id.
+                    highestAssignedServerId = serverMessageId;
                 }
                 }
 
@@ -3370,6 +3389,13 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
         // longer signed in, and nothing will ever move them again. Every caller of this method
         // (deleting a channel, deleting a server, ending the session) is exactly such a case.
         clearAllDeliveryStates();
+
+        // Message positions are per channel and belong to the account that was just dropped. Left
+        // at the value the old session reached, the first cursor of a new account on a server whose
+        // ids start again at 1 would look stale and name nothing, so messages would sit in the list
+        // without a position and could not take part in read receipts.
+        highestKnownMessageId = -1L;
+        highestAssignedServerId = -1L;
     }
 
     /**
@@ -3576,7 +3602,10 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
                         if (lastDelivered > highestKnownMessageId) {
                             highestKnownMessageId = lastDelivered;
                         }
-                        if (channelId == visibleChannelId) {
+                        // The channel may be selected without being on screen (the rooms list
+                        // selects it before the chat opens), and the messages this device wrote
+                        // there still have to be named by its own cursor.
+                        if (channelId == visibleChannelId || channelId == activeChannelId) {
                             assignServerIds(lastDelivered);
                         }
                     } else if (channelId == visibleChannelId) {
@@ -3784,15 +3813,20 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
                     && now - oldest.sentAt > PENDING_SERVER_ID_TTL) {
                 awaitingServerIds.pollFirst();
             }
-            final int unnamed = awaitingServerIds.size();
-            if (unnamed == 0 || lastDelivered - unnamed + 1 <= 0) {
+
+            final List<Long> ids =
+                    serverIdsToAssign(lastDelivered, highestAssignedServerId,
+                            awaitingServerIds.size());
+            if (ids.isEmpty()) {
                 return;
             }
-            long id = lastDelivered - unnamed + 1;
-            for (final UnassignedMessage pending : awaitingServerIds) {
-                resolved.add(withServerId(pending.message, id++));
+
+            final java.util.Iterator<UnassignedMessage> unnamed = awaitingServerIds.iterator();
+            for (int i = 0; unnamed.hasNext(); i++) {
+                resolved.add(withServerId(unnamed.next().message, ids.get(i)));
             }
             awaitingServerIds.clear();
+            highestAssignedServerId = lastDelivered;
         }
         for (final Message message : resolved) {
             replaceMessage(message);
@@ -3810,6 +3844,43 @@ public class ServerConnectionManager implements WebSocketClient.WebSocketClientL
     private static Message withServerId(final Message message, final long serverId) {
         return new Message(message.getId(), serverId, message.getText(), message.getSender(),
                 message.getTimestamp(), message.isPending());
+    }
+
+    /**
+     * Decides whether a {@code CHANNEL_MEMBER_INFO} cursor has to be matched against the messages
+     * still waiting for a position, and splits the ones it covers from the ones it does not.
+     * <p>
+     * The cursor is a single high-water mark and the deque of unnamed messages is emptied the moment
+     * ids are handed out, so a cursor that does not reach past the newest position this device has
+     * already named describes messages it named on an earlier frame. Matching such a cursor against
+     * whatever arrived since stamps positions those messages already carry onto different rows, and
+     * two rows sharing an id is what crashes the {@code RecyclerView}.
+     * <p>
+     * A cursor that does move ahead is taken at its word: the {@code unnamed} positions ending at it
+     * are the newest ones. That is an assumption about the server handing out ids one per message
+     * with no gaps, which is all a high-water mark can ever say.
+     *
+     * @param lastDelivered    the cursor the server reported
+     * @param highestAssigned  the newest position this device has already named, or -1 while it has
+     *                         named none
+     * @param unnamed          how many messages are waiting for a position
+     * @return the ids to hand out, oldest first, or an empty list when this cursor names nothing new
+     */
+    static List<Long> serverIdsToAssign(final long lastDelivered, final long highestAssigned,
+                                        final int unnamed) {
+        if (lastDelivered <= highestAssigned) {
+            return List.of();
+        }
+        if (unnamed <= 0 || lastDelivered - unnamed + 1 <= 0) {
+            return List.of();
+        }
+
+        final List<Long> ids = new ArrayList<>(unnamed);
+        for (long id = lastDelivered - unnamed + 1; id <= lastDelivered; id++) {
+            ids.add(id);
+        }
+
+        return ids;
     }
 
     /**

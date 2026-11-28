@@ -496,11 +496,30 @@ public class MessagesFragment extends Fragment implements ServerConnectionManage
     private List<Message> mergeWithLocalMessages(List<Message> serverMessages) {
         final List<Message> merged = new ArrayList<>(serverMessages);
         final Set<Message> matchedServerMessages = new HashSet<>();
+
+        // Positions the server's page already covers. A message this device wrote is not echoed back
+        // to it over the socket, so its row exists only locally until a poll returns the server's
+        // copy of it under a different id. Without this the poll's copy and the local row are both
+        // kept, the list holds the same message twice, and the RecyclerView throws over the
+        // duplicate ids when it animates the difference.
+        final Set<Long> serverIds = new HashSet<>();
+        for (Message message : merged) {
+            if (message.getServerId() > 0) {
+                serverIds.add(message.getServerId());
+            }
+        }
+
         for (Message localMessage : adapter.getCurrentList()) {
             boolean alreadyPresent = false;
             boolean confirmedByServer = false;
             for (Message message : merged) {
                 if (message.getId().equals(localMessage.getId())) {
+                    alreadyPresent = true;
+                    break;
+                }
+                if (localMessage.getServerId() > 0 && serverIds.contains(localMessage.getServerId())) {
+                    // The server's page carries this very message under its own position, so the
+                    // local row is the stale copy of it and the server's is kept.
                     alreadyPresent = true;
                     break;
                 }
