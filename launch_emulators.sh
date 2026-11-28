@@ -54,7 +54,7 @@ echo "verify tools"
 $android --version
 $adb --version
 
-if [[ $1 == "gradleTasks" ]];
+if [[ $1 == "goal:list:tasks" ]];
 then
     echo "listing gradlew tasks"
     ./gradlew tasks
@@ -73,7 +73,7 @@ $android emulator start small_phone
 $android emulator start medium_phone
 #fi
 
-if [[ $1 == "gradleInstall" ]];
+if [[ $1 == "goal:build" ]];
 then
     echo "building, installing, and testing the appliction code"
 
@@ -81,7 +81,7 @@ then
     ./gradlew installDebugAndroidTest
 fi
 
-if [[ $1 == "androidTests" ]];
+if [[ $1 == "goal:test:android" ]];
 then
     echo "launching androidTests"
 
@@ -239,7 +239,7 @@ then
     fi
 fi
 
-if [[ $1 == "logcats" ]];
+if [[ $1 == "goal:logcats:term" ]];
 then
     TERM_EMU=$2
 
